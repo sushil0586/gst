@@ -5,3 +5,10 @@ __pycache__/
 .env
 db.sqlite3
 staticfiles/
+.DS_Store
+media/
+
+# Frontend build and local files
+gst-compliance-frontend/.env.local
+gst-compliance-frontend/node_modules/
+gst-compliance-frontend/.next/
