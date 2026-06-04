@@ -1,0 +1,3 @@
+invoice_no,invoice_date,recipient_gstin,recipient_name,taxable_value,cgst,sgst,igst,cess,total_amount,document_type
+DBN-8003,2026-04-24,29AAACD8003A1Z6,Debit Note Buyer,7000,630,630,0,0,8260,debit_note
+DBN-8004,2026-04-25,27AAACD8004B1Z9,Interstate Debit Buyer,4000,0,0,720,0,4720,debit_note

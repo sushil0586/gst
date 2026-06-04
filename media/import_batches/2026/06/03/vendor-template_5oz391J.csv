@@ -1,0 +1,2 @@
+bill_ref,bill_dt,vendor_gstin,vendor_name,base_value,cgst_val,sgst_val,gross_total
+TPL-001,2026-04-22,29ABCDE1234F1Z5,Template Vendor,5000,450,450,5900

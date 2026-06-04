@@ -1,0 +1,2 @@
+invoice_no,invoice_date,recipient_gstin,recipient_name,taxable_value,cgst,sgst,igst,cess,total_amount,place_of_supply,document_type,hsn_code,description,uqc,quantity,is_service,supply_category
+PRDN-9301,2026-04-26,07AAACP9002B1Z3,Delhi Enterprise LLP,7000,0,0,1260,0,8260,07,debit_note,8471,Upward revision for workstation supply,PCS,1,FALSE,taxable

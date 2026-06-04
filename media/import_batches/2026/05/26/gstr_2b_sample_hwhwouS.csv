@@ -1,0 +1,3 @@
+invoice_no,invoice_date,supplier_gstin,supplier_name,taxable_value,cgst,sgst,igst,cess,total_amount
+PUR-001,2026-04-14,29BBBBB2222B1Z5,Vendor One,1000,90,90,0,0,1180
+PUR-003,2026-04-16,29DDDDD4444D1Z5,Vendor Three,1200,108,108,0,0,1416

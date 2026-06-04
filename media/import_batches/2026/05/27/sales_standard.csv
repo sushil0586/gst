@@ -1,0 +1,4 @@
+invoice_no,invoice_date,recipient_gstin,recipient_name,taxable_value,cgst,sgst,igst,cess,total_amount,place_of_supply,document_type
+SAL-1001,2026-04-05,29AAACN1111A1Z5,North Retail Pvt Ltd,100000,9000,9000,0,0,118000,29,invoice
+SAL-1002,2026-04-12,07AAACD2222B1Z8,Delhi Buyer LLP,50000,0,0,9000,0,59000,07,invoice
+SAL-1003,2026-04-20,,Cash Customer,25000,2250,2250,0,0,29500,29,invoice

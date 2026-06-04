@@ -1,0 +1,2 @@
+invoice_no,invoice_date,supplier_gstin,supplier_name,taxable_value,cgst,sgst,igst,cess,total_amount
+PUR-GUARD-1,2026-04-06,29AAACG7002B1Z5,Guardrail Vendor,12000,1080,1080,0,0,14160

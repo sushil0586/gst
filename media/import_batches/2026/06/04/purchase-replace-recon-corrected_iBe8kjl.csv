@@ -1,0 +1,2 @@
+invoice_no,invoice_date,supplier_gstin,supplier_name,taxable_value,cgst,sgst,igst,cess,total_amount
+INV-009,2026-04-23,29ABCDE1234F1Z5,Vendor Replace Recon Updated,1400,126,126,0,0,1652

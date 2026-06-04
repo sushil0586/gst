@@ -1,0 +1,2 @@
+invoice_no,invoice_date,supplier_gstin,supplier_name,taxable_value,igst,total_amount
+2B-001,2026-04-20,29ABCDE1234F1Z5,Vendor 2B,1000,180,1180

@@ -1,0 +1,5 @@
+invoice_no,invoice_date,recipient_gstin,recipient_name,taxable_value,cgst,sgst,igst,cess,total_amount,place_of_supply,reverse_charge,document_type,hsn_code,description,uqc,quantity,is_service,supply_category,ecommerce_gstin
+RICH-6001,2026-04-05,29AAACR6001A1Z5,Rich Goods Buyer,40000,3600,3600,0,0,47200,29,FALSE,invoice,8504,Industrial control panel,PCS,10,FALSE,taxable,
+RICH-6002,2026-04-07,07AAACR6002B1Z3,Service Buyer LLP,30000,0,0,5400,0,35400,07,FALSE,invoice,9983,Advisory retainer,HRS,15,TRUE,taxable,
+RICH-6003,2026-04-10,,Marketplace Consumer,12000,1080,1080,0,0,14160,29,FALSE,invoice,9403,Online furniture sale,PCS,4,FALSE,taxable,29ECOM1234F1Z5
+RICH-6004,2026-04-12,,Nil Rated Customer,5000,0,0,0,0,5000,29,FALSE,invoice,4901,Nil rated books,PCS,20,FALSE,nil_rated,

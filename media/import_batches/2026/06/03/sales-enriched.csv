@@ -1,0 +1,2 @@
+invoice_no,invoice_date,recipient_gstin,counterparty_name,taxable_value,cgst_amount,sgst_amount,igst_amount,cess_amount,total_amount,hsn_code,description,uqc,quantity,is_service,supply_category,ecommerce_gstin
+S-1001,2026-04-21,29ABCDE1234F1Z5,Customer One,1000,90,90,0,0,1180,7203,Steel Goods,KGS,25,false,taxable,29ECOM1234F1Z5

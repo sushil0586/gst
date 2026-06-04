@@ -1,0 +1,6 @@
+invoice_no,invoice_date,recipient_gstin,recipient_name,taxable_value,cgst,sgst,igst,cess,total_amount,place_of_supply,reverse_charge,document_type,hsn_code,description,uqc,quantity,is_service,supply_category,ecommerce_gstin
+PRS-9001,2026-04-03,29AAACP9001A1Z5,Prime Retail Stores,85000,7650,7650,0,0,100300,29,FALSE,invoice,8504,Power conditioning units,PCS,25,FALSE,taxable,
+PRS-9002,2026-04-08,07AAACP9002B1Z3,Delhi Enterprise LLP,60000,0,0,10800,0,70800,07,FALSE,invoice,8471,Industrial workstation systems,PCS,10,FALSE,taxable,
+PRS-9003,2026-04-12,,Marketplace Consumer,18000,1620,1620,0,0,21240,29,FALSE,invoice,9403,Marketplace furniture sale,PCS,6,FALSE,taxable,29ECOM4567F1Z5
+PRS-9004,2026-04-18,27AAACP9004C1Z8,Advisory Services Pvt Ltd,45000,0,0,8100,0,53100,27,FALSE,invoice,9983,Compliance advisory retainer,HRS,18,TRUE,taxable,
+PRS-9005,2026-04-22,,Library Walk-in,9000,0,0,0,0,9000,29,FALSE,invoice,4901,Nil rated printed books,PCS,40,FALSE,nil_rated,

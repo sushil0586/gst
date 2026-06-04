@@ -1,0 +1,3 @@
+inv_no,bill_date,customer_gstin,customer_name,assessable_value,cgst_amount,sgst_amount,igst_amount,cess_amount,invoice_value,pos,invoice_type,hsn_sac,goods_description,unit,total_qty,service,gst_supply_type,operator_gstin
+CSTM-5001,2026-04-08,29AAACV5001A1Z5,Vendor Header Buyer,24000,2160,2160,0,0,28320,29,invoice,8504,Power supply units,PCS,12,FALSE,taxable,
+CSTM-5002,2026-04-09,07AAACT5002B1Z3,Interstate Buyer,18000,0,0,3240,0,21240,07,invoice,9983,Consulting support,HRS,8,TRUE,taxable,

@@ -1,0 +1,3 @@
+invoice_no,invoice_date,recipient_gstin,recipient_name,taxable_value,cgst,sgst,igst,cess,total_amount
+DUP-4003,2026-04-11,29AAACD4003B1Z5,Duplicate Buyer,10000,900,900,0,0,11800
+DUP-4003,2026-04-11,29AAACD4003B1Z5,Duplicate Buyer,10000,900,900,0,0,11800

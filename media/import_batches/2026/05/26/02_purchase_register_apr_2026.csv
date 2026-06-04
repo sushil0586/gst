@@ -1,0 +1,5 @@
+﻿invoice_number,invoice_date,supplier_gstin,counterparty_name,taxable_value,cgst_amount,sgst_amount,igst_amount,cess_amount,total_amount,place_of_supply,reverse_charge
+P-2001,2026-04-06,03AAACB2894G1Z5,ABC Metals Pvt Ltd,40000,3600,3600,0,0,47200,03,false
+P-2002,2026-04-10,27AAACN1234C1Z9,Maharashtra Supplies,30000,0,0,5400,0,35400,27,false
+P-2003,2026-04-15,06AAGCS1234H1Z7,Haryana Traders,20000,1800,1800,0,0,23600,06,false
+P-2004,2026-04-18,03AACCS5555Q1Z4,Punjab Packaging,15000,1350,1350,0,0,17700,03,false

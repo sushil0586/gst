@@ -1,0 +1,4 @@
+﻿invoice_number,invoice_date,recipient_gstin,counterparty_name,taxable_value,cgst_amount,sgst_amount,igst_amount,cess_amount,total_amount,place_of_supply,reverse_charge
+S-1001,2026-04-05,03AABCU9603R1Z2,North Retail Pvt Ltd,100000,9000,9000,0,0,118000,03,false
+S-1002,2026-04-12,07AABCU9603R1Z8,Delhi Buyer LLP,50000,0,0,9000,0,59000,07,false
+S-1003,2026-04-20,,Cash Customer,25000,2250,2250,0,0,29500,03,false

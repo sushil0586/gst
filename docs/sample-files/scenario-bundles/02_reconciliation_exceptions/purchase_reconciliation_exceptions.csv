@@ -1,0 +1,5 @@
+invoice_no,invoice_date,supplier_gstin,supplier_name,taxable_value,cgst,sgst,igst,cess,total_amount
+P-3001,2026-04-11,29AABCP3001A1Z5,ABC Metals Pvt Ltd,40000,3600,3600,0,0,47200
+P-3002,2026-04-13,27AACCM3002B1Z9,Maharashtra Supplies,30000,2700,2700,0,0,35400
+P-3003,2026-04-15,06AABCH3003C1Z7,Haryana Traders,20000,1800,1800,0,0,23600
+PX-3004,2026-04-18,29AABCP3004D1Z6,Punjab Packaging,15000,1350,1350,0,0,17700

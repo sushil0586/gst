@@ -1,0 +1,3 @@
+invoice_no,invoice_date,supplier_gstin,supplier_name,taxable_value,cgst,sgst,igst,cess,total_amount
+BAD-001,,INVALIDGSTIN,,oops,90,90,0,0,1180
+BAD-001,2026-04-20,29BBBBB2222B1Z5,Vendor One,1000,90,90,0,0,1180

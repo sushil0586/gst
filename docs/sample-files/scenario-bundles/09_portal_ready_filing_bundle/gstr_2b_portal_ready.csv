@@ -1,0 +1,5 @@
+invoice_no,invoice_date,supplier_gstin,supplier_name,taxable_value,cgst,sgst,igst,cess,total_amount
+PRP-9101,2026-04-05,29BBBBB9101B1Z5,Vendor One Components,30000,2700,2700,0,0,35400
+PRP-9102,2026-04-09,29CCCCC9102C1Z5,Vendor Two Fabrication,25000,2250,2250,0,0,29500
+PRP-9103,2026-04-14,27DDDDD9103D1Z7,Service Vendor LLP,15000,0,0,2600,0,17600
+PRP-9199,2026-04-25,29ZZZZZ9199Z1Z5,Portal Only Vendor,5000,450,450,0,0,5900

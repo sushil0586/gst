@@ -1,0 +1,3 @@
+invoice_no,invoice_date,recipient_gstin,recipient_name,taxable_value,cgst,sgst,igst,cess,total_amount
+CNF-4004,2026-04-12,29AAACE4004C1Z5,Context Buyer,10000,900,900,0,0,11800
+CNF-4004,2026-04-13,29AAACE4004C1Z5,Context Buyer,15000,1350,1350,0,0,17700

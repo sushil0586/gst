@@ -1,0 +1,2 @@
+invoice_no,invoice_date,supplier_gstin,supplier_name,taxable_value,cgst,sgst,igst,cess,total_amount
+INV-103,2026-04-21,29ABCDE1234F1Z5,Vendor Filed,1000,90,90,0,0,1180

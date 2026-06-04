@@ -1,0 +1,5 @@
+invoice_no,invoice_date,supplier_gstin,supplier_name,taxable_value,cgst,sgst,igst,cess,total_amount,place_of_supply,reverse_charge,document_type,hsn_code,description,uqc,quantity,is_service,supply_category
+PRP-9101,2026-04-05,29BBBBB9101B1Z5,Vendor One Components,30000,2700,2700,0,0,35400,29,FALSE,invoice,8536,Control switch inventory,PCS,50,FALSE,taxable
+PRP-9102,2026-04-09,29CCCCC9102C1Z5,Vendor Two Fabrication,25000,2250,2250,0,0,29500,29,FALSE,invoice,7308,Fabricated support frames,PCS,15,FALSE,taxable
+PRP-9103,2026-04-14,27DDDDD9103D1Z7,Service Vendor LLP,15000,0,0,2700,0,17700,27,FALSE,invoice,9987,Installation services,HRS,12,TRUE,taxable
+PRP-9104,2026-04-19,29EEEEE9104E1Z6,Office Essentials Pvt Ltd,8000,720,720,0,0,9440,29,FALSE,invoice,4820,Office stationery packs,PCS,100,FALSE,taxable

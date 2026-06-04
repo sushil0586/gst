@@ -1,0 +1,5 @@
+invoice_no,invoice_date,recipient_gstin,recipient_name,taxable_value,cgst,sgst,igst,cess,total_amount,place_of_supply,document_type,hsn_code,description,uqc,quantity,is_service,supply_category
+ML-7001,2026-04-18,29AAACM7001A1Z5,Multi Line Buyer,10000,900,900,0,0,11800,29,invoice,8504,Power module,PCS,5,FALSE,taxable
+ML-7001,2026-04-18,29AAACM7001A1Z5,Multi Line Buyer,12000,1080,1080,0,0,14160,29,invoice,8536,Switch assembly,PCS,12,FALSE,taxable
+ML-7001,2026-04-18,29AAACM7001A1Z5,Multi Line Buyer,8000,720,720,0,0,9440,29,invoice,8544,Cable harness,PCS,20,FALSE,taxable
+ML-7002,2026-04-19,29AAACM7002B1Z6,Single Line Buyer,15000,1350,1350,0,0,17700,29,invoice,8471,Operator terminal,PCS,3,FALSE,taxable

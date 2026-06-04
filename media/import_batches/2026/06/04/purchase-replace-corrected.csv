@@ -1,0 +1,2 @@
+invoice_no,invoice_date,supplier_gstin,supplier_name,taxable_value,cgst,sgst,igst,cess,total_amount
+INV-008,2026-04-22,29ABCDE1234F1Z5,Vendor Replace Corrected,1200,108,108,0,0,1416

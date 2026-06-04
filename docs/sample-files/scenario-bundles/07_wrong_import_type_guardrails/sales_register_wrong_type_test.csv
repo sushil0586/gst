@@ -1,0 +1,2 @@
+invoice_no,invoice_date,recipient_gstin,recipient_name,taxable_value,cgst,sgst,igst,cess,total_amount
+SAL-GUARD-1,2026-04-06,29AAACG7001A1Z5,Guardrail Buyer,10000,900,900,0,0,11800

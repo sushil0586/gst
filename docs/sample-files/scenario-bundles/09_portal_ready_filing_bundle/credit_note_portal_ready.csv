@@ -1,0 +1,2 @@
+invoice_no,invoice_date,recipient_gstin,recipient_name,taxable_value,cgst,sgst,igst,cess,total_amount,place_of_supply,document_type,hsn_code,description,uqc,quantity,is_service,supply_category
+PRCN-9201,2026-04-24,29AAACP9001A1Z5,Prime Retail Stores,5000,450,450,0,0,5900,29,credit_note,8504,Price adjustment on power units,PCS,2,FALSE,taxable

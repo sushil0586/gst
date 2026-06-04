@@ -1,0 +1,3 @@
+invoice_no,invoice_date,recipient_gstin,recipient_name,taxable_value,cgst,sgst,igst,cess,total_amount
+SAL-001,2026-04-10,29AAAAA1111A1Z5,Northwind Retail,1000,90,90,0,0,1180
+SAL-002,2026-04-12,,Walk-in Customer,2500,225,225,0,0,2950
