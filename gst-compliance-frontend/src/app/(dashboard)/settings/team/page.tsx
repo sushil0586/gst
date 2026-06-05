@@ -106,7 +106,12 @@ export default function TeamManagementPage() {
     }
     try {
       if (editingMember) {
-        await updateMemberMutation.mutateAsync({ role: formState.role });
+        await updateMemberMutation.mutateAsync({
+          role: formState.role,
+          first_name: formState.first_name,
+          last_name: formState.last_name,
+          password: formState.password || undefined,
+        });
         toast.success("Workspace member updated.");
       } else {
         await createMemberMutation.mutateAsync({
@@ -251,7 +256,6 @@ export default function TeamManagementPage() {
                 id="member-first-name"
                 value={formState.first_name}
                 onChange={(event) => setFormState((current) => ({ ...current, first_name: event.target.value }))}
-                disabled={Boolean(editingMember)}
               />
             </div>
             <div className="space-y-2">
@@ -260,7 +264,6 @@ export default function TeamManagementPage() {
                 id="member-last-name"
                 value={formState.last_name}
                 onChange={(event) => setFormState((current) => ({ ...current, last_name: event.target.value }))}
-                disabled={Boolean(editingMember)}
               />
             </div>
             <div className="space-y-2">
@@ -278,20 +281,21 @@ export default function TeamManagementPage() {
                 </SelectContent>
               </Select>
             </div>
-            {!editingMember ? (
-              <div className="space-y-2">
-                <Label htmlFor="member-password">Initial password</Label>
-                <Input
-                  id="member-password"
-                  type="password"
-                  value={formState.password}
-                  onChange={(event) => setFormState((current) => ({ ...current, password: event.target.value }))}
-                />
-              </div>
-            ) : null}
+            <div className="space-y-2">
+              <Label htmlFor="member-password">{editingMember ? "Reset password (optional)" : "Initial password"}</Label>
+              <Input
+                id="member-password"
+                type="password"
+                value={formState.password}
+                onChange={(event) => setFormState((current) => ({ ...current, password: event.target.value }))}
+                placeholder={editingMember ? "Leave blank to keep current password" : ""}
+              />
+            </div>
           </AppModalBody>
           <AppModalFooter>
-            <div className="text-sm text-slate-500">Owner and admin roles can onboard firm users without relying on Django admin.</div>
+            <div className="text-sm text-slate-500">
+              Owner and admin roles can create firm users, assign roles, and reset member passwords without relying on Django admin.
+            </div>
             <div className="flex items-center gap-3">
               <Button variant="outline" onClick={resetDialog}>
                 Cancel

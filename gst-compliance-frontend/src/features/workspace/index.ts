@@ -8,4 +8,9 @@ export {
   useWorkspaceMembersQuery,
   useWorkspacesQuery,
 } from "@/features/workspace/api";
-export { useCreateOrganizationMutation, useCreateWorkspaceMutation } from "@/features/workspace/mutations";
+export {
+  useCreateOrganizationMutation,
+  useCreateWorkspaceMutation,
+  useDeactivateWorkspaceMutation,
+  useUpdateWorkspaceMutation,
+} from "@/features/workspace/mutations";

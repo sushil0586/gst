@@ -23,6 +23,10 @@ from apps.filings.models import (
 from apps.filings.providers.base import FilingProvider, ProviderCapabilitySet
 from apps.filings.providers.registry import get_filing_provider
 from apps.filings.services.provider_auth import request_provider_otp_session, verify_provider_otp_session
+from apps.filings.services.auth_session_freshness import (
+    get_provider_auth_session_freshness,
+    is_provider_auth_session_live_enabled,
+)
 from apps.gstins.models import GSTIN
 from apps.integrations.whitebooks.exceptions import WhiteBooksSessionLimitError, WhiteBooksSubmissionError
 from apps.integrations.whitebooks.mappers import map_return_filing_to_whitebooks_payload
@@ -137,6 +141,26 @@ def filings_context(filings_user):
     }
 
 
+def create_ready_whitebooks_auth_session(filings_context, **overrides):
+    params = {
+        "workspace": filings_context["workspace"],
+        "client": filings_context["client"],
+        "gstin": filings_context["gstin"],
+        "provider": ReturnFiling.Provider.WHITEBOOKS,
+        "email": "ops@example.com",
+        "txn": "txn-ready-001",
+        "status": WhiteBooksAuthSession.SessionStatus.SESSION_ACTIVE,
+        "response_contract_confirmed": True,
+        "verified_at": timezone.now(),
+        "initiated_by": filings_context["user"],
+        "verified_by": filings_context["user"],
+        "created_by": filings_context["user"],
+        "updated_by": filings_context["user"],
+    }
+    params.update(overrides)
+    return WhiteBooksAuthSession.objects.create(**params)
+
+
 @pytest.mark.django_db
 def test_return_filing_models_support_attempts_and_events(filings_context):
     filing = ReturnFiling.objects.create(
@@ -174,6 +198,142 @@ def test_return_filing_models_support_attempts_and_events(filings_context):
     assert filing.prepared_return == filings_context["prepared_return"]
     assert filing.attempts.count() == 1
     assert filing.events.count() == 1
+
+
+@pytest.mark.django_db
+def test_start_filing_api_requires_live_confirmed_provider_auth_session(filings_authenticated_client, filings_context):
+    response = filings_authenticated_client.post(
+        "/api/v1/filings/start/",
+        {
+            "workspace": str(filings_context["workspace"].id),
+            "client": str(filings_context["client"].id),
+            "gstin": str(filings_context["gstin"].id),
+            "compliance_period": str(filings_context["compliance_period"].id),
+            "prepared_return": str(filings_context["prepared_return"].id),
+            "return_type": filings_context["prepared_return"].return_type,
+            "provider": ReturnFiling.Provider.WHITEBOOKS,
+            "approval_request": str(filings_context["approval_request"].id),
+            "confirmation_note": "Started from returns workspace.",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "Request OTP and verify a live filing session" in str(response.data["errors"]["provider_auth"][0])
+
+
+@pytest.mark.django_db
+def test_start_filing_api_requeues_queued_filing_after_fresh_confirmed_auth(monkeypatch, filings_authenticated_client, filings_context):
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=filings_context["prepared_return"].return_type,
+        status=ReturnFiling.FilingStatus.QUEUED_FOR_FILING,
+        approved_by=filings_context["user"],
+        filed_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    ReturnFilingAttempt.objects.create(
+        return_filing=filing,
+        attempt_number=1,
+        status=ReturnFilingAttempt.AttemptStatus.QUEUED,
+        request_summary={"provider": filing.provider, "return_type": filing.return_type},
+        triggered_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    create_ready_whitebooks_auth_session(filings_context, txn="txn-live-ready")
+
+    captured = {}
+
+    def fake_enqueue_return_filing(*, filing, actor):
+        captured["filing_id"] = str(filing.id)
+        captured["actor_id"] = actor.id if actor else None
+
+    monkeypatch.setattr("apps.filings.services.filings.enqueue_return_filing", fake_enqueue_return_filing)
+
+    response = filings_authenticated_client.post(
+        "/api/v1/filings/start/",
+        {
+            "workspace": str(filings_context["workspace"].id),
+            "client": str(filings_context["client"].id),
+            "gstin": str(filings_context["gstin"].id),
+            "compliance_period": str(filings_context["compliance_period"].id),
+            "prepared_return": str(filings_context["prepared_return"].id),
+            "return_type": filings_context["prepared_return"].return_type,
+            "provider": ReturnFiling.Provider.WHITEBOOKS,
+            "approval_request": str(filings_context["approval_request"].id),
+            "confirmation_note": "Started from returns workspace.",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.data["message"] == "Filing queued"
+    assert response.data["data"]["id"] == str(filing.id)
+    assert captured["filing_id"] == str(filing.id)
+    assert AuditLog.objects.filter(action="return_filing.requeued_after_auth_refresh", entity_id=filing.id).exists()
+    assert ReturnFilingEvent.objects.filter(return_filing=filing, event_type="filing.requeued_after_auth_refresh").exists()
+
+
+@pytest.mark.django_db
+def test_start_filing_api_blocks_restarting_queued_filing_when_auth_session_is_stale(settings, filings_authenticated_client, filings_context):
+    settings.WHITEBOOKS_AUTH_SESSION_MAX_AGE_MINUTES = 30
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=filings_context["prepared_return"].return_type,
+        status=ReturnFiling.FilingStatus.QUEUED_FOR_FILING,
+        approved_by=filings_context["user"],
+        filed_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    ReturnFilingAttempt.objects.create(
+        return_filing=filing,
+        attempt_number=1,
+        status=ReturnFilingAttempt.AttemptStatus.QUEUED,
+        request_summary={"provider": ReturnFiling.Provider.WHITEBOOKS, "return_type": filings_context["prepared_return"].return_type},
+        triggered_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    create_ready_whitebooks_auth_session(
+        filings_context,
+        txn="txn-stale-restart",
+        verified_at=timezone.now() - timezone.timedelta(minutes=45),
+    )
+
+    response = filings_authenticated_client.post(
+        "/api/v1/filings/start/",
+        {
+            "workspace": str(filings_context["workspace"].id),
+            "client": str(filings_context["client"].id),
+            "gstin": str(filings_context["gstin"].id),
+            "compliance_period": str(filings_context["compliance_period"].id),
+            "prepared_return": str(filings_context["prepared_return"].id),
+            "return_type": filings_context["prepared_return"].return_type,
+            "provider": ReturnFiling.Provider.WHITEBOOKS,
+            "approval_request": str(filings_context["approval_request"].id),
+            "confirmation_note": "Started from returns workspace.",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "earlier queued filing attempt" in str(response.data["errors"]["provider_auth"][0])
+    assert "older than 30 minutes" in str(response.data["errors"]["provider_auth"][0])
 
 
 @pytest.mark.django_db
@@ -458,6 +618,7 @@ def test_provider_auth_sessions_api_alias_supports_demo_provider(filings_authent
 
 @pytest.mark.django_db
 def test_start_filing_api_creates_filing_attempt_and_event(filings_authenticated_client, filings_context):
+    create_ready_whitebooks_auth_session(filings_context)
     response = filings_authenticated_client.post(
         "/api/v1/filings/start/",
         {
@@ -488,6 +649,7 @@ def test_start_filing_api_creates_filing_attempt_and_event(filings_authenticated
 
 @pytest.mark.django_db
 def test_start_filing_api_is_idempotent_for_active_snapshot(filings_authenticated_client, filings_context):
+    create_ready_whitebooks_auth_session(filings_context)
     payload = {
         "workspace": str(filings_context["workspace"].id),
         "client": str(filings_context["client"].id),
@@ -733,8 +895,11 @@ def test_process_return_filing_marks_session_limit_as_actionable_auth_failure(mo
 
 
 @pytest.mark.django_db
-def test_request_whitebooks_otp_api_creates_auth_session(monkeypatch, filings_authenticated_client, filings_context):
+def test_request_whitebooks_otp_api_creates_auth_session(monkeypatch, settings, filings_authenticated_client, filings_context):
+    override = {}
+
     def fake_request_otp(self, email):
+        override["email"] = email
         return {
             "status_cd": "1",
             "status_desc": "user name exists",
@@ -761,7 +926,8 @@ def test_request_whitebooks_otp_api_creates_auth_session(monkeypatch, filings_au
     assert auth_session.txn == "2ac85ae689ce442180b2079bb7169897"
     assert auth_session.otp_request_payload["status_cd"] == "1"
     assert auth_session.otp_request_payload["status_desc"] == "user name exists"
-    assert auth_session.email == "ops@example.com"
+    assert auth_session.email == settings.WHITEBOOKS_CONTACT_EMAIL
+    assert override["email"] == settings.WHITEBOOKS_CONTACT_EMAIL
     assert AuditLog.objects.filter(action="whitebooks_auth.otp_requested", entity_id=auth_session.id).exists()
 
 
@@ -803,6 +969,55 @@ def test_verify_whitebooks_otp_api_stores_unresolved_auth_token_payload(monkeypa
     assert auth_session.auth_token_payload["data"]["unknown_token_key"] == "abc123"
     assert auth_session.session_metadata["txn"] == "txn-otp-001"
     assert AuditLog.objects.filter(action="whitebooks_auth.auth_token_received", entity_id=auth_session.id).exists()
+
+
+@pytest.mark.django_db
+def test_whitebooks_success_payload_with_txn_is_treated_as_live_enabled(filings_context):
+    auth_session = WhiteBooksAuthSession.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        email="ops@example.com",
+        txn="txn-docx-001",
+        status=WhiteBooksAuthSession.SessionStatus.AUTH_TOKEN_RECEIVED,
+        auth_token_payload={
+            "status_cd": "1",
+            "status_desc": "If authentication succeeds",
+            "header": {"txn": "txn-docx-001"},
+        },
+        session_metadata={
+            "resolution_status": "session_credentials_missing_from_confirmed_auth_response",
+            "session_credentials_present": False,
+        },
+        initiated_by=filings_context["user"],
+        verified_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+
+    assert is_provider_auth_session_live_enabled(auth_session=auth_session) is True
+
+
+@pytest.mark.django_db
+def test_unverified_auth_session_has_no_expiry_window(filings_context):
+    auth_session = WhiteBooksAuthSession.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        email="aadishb3@gmail.com",
+        status=WhiteBooksAuthSession.SessionStatus.CREATED,
+        initiated_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+
+    freshness = get_provider_auth_session_freshness(auth_session=auth_session)
+
+    assert freshness["verified_at"] is None
+    assert freshness["expires_at"] is None
+    assert freshness["is_stale"] is True
 
 
 @pytest.mark.django_db
@@ -1183,6 +1398,81 @@ def test_live_gstr1_save_uses_verified_whitebooks_auth_session(monkeypatch, sett
     assert captured["txn"] == "txn-live-001"
     assert captured["ret_period"] == "042026"
     assert captured["payload"]["fp"] == "042026"
+
+
+@pytest.mark.django_db
+def test_live_gstr1_save_rejects_stale_whitebooks_auth_session(settings, filings_context):
+    from django.utils import timezone
+
+    from apps.filings.services.filings import process_return_filing
+    from apps.integrations.whitebooks.exceptions import WhiteBooksSubmissionError
+
+    settings.WHITEBOOKS_SANDBOX_MODE = False
+    settings.WHITEBOOKS_ENABLE_GSTR1_SAVE_LIVE = True
+    settings.WHITEBOOKS_AUTH_SESSION_MAX_AGE_MINUTES = 30
+    settings.WHITEBOOKS_BASE_URL = "https://apisandbox.whitebooks.in"
+    settings.WHITEBOOKS_API_KEY = "client-id"
+    settings.WHITEBOOKS_API_SECRET = "client-secret"
+    settings.WHITEBOOKS_GST_USERNAME = "GSTUSER"
+    settings.WHITEBOOKS_STATE_CODE = "29"
+    settings.WHITEBOOKS_IP_ADDRESS = "192.168.1.6"
+
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR1
+    filings_context["prepared_return"].summary_snapshot = {
+        "outward_supplies": {
+            "total_taxable_value": "1000.00",
+            "total_tax_amount": "180.00",
+        }
+    }
+    filings_context["prepared_return"].save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR1,
+        status=ReturnFiling.FilingStatus.QUEUED_FOR_FILING,
+        approved_by=filings_context["user"],
+        filed_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    attempt = ReturnFilingAttempt.objects.create(
+        return_filing=filing,
+        attempt_number=1,
+        status=ReturnFilingAttempt.AttemptStatus.QUEUED,
+        triggered_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    WhiteBooksAuthSession.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        email="ops@example.com",
+        txn="txn-stale-001",
+        status=WhiteBooksAuthSession.SessionStatus.SESSION_ACTIVE,
+        verified_at=timezone.now() - timezone.timedelta(minutes=45),
+        initiated_by=filings_context["user"],
+        verified_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+
+    with pytest.raises(WhiteBooksSubmissionError) as exc_info:
+        process_return_filing(filing_id=filing.id, actor_id=filings_context["user"].id)
+
+    filing.refresh_from_db()
+    attempt.refresh_from_db()
+    assert "older than 30 minutes" in str(exc_info.value)
+    assert filing.status == ReturnFiling.FilingStatus.FAILED
+    assert attempt.status == ReturnFilingAttempt.AttemptStatus.FAILED
+    assert attempt.failure_code == "whitebooks_submission_error"
 
 
 def test_whitebooks_provider_capabilities_follow_flags_and_payload_readiness(settings, filings_context):
@@ -2766,6 +3056,7 @@ def test_filer_role_is_blocked_from_support_only_filing_actions(filings_context)
 def test_start_filing_blocks_same_approver_when_maker_checker_enforced(filings_authenticated_client, filings_context, monkeypatch, settings):
     monkeypatch.setattr("apps.filings.services.filings.enqueue_return_filing", lambda **kwargs: None)
     settings.FILING_ENFORCE_MAKER_CHECKER = True
+    create_ready_whitebooks_auth_session(filings_context)
 
     filings_context["prepared_return"].approved_by = filings_context["user"]
     filings_context["prepared_return"].save(update_fields=["approved_by", "updated_at"])

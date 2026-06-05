@@ -48,6 +48,11 @@ type CorrectImportRowPayload = {
   batchId: string;
   rowNumber: number;
   rawRow: Record<string, string>;
+  exceptionContext?: {
+    allow_period_override: boolean;
+    reason: string;
+    category: string;
+  };
 };
 
 type DiscardImportRowPayload = {
@@ -787,6 +792,7 @@ export function useCorrectImportRowMutation(filtersToInvalidate?: ImportBatchFil
       const response = await apiClient.post(`/imports/batches/${payload.batchId}/row-corrections/`, {
         row_number: payload.rowNumber,
         raw_row: payload.rawRow,
+        exception_context: payload.exceptionContext,
       });
       return unwrapApiData<ImportBatchRecord>(response);
     },

@@ -1,6 +1,7 @@
 import re
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
 from django.db import transaction
 from django.utils.crypto import get_random_string
 from rest_framework import serializers
@@ -108,10 +109,12 @@ def create_or_assign_workspace_member(*, actor, workspace: Workspace, email: str
     created_user = False
 
     if user is None:
+        initial_password = password or get_random_string(14)
+        validate_password(initial_password)
         user = User.objects.create_user(
             username=_unique_username_from_email(normalized_email),
             email=normalized_email,
-            password=password or get_random_string(14),
+            password=initial_password,
             first_name=first_name.strip(),
             last_name=last_name.strip(),
         )
@@ -125,6 +128,7 @@ def create_or_assign_workspace_member(*, actor, workspace: Workspace, email: str
             user.last_name = last_name.strip()
             update_fields.append("last_name")
         if password:
+            validate_password(password, user)
             user.set_password(password)
             update_fields.append("password")
         if update_fields:
@@ -163,7 +167,23 @@ def create_or_assign_workspace_member(*, actor, workspace: Workspace, email: str
 
 
 @transaction.atomic
-def update_workspace_member(*, actor, membership: WorkspaceMembership, role: str):
+def update_workspace_member(*, actor, membership: WorkspaceMembership, role: str, first_name: str | None = None, last_name: str | None = None, password: str | None = None):
+    user = membership.user
+    user_update_fields: list[str] = []
+
+    if first_name is not None:
+        user.first_name = first_name.strip()
+        user_update_fields.append("first_name")
+    if last_name is not None:
+        user.last_name = last_name.strip()
+        user_update_fields.append("last_name")
+    if password:
+        validate_password(password, user)
+        user.set_password(password)
+        user_update_fields.append("password")
+    if user_update_fields:
+        user.save(update_fields=user_update_fields)
+
     membership.role = role
     membership.updated_by = actor
     membership.save(update_fields=["role", "updated_by", "updated_at"])
@@ -172,7 +192,12 @@ def update_workspace_member(*, actor, membership: WorkspaceMembership, role: str
         action="workspace_member.updated",
         entity=membership,
         workspace_id=membership.workspace_id,
-        metadata={"user_email": membership.user.email, "role": membership.role},
+        metadata={
+            "user_email": membership.user.email,
+            "role": membership.role,
+            "password_reset": bool(password),
+            "name_updated": first_name is not None or last_name is not None,
+        },
     )
     return membership
 

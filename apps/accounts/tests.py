@@ -1,5 +1,6 @@
 import pytest
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.management import call_command
 from rest_framework.test import APIClient
 
@@ -277,6 +278,43 @@ def test_workspace_member_role_can_be_updated(owner_client, accounts_context):
 
 
 @pytest.mark.django_db
+def test_workspace_member_can_be_updated_with_name_and_password(owner_client, accounts_context):
+    member = User.objects.create_user(
+        username="member-password-reset",
+        email="member-password-reset@example.com",
+        password="strong-pass-123",
+        first_name="Old",
+        last_name="Name",
+    )
+    membership = WorkspaceMembership.objects.create(
+        user=member,
+        workspace=accounts_context["workspace"],
+        role=WorkspaceRole.FILER,
+        created_by=accounts_context["owner"],
+        updated_by=accounts_context["owner"],
+    )
+
+    response = owner_client.patch(
+        f"/api/v1/workspace-members/{membership.id}/",
+        {
+            "role": WorkspaceRole.REVIEWER,
+            "first_name": "New",
+            "last_name": "Reviewer",
+            "password": "changed-pass-123",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    member.refresh_from_db()
+    membership.refresh_from_db()
+    assert membership.role == WorkspaceRole.REVIEWER
+    assert member.first_name == "New"
+    assert member.last_name == "Reviewer"
+    assert member.check_password("changed-pass-123")
+
+
+@pytest.mark.django_db
 def test_workspace_member_can_be_deactivated(owner_client, accounts_context):
     member = User.objects.create_user(
         username="member-deactivate",
@@ -296,6 +334,65 @@ def test_workspace_member_can_be_deactivated(owner_client, accounts_context):
     assert response.status_code == 200
     membership.refresh_from_db()
     assert membership.is_active is False
+
+
+@pytest.mark.django_db
+def test_forgot_password_sends_reset_email(accounts_api_client, accounts_owner, settings):
+    settings.EMAIL_BACKEND = "django.core.mail.backends.locmem.EmailBackend"
+    settings.APP_FRONTEND_URL = "http://localhost:3000"
+
+    response = accounts_api_client.post(
+        "/api/v1/auth/forgot-password/",
+        {"email": accounts_owner.email},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert len(mail.outbox) == 1
+    assert "reset-password?uid=" in mail.outbox[0].body
+    assert accounts_owner.email in mail.outbox[0].to
+
+
+@pytest.mark.django_db
+def test_reset_password_confirm_updates_password(accounts_api_client, accounts_owner):
+    from django.contrib.auth.tokens import default_token_generator
+    from django.utils.encoding import force_bytes
+    from django.utils.http import urlsafe_base64_encode
+
+    uid = urlsafe_base64_encode(force_bytes(accounts_owner.pk))
+    token = default_token_generator.make_token(accounts_owner)
+
+    response = accounts_api_client.post(
+        "/api/v1/auth/reset-password/",
+        {
+            "uid": uid,
+            "token": token,
+            "password": "brand-new-pass-123",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    accounts_owner.refresh_from_db()
+    assert accounts_owner.check_password("brand-new-pass-123")
+
+
+@pytest.mark.django_db
+def test_authenticated_user_can_change_password(accounts_api_client, accounts_owner):
+    accounts_api_client.force_authenticate(user=accounts_owner)
+
+    response = accounts_api_client.post(
+        "/api/v1/auth/change-password/",
+        {
+            "current_password": "strong-pass-123",
+            "new_password": "changed-directly-123",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    accounts_owner.refresh_from_db()
+    assert accounts_owner.check_password("changed-directly-123")
 
 
 @pytest.mark.django_db

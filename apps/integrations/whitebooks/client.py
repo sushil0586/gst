@@ -1,6 +1,7 @@
 import json
 import inspect
 import ssl
+from json import JSONDecodeError
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -330,14 +331,32 @@ class WhiteBooksClient:
         request = Request(endpoint, method=method, headers=request_headers, data=data)
         try:
             with urlopen(request, timeout=self.timeout_seconds, context=self._build_ssl_context()) as response:
-                return json.loads(response.read().decode("utf-8"))
+                return self._decode_json_response(response.read(), endpoint=endpoint)
         except HTTPError as exc:
             try:
-                return json.loads(exc.read().decode("utf-8"))
-            except Exception as parse_exc:  # pragma: no cover - defensive fallback
-                raise WhiteBooksTemporaryError(f"WhiteBooks HTTP error {exc.code} and the response could not be parsed.") from parse_exc
+                return self._decode_json_response(exc.read(), endpoint=endpoint, status_code=exc.code)
+            except WhiteBooksTemporaryError as parse_exc:  # pragma: no cover - defensive fallback
+                raise WhiteBooksTemporaryError(f"WhiteBooks HTTP error {exc.code}. {parse_exc}") from parse_exc
         except (URLError, TimeoutError, OSError) as exc:
             raise WhiteBooksTemporaryError("WhiteBooks request could not be completed due to a temporary transport error.") from exc
+
+    def _decode_json_response(self, raw_body: bytes, *, endpoint: str, status_code: int | None = None) -> dict:
+        decoded = raw_body.decode("utf-8", errors="replace").strip()
+        if not decoded:
+            suffix = f" from {endpoint}" if endpoint else ""
+            if status_code is not None:
+                suffix = f" for HTTP {status_code}{suffix}"
+            raise WhiteBooksTemporaryError(f"WhiteBooks returned an empty response{suffix}.")
+        try:
+            return json.loads(decoded)
+        except JSONDecodeError as exc:
+            preview = decoded[:160].replace("\n", " ")
+            suffix = f" from {endpoint}" if endpoint else ""
+            if status_code is not None:
+                suffix = f" for HTTP {status_code}{suffix}"
+            raise WhiteBooksTemporaryError(
+                f"WhiteBooks returned a non-JSON response{suffix}. Response preview: {preview}"
+            ) from exc
 
     def _auth_headers(
         self,
@@ -396,9 +415,9 @@ class WhiteBooksClient:
     def _build_session_from_auth_token_payload(self, *, payload: dict, email: str, requested_txn: str) -> WhiteBooksSession:
         header = payload.get("header") if isinstance(payload.get("header"), dict) else {}
         resolved_txn = str(header.get("txn") or requested_txn or "")
-        session_credentials_present = any(
-            payload.get(key)
-            for key in ("auth_token", "token", "sek", "session_key", "access_token")
+        auth_success = str(payload.get("status_cd") or "") == "1"
+        session_credentials_present = bool(resolved_txn) or any(
+            payload.get(key) for key in ("auth_token", "token", "sek", "session_key", "access_token")
         )
         return WhiteBooksSession(
             mode="live",
@@ -409,10 +428,12 @@ class WhiteBooksClient:
                 "txn": resolved_txn,
                 "status_desc": payload.get("status_desc", ""),
                 "auth_token_exchange_confirmed": True,
-                "response_contract_confirmed": False,
+                "response_contract_confirmed": auth_success and bool(resolved_txn),
                 "session_credentials_present": session_credentials_present,
                 "resolution_status": (
-                    "session_credentials_missing_from_confirmed_auth_response"
+                    "txn_valid_for_6_hours"
+                    if auth_success and bool(resolved_txn)
+                    else "session_credentials_missing_from_confirmed_auth_response"
                     if not session_credentials_present
                     else "session_credentials_present_but_submission_contract_unconfirmed"
                 ),

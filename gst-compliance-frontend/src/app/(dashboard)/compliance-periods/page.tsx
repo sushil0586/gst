@@ -12,7 +12,6 @@ import { ActionLabel } from "@/components/common/action-label";
 import { DataTableShell } from "@/components/tables/data-table-shell";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status/status-badge";
-import { compliancePeriods as mockPeriods } from "@/data/compliancePeriods";
 import { useClientsQuery } from "@/features/clients";
 import { useCompliancePeriodsQuery, useLockCompliancePeriodMutation, useUnlockCompliancePeriodMutation } from "@/features/compliance-periods";
 import { useGstinsQuery } from "@/features/gstins";
@@ -32,11 +31,7 @@ export default function CompliancePeriodsPage() {
   const gstinsQuery = useGstinsQuery(selectedClientId);
   const gstins = gstinsQuery.data?.items ?? [];
   const periodsQuery = useCompliancePeriodsQuery(selectedGstinId);
-  const displayPeriods = periodsQuery.data?.items.length
-    ? periodsQuery.data.items
-    : periodsQuery.isError
-      ? mockPeriods.filter((period) => !selectedClientId || period.clientId === selectedClientId)
-      : [];
+  const displayPeriods = periodsQuery.data?.items ?? [];
   const editingPeriod = useMemo(
     () => periodsQuery.data?.items.find((entry) => entry.id === editingId) ?? null,
     [editingId, periodsQuery.data?.items],
@@ -67,7 +62,7 @@ export default function CompliancePeriodsPage() {
         description="Review monthly cycles, due dates, and filing progression at the period level."
         actions={canPrepare ? [{ label: "Add Period", onClick: () => setDialogOpen(true) }] : []}
       />
-      <SectionCard title="Period register" description="Live period records, with preview fallback only when the API is unavailable.">
+      <SectionCard title="Period register" description="Live period records for the selected GSTIN context.">
         {clients.length === 0 && !clientsQuery.isLoading ? (
           <EmptyState title="No clients available" description="Create a client and GSTIN first to begin period management." />
         ) : null}
@@ -75,7 +70,7 @@ export default function CompliancePeriodsPage() {
           <LoadingState message="Loading compliance periods..." />
         ) : null}
         {periodsQuery.isError ? (
-          <ErrorState description="We couldn't load period data. Preview fallback records are shown only because the live API request failed." />
+          <ErrorState description="We couldn't load period data. Resolve the API issue before continuing with period operations." />
         ) : null}
         {displayPeriods.length > 0 ? (
           <DataTableShell
@@ -88,17 +83,17 @@ export default function CompliancePeriodsPage() {
             ]}
             rows={displayPeriods.map((period) => ({
               id: period.id,
-              period: "period" in period ? period.period : period.label,
-              returnType: "return_type" in period ? period.return_type : "GSTR-3B",
-              dueDate: "due_date" in period ? period.due_date ?? "Not set" : period.dueDate,
+              period: period.period,
+              returnType: period.return_type,
+              dueDate: period.due_date ?? "Not set",
               status: (
                 <div className="flex items-center gap-2">
                   <StatusBadge label={period.status} variant={period.status === "closed" ? "success" : "warning"} />
-                  {"is_locked" in period && period.is_locked ? <StatusBadge label="Locked" variant="danger" /> : null}
+                  {period.is_locked ? <StatusBadge label="Locked" variant="danger" /> : null}
                 </div>
               ),
               actions:
-                canPrepare && "return_type" in period ? (
+                canPrepare ? (
                   <div className="flex justify-end gap-2">
                     <Button size="sm" variant="ghost" onClick={() => {
                       setEditingId(period.id);
@@ -109,10 +104,10 @@ export default function CompliancePeriodsPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleLockToggle(period.id, "is_locked" in period ? period.is_locked : false)}
-                      disabled={"is_locked" in period ? (period.is_locked ? !canUnlock : false) : false}
+                      onClick={() => handleLockToggle(period.id, period.is_locked)}
+                      disabled={period.is_locked ? !canUnlock : false}
                     >
-                      {"is_locked" in period && period.is_locked ? (
+                      {period.is_locked ? (
                         <ActionLabel kind="unlock" label="Unlock" />
                       ) : (
                         <ActionLabel kind="lock" label="Lock" />

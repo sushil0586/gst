@@ -8,6 +8,13 @@ import { authService } from "@/lib/auth/auth-service";
 import { queryKeys } from "@/lib/query/query-keys";
 import type { SessionPayload } from "@/types/api";
 
+const WORKSPACE_STORAGE_KEYS = [
+  "gst:selected-workspace-id",
+  "gst:selected-client-id",
+  "gst:selected-gstin-id",
+  "gst:selected-period-id",
+];
+
 type SessionContextValue = {
   session: SessionPayload | null;
   user: SessionPayload["user"] | null;
@@ -37,8 +44,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       isAuthenticated: Boolean(sessionQuery.data),
       logout: async () => {
         await authService.logout();
+        queryClient.cancelQueries();
+        queryClient.setQueryData(queryKeys.auth.me, null);
         queryClient.removeQueries({ queryKey: queryKeys.auth.me });
+        queryClient.clear();
+        if (typeof window !== "undefined") {
+          for (const key of WORKSPACE_STORAGE_KEYS) {
+            window.localStorage.removeItem(key);
+          }
+        }
         router.replace("/login");
+        router.refresh();
       },
     }),
     [queryClient, router, sessionQuery.data, sessionQuery.isLoading],

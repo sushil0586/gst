@@ -1,4 +1,9 @@
+from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.tokens import default_token_generator
+from django.core.mail import send_mail
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
@@ -7,8 +12,11 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 
 from apps.accounts.models import WorkspaceMembership
 from apps.accounts.serializers import (
+    ChangePasswordSerializer,
     CurrentUserSerializer,
     EmailOrUsernameTokenObtainPairSerializer,
+    ForgotPasswordRequestSerializer,
+    ResetPasswordConfirmSerializer,
     SelfRegistrationResponseSerializer,
     SelfRegistrationSerializer,
     WorkspaceMemberCreateSerializer,
@@ -60,6 +68,75 @@ class SelfRegistrationView(APIView):
         )
         payload = SelfRegistrationResponseSerializer.from_user(user)
         return Response(api_response(data=payload, message="Account created"), status=201)
+
+
+class ForgotPasswordView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [RegistrationRateThrottle]
+
+    def post(self, request, *args, **kwargs):
+        serializer = ForgotPasswordRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        normalized_email = serializer.validated_data["email"].strip().lower()
+        user = User.objects.filter(email__iexact=normalized_email, is_active=True).first()
+
+        if user is not None:
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            reset_url = f"{settings.APP_FRONTEND_URL.rstrip('/')}/reset-password?uid={uid}&token={token}"
+            send_mail(
+                subject="Reset your GST Compliance password",
+                message=(
+                    "We received a request to reset your GST Compliance password.\n\n"
+                    f"Reset your password: {reset_url}\n\n"
+                    "If you did not request this, you can ignore this email."
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[user.email],
+                fail_silently=False,
+            )
+            log_security_event(
+                event="auth.password_reset_requested",
+                severity="info",
+                details={"user_id": user.id, "email": user.email, "ip": request.META.get("REMOTE_ADDR", "")},
+            )
+
+        return Response(api_response(data=None, message="If an account exists for this email, a reset link has been sent."))
+
+
+class ResetPasswordConfirmView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [RegistrationRateThrottle]
+
+    def post(self, request, *args, **kwargs):
+        serializer = ResetPasswordConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data["user"]
+        user.set_password(serializer.validated_data["password"])
+        user.save(update_fields=["password"])
+        log_security_event(
+            event="auth.password_reset_completed",
+            severity="info",
+            details={"user_id": user.id, "email": user.email, "ip": request.META.get("REMOTE_ADDR", "")},
+        )
+        return Response(api_response(data=None, message="Password reset successful."))
+
+
+class ChangePasswordView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        serializer = ChangePasswordSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        user = request.user
+        user.set_password(serializer.validated_data["new_password"])
+        user.save(update_fields=["password"])
+        log_security_event(
+            event="auth.password_changed",
+            severity="info",
+            details={"user_id": user.id, "email": user.email, "ip": request.META.get("REMOTE_ADDR", "")},
+        )
+        return Response(api_response(data=None, message="Password changed successfully."))
 
 
 class WorkspaceMemberViewSet(StandardizedModelViewSet):
@@ -117,7 +194,14 @@ class WorkspaceMemberViewSet(StandardizedModelViewSet):
     def perform_update(self, serializer):
         membership = self.get_object()
         role = serializer.validated_data.get("role", membership.role)
-        return update_workspace_member(actor=self.request.user, membership=membership, role=role)
+        return update_workspace_member(
+            actor=self.request.user,
+            membership=membership,
+            role=role,
+            first_name=serializer.validated_data.get("first_name"),
+            last_name=serializer.validated_data.get("last_name"),
+            password=serializer.validated_data.get("password"),
+        )
 
     def perform_destroy(self, instance):
         deactivate_workspace_member(actor=self.request.user, membership=instance)

@@ -5,6 +5,10 @@ from apps.approvals.models import ApprovalRequest
 from apps.clients.models import Client
 from apps.common.security import sanitize_json
 from apps.filings.models import ProviderAuthSession, ReturnFiling, ReturnFilingAttempt, ReturnFilingEvent, ReturnFilingIncidentNote
+from apps.filings.services.auth_session_freshness import (
+    get_provider_auth_session_freshness,
+    is_provider_auth_session_live_enabled,
+)
 from apps.filings.services.alerts import build_return_filing_operational_alerts, get_alert_routing_summary
 from apps.filings.services.rollout import (
     resolve_provider_rollout_policy,
@@ -13,6 +17,54 @@ from apps.filings.services.rollout import (
 )
 from apps.gstins.models import GSTIN
 from apps.returns.models import ReturnPreparation
+
+
+def _get_latest_provider_auth_session(*, workspace_id, client_id, gstin_id, provider_code):
+    return (
+        ProviderAuthSession.objects.filter(
+            workspace_id=workspace_id,
+            client_id=client_id,
+            gstin_id=gstin_id,
+            provider=provider_code,
+            is_active=True,
+        )
+        .order_by("-verified_at", "-updated_at", "-created_at")
+        .first()
+    )
+
+
+def _get_provider_auth_readiness_error(*, auth_session):
+    if auth_session is None:
+        return "Request OTP and verify a live filing session before starting filing."
+
+    if auth_session.status not in {
+        ProviderAuthSession.SessionStatus.AUTH_TOKEN_RECEIVED,
+        ProviderAuthSession.SessionStatus.SESSION_ACTIVE,
+    }:
+        return "Verify OTP successfully before starting filing."
+
+    if not is_provider_auth_session_live_enabled(auth_session=auth_session):
+        return "Verify OTP and wait for the live gateway confirmation before starting filing."
+
+    freshness = get_provider_auth_session_freshness(auth_session=auth_session)
+    if freshness["is_stale"]:
+        return freshness["stale_reason"] or "The filing access session is stale. Request OTP again."
+
+    return None
+
+
+def _is_auth_recoverable_queued_filing(filing):
+    if filing.status != ReturnFiling.FilingStatus.QUEUED_FOR_FILING:
+        return False
+    if filing.submitted_at or filing.provider_reference_id or filing.provider_acknowledgement_id:
+        return False
+    latest_attempt = filing.attempts.order_by("-attempt_number").first()
+    if latest_attempt is None:
+        return False
+    return latest_attempt.status in {
+        ReturnFilingAttempt.AttemptStatus.CREATED,
+        ReturnFilingAttempt.AttemptStatus.QUEUED,
+    }
 
 
 class ReturnFilingAttemptSerializer(serializers.ModelSerializer):
@@ -511,14 +563,39 @@ class ReturnFilingStartSerializer(serializers.Serializer):
         )
         if prepared_return is None:
             raise serializers.ValidationError({"prepared_return": "Prepared return not found."})
+        provider_auth_session = None
+        provider_auth_error = None
+        if attrs["provider"] == ReturnFiling.Provider.WHITEBOOKS:
+            provider_auth_session = _get_latest_provider_auth_session(
+                workspace_id=attrs["workspace"],
+                client_id=attrs["client"],
+                gstin_id=attrs["gstin"],
+                provider_code=attrs["provider"],
+            )
+            provider_auth_error = _get_provider_auth_readiness_error(auth_session=provider_auth_session)
         existing_filing = ReturnFiling.objects.filter(
             prepared_return=prepared_return,
             prepared_snapshot_version=1,
             is_active=True,
         ).first()
         if existing_filing is not None:
-            attrs["existing_filing"] = existing_filing
+            if _is_auth_recoverable_queued_filing(existing_filing):
+                if provider_auth_error:
+                    raise serializers.ValidationError(
+                        {
+                            "provider_auth": (
+                                "This return already has an earlier queued filing attempt from before OTP verification was completed. "
+                                "Request a fresh OTP for this GSTIN, verify it, then click Resume filing. "
+                                "A verified filing session stays active for up to 6 hours. "
+                                f"{provider_auth_error}"
+                            )
+                        }
+                    )
+                attrs["restart_existing_filing"] = existing_filing
+            else:
+                attrs["existing_filing"] = existing_filing
             attrs["prepared_return_instance"] = prepared_return
+            attrs["provider_auth_session_instance"] = provider_auth_session
             return attrs
         if prepared_return.status != ReturnPreparation.PreparationStatus.APPROVED:
             raise serializers.ValidationError({"prepared_return": "Prepared return must be approved before filing."})
@@ -532,6 +609,8 @@ class ReturnFilingStartSerializer(serializers.Serializer):
             raise serializers.ValidationError({"workspace": "Prepared return does not belong to this workspace."})
         if prepared_return.return_type != attrs["return_type"]:
             raise serializers.ValidationError({"return_type": "Prepared return type does not match filing request."})
+        if provider_auth_error:
+            raise serializers.ValidationError({"provider_auth": provider_auth_error})
 
         approval_request_id = attrs.get("approval_request")
         if approval_request_id:
@@ -547,6 +626,7 @@ class ReturnFilingStartSerializer(serializers.Serializer):
             attrs["approval_request_instance"] = approval_request
 
         attrs["prepared_return_instance"] = prepared_return
+        attrs["provider_auth_session_instance"] = provider_auth_session
         return attrs
 
 
@@ -574,6 +654,7 @@ class ReturnFilingIncidentNoteResolveSerializer(serializers.Serializer):
 
 
 class ProviderAuthSessionSerializer(serializers.ModelSerializer):
+    response_contract_confirmed = serializers.SerializerMethodField()
     workspace_name = serializers.CharField(source="workspace.name", read_only=True)
     client_name = serializers.CharField(source="client.legal_name", read_only=True)
     gstin_value = serializers.CharField(source="gstin.gstin", read_only=True)
@@ -582,6 +663,7 @@ class ProviderAuthSessionSerializer(serializers.ModelSerializer):
     otp_request_payload = serializers.SerializerMethodField()
     auth_token_payload = serializers.SerializerMethodField()
     session_metadata = serializers.SerializerMethodField()
+    freshness_summary = serializers.SerializerMethodField()
 
     class Meta:
         model = ProviderAuthSession
@@ -600,6 +682,7 @@ class ProviderAuthSessionSerializer(serializers.ModelSerializer):
             "otp_request_payload",
             "auth_token_payload",
             "session_metadata",
+            "freshness_summary",
             "error_summary",
             "response_contract_confirmed",
             "last_requested_at",
@@ -639,7 +722,7 @@ class ProviderAuthSessionSerializer(serializers.ModelSerializer):
             "available": bool(payload),
             "status_cd": str(payload.get("status_cd") or ""),
             "status_desc": str(payload.get("status_desc") or payload.get("message") or ""),
-            "response_contract_confirmed": bool(obj.response_contract_confirmed),
+            "response_contract_confirmed": is_provider_auth_session_live_enabled(auth_session=obj),
         }
 
     def get_session_metadata(self, obj):
@@ -648,7 +731,20 @@ class ProviderAuthSessionSerializer(serializers.ModelSerializer):
             "available": bool(payload),
             "session_credentials_present": bool(payload.get("session_credentials_present")),
             "resolution_status": str(payload.get("resolution_status") or ""),
-            "response_contract_confirmed": bool(obj.response_contract_confirmed),
+            "response_contract_confirmed": is_provider_auth_session_live_enabled(auth_session=obj),
+        }
+
+    def get_response_contract_confirmed(self, obj):
+        return is_provider_auth_session_live_enabled(auth_session=obj)
+
+    def get_freshness_summary(self, obj):
+        freshness = get_provider_auth_session_freshness(auth_session=obj)
+        return {
+            "max_age_minutes": freshness["max_age_minutes"],
+            "verified_at": freshness["verified_at"],
+            "expires_at": freshness["expires_at"],
+            "is_stale": freshness["is_stale"],
+            "stale_reason": freshness["stale_reason"],
         }
 
 
@@ -677,7 +773,10 @@ class ProviderOTPRequestSerializer(serializers.Serializer):
 
         attrs["client_instance"] = client
         attrs["gstin_instance"] = gstin
-        attrs["email"] = attrs.get("email") or settings.WHITEBOOKS_CONTACT_EMAIL
+        if attrs.get("provider") == ReturnFiling.Provider.WHITEBOOKS:
+            attrs["email"] = settings.WHITEBOOKS_CONTACT_EMAIL
+        else:
+            attrs["email"] = attrs.get("email") or settings.WHITEBOOKS_CONTACT_EMAIL
         if not attrs["email"]:
             raise serializers.ValidationError({"email": "Provider contact email is required."})
         return attrs

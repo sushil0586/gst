@@ -5,6 +5,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import WorkspaceMembership, WorkspaceRole
 from apps.audit_logs.models import AuditLog
 from apps.clients.models import Client
+from apps.common.security import sanitize_json
 from apps.gstins.models import GSTIN
 from apps.organizations.models import Organization
 from apps.workspaces.models import Workspace
@@ -129,7 +130,7 @@ def test_workspace_owner_can_search_taxpayer_for_onboarding(gstins_owner_client,
 
     audit_entry = AuditLog.objects.get(action="gstin.taxpayer_searched")
     assert str(audit_entry.workspace_id_ref) == str(gstins_context["workspace"].id)
-    assert audit_entry.metadata["gstin"] == "29ABCDE1234F1Z5"
+    assert audit_entry.metadata["gstin"] == sanitize_json("29ABCDE1234F1Z5")
 
 
 @pytest.mark.django_db
@@ -165,3 +166,40 @@ def test_owner_can_create_gstin_with_optional_whitebooks_username(gstins_owner_c
 
     gstin = GSTIN.objects.get(gstin="29ABCDE1234F1Z5")
     assert gstin.whitebooks_gst_username == "MH_NT2.1642"
+
+
+@pytest.mark.django_db
+def test_owner_cannot_create_duplicate_gstin_in_same_workspace(gstins_owner_client, gstins_context):
+    GSTIN.objects.create(
+        client=gstins_context["client"],
+        gstin="29ABCDE1234F1Z5",
+        registration_type="regular",
+        state_code="29",
+        created_by=gstins_context["owner"],
+        updated_by=gstins_context["owner"],
+    )
+
+    another_client = Client.objects.create(
+        workspace=gstins_context["workspace"],
+        legal_name="Another GSTIN Client",
+        trade_name="Another Client",
+        client_code="GST002",
+        pan="ABCDE1234G",
+        email="another@gstin.example.com",
+        created_by=gstins_context["owner"],
+        updated_by=gstins_context["owner"],
+    )
+
+    response = gstins_owner_client.post(
+        "/api/v1/gstins/",
+        {
+            "client": str(another_client.id),
+            "gstin": "29ABCDE1234F1Z5",
+            "registration_type": "regular",
+            "state_code": "29",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.data["errors"]["gstin"][0] == "This GSTIN already exists in the selected workspace."

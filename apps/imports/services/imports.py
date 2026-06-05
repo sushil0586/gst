@@ -253,7 +253,7 @@ def enqueue_import_processing(*, import_batch, actor):
         process_import_batch(import_batch_id=import_batch.id, actor_id=actor.id if actor else None)
 
 
-def correct_import_batch_row(*, import_batch, row_number, raw_row, user):
+def correct_import_batch_row(*, import_batch, row_number, raw_row, user, exception_context=None):
     ensure_period_modifiable(import_batch.compliance_period, actor=user, attempted_action="import.correct_row")
     policy = evaluate_import_correction_policy(batch=import_batch, user=user)
     if not policy.can_edit_rows:
@@ -280,6 +280,15 @@ def correct_import_batch_row(*, import_batch, row_number, raw_row, user):
             for key, value in (raw_row or {}).items()
         }
     )
+    normalized_exception_context = exception_context if isinstance(exception_context, dict) else {}
+    if normalized_exception_context.get("allow_period_override"):
+        merged_raw_row["__allow_period_exception"] = "true"
+        merged_raw_row["__period_exception_reason"] = str(normalized_exception_context.get("reason", "") or "")
+        merged_raw_row["__period_exception_category"] = str(normalized_exception_context.get("category", "") or "")
+    else:
+        merged_raw_row.pop("__allow_period_exception", None)
+        merged_raw_row.pop("__period_exception_reason", None)
+        merged_raw_row.pop("__period_exception_category", None)
     sanitized_raw_row = merged_raw_row
     metadata = dict(import_batch.source_metadata or {}) if isinstance(import_batch.source_metadata, dict) else {}
     manual_overrides = metadata.get("manual_row_overrides")
@@ -321,6 +330,7 @@ def correct_import_batch_row(*, import_batch, row_number, raw_row, user):
         metadata={
             "row_number": row_number,
             "corrected_fields": sorted(sanitized_raw_row.keys()),
+            "period_exception": normalized_exception_context if normalized_exception_context.get("allow_period_override") else None,
             "reprocessed_result": result,
             "downstream_invalidations": invalidation_counts,
         },

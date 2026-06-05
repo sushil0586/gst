@@ -6,7 +6,7 @@ from apps.common.models import BaseModel
 
 class GSTIN(BaseModel):
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name="gstins")
-    gstin = models.CharField(max_length=15, unique=True)
+    gstin = models.CharField(max_length=15)
     registration_type = models.CharField(max_length=64, default="regular")
     state_code = models.CharField(max_length=2)
     whitebooks_gst_username = models.CharField(max_length=255, blank=True, default="")
@@ -14,6 +14,9 @@ class GSTIN(BaseModel):
     class Meta:
         db_table = "gstins"
         ordering = ["gstin"]
+        constraints = [
+            models.UniqueConstraint(fields=["client", "gstin"], name="unique_gstin_per_client"),
+        ]
         indexes = [
             models.Index(fields=["client", "gstin"]),
             models.Index(fields=["state_code"]),

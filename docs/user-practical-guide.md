@@ -91,7 +91,9 @@ These pages are directly available from the sidebar:
   - Approval queue
   - Approve, reject, cancel
 - `Notices`
-  - Placeholder workflow shell in current phase
+  - Live notice register
+  - Ownership and due-date tracking
+  - Response-status updates
 - `Reports`
   - Transaction review
   - Transaction correction
@@ -345,8 +347,9 @@ Use for:
 
 Current phase:
 
-- workflow shell only
-- useful for UI coverage, not yet a full operational module
+- live operational register
+- useful for assigning ownership, tracking due dates, and recording notice status
+- keep detailed legal-response drafting and submission evidence in your operating process
 
 ### Settings
 

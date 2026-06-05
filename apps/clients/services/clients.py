@@ -2,7 +2,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from apps.audit_logs.services.audit import record_audit_log
-from apps.clients.models import Client
+from apps.clients.models import Client, ClientContact
 from apps.compliance_periods.models import CompliancePeriod
 from apps.gst_transactions.models import GSTTransaction
 from apps.gstins.models import GSTIN, GSTINTaxpayerProfile
@@ -149,3 +149,54 @@ def upsert_gstin_taxpayer_profile(*, gstin, raw_payload, user):
         metadata={"gstin": gstin.gstin},
     )
     return profile
+
+
+def create_client_contact(*, serializer, user):
+    with transaction.atomic():
+        client = serializer.validated_data["client"]
+        is_primary = serializer.validated_data.get("is_primary", False)
+        if is_primary:
+            ClientContact.objects.filter(client=client, is_active=True, is_primary=True).update(is_primary=False)
+        instance = serializer.save(created_by=user, updated_by=user)
+    record_audit_log(
+        actor=user,
+        action="client_contact.created",
+        entity=instance,
+        workspace_id=instance.client.workspace_id,
+        client_id=instance.client_id,
+        metadata={"name": instance.name, "is_primary": instance.is_primary},
+    )
+    return instance
+
+
+def update_client_contact(*, serializer, user):
+    with transaction.atomic():
+        client = serializer.instance.client
+        is_primary = serializer.validated_data.get("is_primary", serializer.instance.is_primary)
+        if is_primary:
+            ClientContact.objects.filter(client=client, is_active=True, is_primary=True).exclude(pk=serializer.instance.pk).update(is_primary=False)
+        instance = serializer.save(updated_by=user)
+    record_audit_log(
+        actor=user,
+        action="client_contact.updated",
+        entity=instance,
+        workspace_id=instance.client.workspace_id,
+        client_id=instance.client_id,
+        metadata={"name": instance.name, "is_primary": instance.is_primary},
+    )
+    return instance
+
+
+def deactivate_client_contact(*, instance, user):
+    instance.is_active = False
+    instance.is_primary = False
+    instance.updated_by = user
+    instance.save(update_fields=["is_active", "is_primary", "updated_by", "updated_at"])
+    record_audit_log(
+        actor=user,
+        action="client_contact.deleted",
+        entity=instance,
+        workspace_id=instance.client.workspace_id,
+        client_id=instance.client_id,
+        metadata={"name": instance.name},
+    )

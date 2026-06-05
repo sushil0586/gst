@@ -27,6 +27,38 @@ def create_return_filing(*, validated_data, user):
     existing = validated_data.get("existing_filing")
     if existing is not None:
         return existing, False
+    restart_existing = validated_data.get("restart_existing_filing")
+    if restart_existing is not None:
+        latest_attempt = restart_existing.attempts.order_by("-attempt_number").first()
+        with transaction.atomic():
+            restart_existing.updated_by = user
+            restart_existing.error_summary = {}
+            restart_existing.save(update_fields=["updated_by", "error_summary", "updated_at"])
+            if latest_attempt is not None and latest_attempt.status == ReturnFilingAttempt.AttemptStatus.CREATED:
+                latest_attempt.status = ReturnFilingAttempt.AttemptStatus.QUEUED
+                latest_attempt.updated_by = user
+                latest_attempt.save(update_fields=["status", "updated_by", "updated_at"])
+            ReturnFilingEvent.objects.create(
+                return_filing=restart_existing,
+                filing_attempt=latest_attempt,
+                event_type="filing.requeued_after_auth_refresh",
+                old_status=restart_existing.status,
+                new_status=restart_existing.status,
+                actor=user,
+                metadata={"reason": "Fresh provider auth session verified before restarting queued filing."},
+            )
+            record_audit_log(
+                actor=user,
+                action="return_filing.requeued_after_auth_refresh",
+                entity=restart_existing,
+                workspace_id=restart_existing.workspace_id,
+                client_id=restart_existing.client_id,
+                gstin_id=restart_existing.gstin_id,
+                compliance_period_id=restart_existing.compliance_period_id,
+                metadata={"latest_attempt_id": str(latest_attempt.id) if latest_attempt else ""},
+            )
+        enqueue_return_filing(filing=restart_existing, actor=user)
+        return restart_existing, True
 
     prepared_return = validated_data["prepared_return_instance"]
     approval_request = validated_data.get("approval_request_instance")

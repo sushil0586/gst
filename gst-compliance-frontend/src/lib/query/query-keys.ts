@@ -19,6 +19,7 @@ export const queryKeys = {
     all: ["clients"] as const,
     list: (workspaceId?: string) => ["clients", "list", workspaceId ?? "all"] as const,
     detail: (clientId: string) => ["clients", clientId] as const,
+    contacts: (clientId?: string) => ["clients", "contacts", clientId ?? "all"] as const,
   },
   gstins: {
     all: ["gstins"] as const,
@@ -36,6 +37,17 @@ export const queryKeys = {
   approvals: {
     list: (filters?: Record<string, string | undefined>) => ["approvals", "list", filters ?? {}] as const,
     detail: (approvalId: string) => ["approvals", approvalId] as const,
+  },
+  notices: {
+    list: (filters?: Record<string, string | undefined>) => ["notices", "list", filters ?? {}] as const,
+    detail: (noticeId: string) => ["notices", noticeId] as const,
+  },
+  operationalFollowUps: {
+    list: (filters?: Record<string, string | undefined>) => ["operational-follow-ups", "list", filters ?? {}] as const,
+    detail: (followUpId: string) => ["operational-follow-ups", followUpId] as const,
+  },
+  returnStatusRegister: {
+    list: (filters?: Record<string, string | undefined>) => ["return-status-register", "list", filters ?? {}] as const,
   },
   auditLogs: {
     list: (filters?: Record<string, string | undefined>) => ["audit-logs", "list", filters ?? {}] as const,

@@ -4,7 +4,7 @@ from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from apps.accounts.views import CurrentUserView, EmailOrUsernameTokenObtainPairView, SelfRegistrationView
+from apps.accounts.views import ChangePasswordView, CurrentUserView, EmailOrUsernameTokenObtainPairView, ForgotPasswordView, ResetPasswordConfirmView, SelfRegistrationView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -12,6 +12,9 @@ urlpatterns = [
     path("api/v1/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("api/v1/auth/me/", CurrentUserView.as_view(), name="auth_me"),
     path("api/v1/auth/register/", SelfRegistrationView.as_view(), name="auth_register"),
+    path("api/v1/auth/forgot-password/", ForgotPasswordView.as_view(), name="auth_forgot_password"),
+    path("api/v1/auth/reset-password/", ResetPasswordConfirmView.as_view(), name="auth_reset_password"),
+    path("api/v1/auth/change-password/", ChangePasswordView.as_view(), name="auth_change_password"),
     path("api/v1/", include("config.api_urls")),
 ]
 

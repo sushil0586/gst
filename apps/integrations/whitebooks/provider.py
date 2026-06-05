@@ -1,7 +1,8 @@
 from django.conf import settings
 
-from apps.filings.providers.base import FilingProvider, ProviderCapabilitySet, ProviderStageDefinition
 from apps.filings.models import ProviderAuthSession, ReturnFiling
+from apps.filings.providers.base import FilingProvider, ProviderCapabilitySet, ProviderStageDefinition
+from apps.filings.services.auth_session_freshness import get_provider_auth_session_freshness
 from apps.filings.services.rollout import (
     rollout_policy_allows_live_status_sync,
     rollout_policy_allows_live_submission,
@@ -830,6 +831,11 @@ class WhiteBooksProvider(FilingProvider):
         if not auth_session.txn:
             if required:
                 raise WhiteBooksSubmissionError("The latest WhiteBooks auth session does not include a txn value.")
+            return None
+        freshness = get_provider_auth_session_freshness(auth_session=auth_session)
+        if freshness["is_stale"]:
+            if required:
+                raise WhiteBooksSubmissionError(freshness["stale_reason"])
             return None
         return auth_session
 

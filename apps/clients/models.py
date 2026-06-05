@@ -26,3 +26,44 @@ class Client(BaseModel):
 
     def __str__(self):
         return self.legal_name
+
+
+class ClientContact(BaseModel):
+    class PreferredContactMode(models.TextChoices):
+        CALL = "call", "Call"
+        WHATSAPP = "whatsapp", "WhatsApp"
+        EMAIL = "email", "Email"
+        SMS = "sms", "SMS"
+
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name="contacts")
+    name = models.CharField(max_length=255)
+    designation = models.CharField(max_length=128, blank=True)
+    mobile_number = models.CharField(max_length=32, blank=True)
+    alternate_mobile_number = models.CharField(max_length=32, blank=True)
+    email = models.EmailField(blank=True)
+    is_primary = models.BooleanField(default=False)
+    preferred_contact_mode = models.CharField(
+        max_length=32,
+        choices=PreferredContactMode.choices,
+        default=PreferredContactMode.CALL,
+    )
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "client_contacts"
+        ordering = ["-is_primary", "name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["client"],
+                condition=models.Q(is_active=True, is_primary=True),
+                name="unique_active_primary_contact_per_client",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["client", "is_primary"]),
+            models.Index(fields=["mobile_number"]),
+            models.Index(fields=["email"]),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.client.legal_name})"

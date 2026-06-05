@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { format } from "date-fns";
@@ -30,8 +31,6 @@ import { StatusBadge } from "@/components/status/status-badge";
 import { WorkflowTimeline } from "@/components/status/workflow-timeline";
 import { DataTableShell } from "@/components/tables/data-table-shell";
 import { Button } from "@/components/ui/button";
-import { recentActivities as mockActivities } from "@/data/activities";
-import { dashboardMetrics, periodSummary as mockPeriodSummary, workflowSteps as mockWorkflowSteps } from "@/data/dashboard";
 import { useCloseManagerReportQuery, useDashboardSummaryQuery } from "@/features/dashboard";
 import { useFilingOperationsQuery } from "@/features/filings";
 import {
@@ -40,7 +39,6 @@ import {
   useDispatchTransactionRemediationDigestMutation,
   useTransactionRemediationDigestsQuery,
 } from "@/features/imports";
-import { mismatchBreakdown as mockMismatchBreakdown, topMismatchVendors as mockTopMismatchVendors } from "@/data/reconciliationIssues";
 import { getErrorMessage } from "@/lib/api/error-handler";
 import { downloadFile } from "@/lib/api/download";
 import { useSession } from "@/lib/query/session-provider";
@@ -79,6 +77,24 @@ function formatDate(value?: string | null) {
   return format(new Date(value), "dd MMM yyyy");
 }
 
+function buildScopedHref(
+  pathname: string,
+  scope: {
+    workspace?: string;
+    client?: string;
+    gstin?: string;
+    period?: string;
+  },
+) {
+  const params = new URLSearchParams();
+  if (scope.workspace) params.set("workspace", scope.workspace);
+  if (scope.client) params.set("client", scope.client);
+  if (scope.gstin) params.set("gstin", scope.gstin);
+  if (scope.period) params.set("period", scope.period);
+  const query = params.toString();
+  return query ? `${pathname}?${query}` : pathname;
+}
+
 function getFilingStatusVariant(status: string) {
   if (status === "filed" || status === "arn_received") return "success" as const;
   if (status === "failed") return "danger" as const;
@@ -88,7 +104,14 @@ function getFilingStatusVariant(status: string) {
 
 function getWorkflowSteps(summary?: DashboardSummaryRecord | null): WorkflowStep[] {
   if (!summary) {
-    return mockWorkflowSteps;
+    return [
+      { label: "Import", status: "current" },
+      { label: "Reconciliation", status: "upcoming" },
+      { label: "GSTR-1", status: "upcoming" },
+      { label: "GSTR-3B", status: "upcoming" },
+      { label: "Approval", status: "upcoming" },
+      { label: "Filing", status: "upcoming" },
+    ];
   }
 
   const importsReady =
@@ -113,7 +136,32 @@ function getWorkflowSteps(summary?: DashboardSummaryRecord | null): WorkflowStep
 
 function getDashboardMetrics(summary?: DashboardSummaryRecord | null): DashboardMetric[] {
   if (!summary) {
-    return dashboardMetrics;
+    return [
+      {
+        label: "Compliance Health",
+        value: "0%",
+        tone: "warning",
+        detail: "Select a live workspace context to load health metrics.",
+      },
+      {
+        label: "Mismatches",
+        value: "0",
+        tone: "primary",
+        detail: "Reconciliation metrics will appear once live data is available.",
+      },
+      {
+        label: "Open Issues",
+        value: "0",
+        tone: "primary",
+        detail: "Open issue counts depend on live imports, approvals, and returns.",
+      },
+      {
+        label: "Return Status",
+        value: "Not started",
+        tone: "primary",
+        detail: "Return progress will appear once a live period is in motion.",
+      },
+    ];
   }
 
   return [
@@ -146,7 +194,14 @@ function getDashboardMetrics(summary?: DashboardSummaryRecord | null): Dashboard
 
 function getPeriodSummary(summary?: DashboardSummaryRecord | null) {
   if (!summary?.selected_context.compliance_period) {
-    return mockPeriodSummary;
+    return {
+      client: "Not selected",
+      gstin: "Not selected",
+      period: "Not selected",
+      filingFrequency: "Not selected",
+      dueDate: "Not scheduled",
+      currentStatus: "Not selected",
+    };
   }
 
   return {
@@ -282,12 +337,21 @@ export default function DashboardPage() {
   const closeManagerWorkspaceSummary = summary?.workspace_close_manager_summary ?? null;
   const closeManagerReport = closeManagerReportQuery.data;
   const metrics = getDashboardMetrics(summary);
+  const scopedNavigation = useMemo(
+    () => ({
+      workspace: selectedWorkspaceId ?? undefined,
+      client: selectedClientId ?? undefined,
+      gstin: selectedGstinId ?? undefined,
+      period: selectedPeriodId ?? undefined,
+    }),
+    [selectedClientId, selectedGstinId, selectedPeriodId, selectedWorkspaceId],
+  );
   const workflowSteps = getWorkflowSteps(summary);
   const periodSummary = getPeriodSummary(summary);
   const recentActivity = summary?.recent_activity?.length ? summary.recent_activity : [];
   const mismatchBreakdown = summary?.reconciliation_summary.mismatch_breakdown?.length
     ? summary.reconciliation_summary.mismatch_breakdown
-    : mockMismatchBreakdown;
+    : [];
   const topMismatchVendors = summary?.reconciliation_summary.top_vendors?.length
     ? summary.reconciliation_summary.top_vendors.map((entry) => ({
         vendor: entry.vendor,
@@ -297,7 +361,7 @@ export default function DashboardPage() {
         status: entry.status,
         assignedTo: entry.assigned_to,
       }))
-    : mockTopMismatchVendors;
+    : [];
   const closeManagerSummary = summary?.close_management_summary ?? null;
   const remediationDigests = remediationDigestsQuery.data?.items ?? [];
   const focusItems = getFocusItems(summary);
@@ -400,7 +464,7 @@ export default function DashboardPage() {
       {requiresOnboarding ? (
         <EmptyState
           title="Complete your workspace setup"
-          description="Before future modules become useful, create at least one workspace, client, GSTIN, and compliance period."
+          description="Create your first workspace before opening the live compliance modules."
           action={
             <Button asChild>
               <Link href="/onboarding">Finish onboarding</Link>
@@ -416,9 +480,21 @@ export default function DashboardPage() {
         />
       ) : null}
 
+      {selectedWorkspaceId && !selectedClientId && !requiresOnboarding ? (
+        <EmptyState
+          title="Your workspace is ready"
+          description="Next, add your first client from the Clients register. GSTINs and compliance periods can be created from the normal client workflow after that."
+          action={
+            <Button asChild>
+              <Link href="/clients">Open clients</Link>
+            </Button>
+          }
+        />
+      ) : null}
+
       {selectedWorkspaceId && summaryQuery.isLoading ? <LoadingState message="Loading dashboard summary..." /> : null}
       {selectedWorkspaceId && summaryQuery.isError ? (
-        <ErrorState description="We couldn't load the live dashboard summary, so fallback workspace visuals remain available." />
+        <ErrorState description="We couldn't load the live dashboard summary. Resolve the API issue before relying on dashboard metrics." />
       ) : null}
 
       <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
@@ -519,21 +595,21 @@ export default function DashboardPage() {
                 variant="tile"
               />
               <QuickActionButton
-                href="/reconciliation"
+                href={buildScopedHref("/reconciliation", scopedNavigation)}
                 icon={GitCompareArrows}
                 label="Run Reconciliation"
                 description="Match and verify data"
                 variant="tile"
               />
               <QuickActionButton
-                href="/returns"
+                href={buildScopedHref("/returns", scopedNavigation)}
                 icon={ListChecks}
                 label="Prepare Return"
                 description="Generate return draft"
                 variant="tile"
               />
               <QuickActionButton
-                href="/operations"
+                href={buildScopedHref("/operations", scopedNavigation)}
                 icon={ShieldCheck}
                 label="Filing Ops"
                 description="Track returns and status"
@@ -546,7 +622,7 @@ export default function DashboardPage() {
               <div>
                 <p className="text-sm text-indigo-100">Compliance health</p>
                 <p className="mt-3 text-5xl font-semibold tracking-tight">
-                  {summary ? `${summary.compliance_health_score}%` : "85%"}
+                  {summary ? `${summary.compliance_health_score}%` : "0%"}
                 </p>
                 <p className="mt-2 text-sm text-indigo-100/90">
                   {summary?.lock_status.is_locked
@@ -851,10 +927,10 @@ export default function DashboardPage() {
       {selectedWorkspaceId ? (
         <SectionCard
           title="Filing operations queue"
-          description="Support-facing queue of unresolved filing states, recommended next actions, and evidence coverage."
+          description="Operator queue of unresolved filing states, recommended next actions, and proof coverage."
           action={
             <Button asChild size="sm" variant="outline">
-              <Link href="/operations">
+              <Link href={buildScopedHref("/operations", scopedNavigation)}>
                 <ActionLabel kind="open" label="Open operations workspace" />
               </Link>
             </Button>
@@ -893,7 +969,7 @@ export default function DashboardPage() {
                   </div>
                   <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                     <div className="rounded-2xl bg-slate-50 p-3">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Provider stage</p>
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Filing stage</p>
                       <p className="mt-2 font-medium text-slate-900">{filing.support_status_summary.provider_stage || "Pending"}</p>
                     </div>
                     <div className="rounded-2xl bg-slate-50 p-3">
@@ -901,7 +977,7 @@ export default function DashboardPage() {
                       <p className="mt-2 font-medium text-slate-900">{filing.support_status_summary.intervention_count}</p>
                     </div>
                     <div className="rounded-2xl bg-slate-50 p-3">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Evidence</p>
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Proof</p>
                       <p className="mt-2 font-medium text-slate-900">
                         {[
                           filing.support_status_summary.evidence_flags.save_response ? "save" : null,
@@ -915,18 +991,18 @@ export default function DashboardPage() {
                       </p>
                     </div>
                     <div className="rounded-2xl bg-slate-50 p-3">
-                      <p className="text-xs uppercase tracking-wide text-slate-500">Last sync</p>
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Last refresh</p>
                       <p className="mt-2 font-medium text-slate-900">{formatDate(filing.last_status_sync_at)}</p>
                     </div>
                   </div>
-                  <p className="mt-3 text-sm text-slate-700">{filing.support_status_summary.summary_reason || "No backend guidance recorded yet."}</p>
+                  <p className="mt-3 text-sm text-slate-700">{filing.support_status_summary.summary_reason || "No workflow guidance recorded yet."}</p>
                 </div>
               ))}
             </div>
           ) : (
             <EmptyState
               title="No unresolved filing operations"
-              description="Filed or cancelled items are hidden by default. Any filing needing support attention will appear here."
+              description="Filed or cancelled items are hidden by default. Any filing needing operator attention will appear here."
             />
           )}
         </SectionCard>
@@ -1000,57 +1076,68 @@ export default function DashboardPage() {
 
         <SectionCard title="Recent activities" description="Latest operational actions across the workspace.">
           <div className="space-y-4">
-            {(recentActivity.length ? recentActivity : mockActivities).map((activity) => {
-              const isMockActivity = "title" in activity;
-
-              return (
+            {recentActivity.length ? recentActivity.map((activity) => (
               <div key={activity.id} className="flex items-start justify-between gap-4 rounded-2xl border border-slate-100 px-4 py-4">
                 <div>
-                  <p className="text-sm font-semibold text-slate-900">
-                    {isMockActivity ? activity.title : activity.action.replace(/_/g, " ")}
-                  </p>
-                  <p className="mt-1 text-sm leading-6 text-slate-600">
-                    {activity.description}
-                  </p>
+                  <p className="text-sm font-semibold text-slate-900">{activity.action.replace(/_/g, " ")}</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">{activity.description}</p>
                 </div>
-                <span className="text-xs text-slate-400">
-                  {isMockActivity ? activity.timestamp : format(new Date(activity.timestamp), "dd MMM, h:mm a")}
-                </span>
+                <span className="text-xs text-slate-400">{format(new Date(activity.timestamp), "dd MMM, h:mm a")}</span>
               </div>
-              );
-            })}
+            )) : (
+              <EmptyState
+                title="No recent activity yet"
+                description="Operational activity will appear here once imports, reviews, returns, or approvals start moving."
+              />
+            )}
           </div>
         </SectionCard>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
         <SectionCard title="Mismatch category mix" description="Distribution snapshot of the current 2B reconciliation run.">
-          <MismatchDonutChart data={mismatchBreakdown} />
-          <div className="mt-4 grid gap-2">
-            {mismatchBreakdown.map((entry) => (
-              <div key={entry.name} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
-                <div className="flex items-center gap-3">
-                  <span className="size-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
-                  <span className="text-sm text-slate-700">{entry.name}</span>
-                </div>
-                <span className="text-sm font-semibold text-slate-950">{entry.value}</span>
+          {mismatchBreakdown.length ? (
+            <>
+              <MismatchDonutChart data={mismatchBreakdown} />
+              <div className="mt-4 grid gap-2">
+                {mismatchBreakdown.map((entry) => (
+                  <div key={entry.name} className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2">
+                    <div className="flex items-center gap-3">
+                      <span className="size-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
+                      <span className="text-sm text-slate-700">{entry.name}</span>
+                    </div>
+                    <span className="text-sm font-semibold text-slate-950">{entry.value}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          ) : (
+            <EmptyState
+              title="No reconciliation mix yet"
+              description="Run reconciliation for the selected period to see mismatch categories here."
+            />
+          )}
         </SectionCard>
 
         <SectionCard title="Top mismatch vendors" description="High-value vendor exceptions requiring immediate review.">
-          <DataTableShell
-            columns={[
-              { key: "vendor", label: "Vendor" },
-              { key: "gstin", label: "GSTIN" },
-              { key: "issue", label: "Issue" },
-              { key: "taxDifference", label: "Tax Difference" },
-              { key: "status", label: "Status" },
-              { key: "assignedTo", label: "Assigned To" },
-            ]}
-            rows={topMismatchVendors}
-          />
+          {topMismatchVendors.length ? (
+            <DataTableShell
+              columns={[
+                { key: "vendor", label: "Vendor" },
+                { key: "gstin", label: "GSTIN" },
+                { key: "issue", label: "Issue" },
+                { key: "taxDifference", label: "Tax Difference" },
+                { key: "status", label: "Status" },
+                { key: "assignedTo", label: "Assigned To" },
+              ]}
+              rows={topMismatchVendors}
+            />
+          ) : (
+            <EmptyState
+              title="No vendor exceptions yet"
+              description="Vendor-level exception insights will appear after a live reconciliation run produces mismatch data."
+            />
+          )}
         </SectionCard>
       </div>
 

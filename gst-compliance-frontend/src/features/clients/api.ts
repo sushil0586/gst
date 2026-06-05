@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api/client";
 import { unwrapApiData, unwrapPaginatedData } from "@/lib/api/helpers";
 import { queryKeys } from "@/lib/query/query-keys";
-import type { ClientBootstrapRequest, ClientBootstrapResult, ClientRecord } from "@/types/api";
+import type { ClientBootstrapRequest, ClientBootstrapResult, ClientContactRecord, ClientRecord } from "@/types/api";
 
 export function useClientsQuery(workspaceId?: string) {
   return useQuery({
@@ -25,6 +25,19 @@ export function useClientQuery(clientId?: string) {
     queryFn: async () => {
       const response = await apiClient.get(`/clients/${clientId}/`);
       return unwrapApiData<ClientRecord>(response);
+    },
+  });
+}
+
+export function useClientContactsQuery(clientId?: string) {
+  return useQuery({
+    queryKey: queryKeys.clients.contacts(clientId),
+    enabled: Boolean(clientId),
+    queryFn: async () => {
+      const response = await apiClient.get("/client-contacts/", {
+        params: { client: clientId },
+      });
+      return unwrapPaginatedData<ClientContactRecord>(response);
     },
   });
 }
@@ -92,6 +105,50 @@ export function useDeleteClientMutation(workspaceId?: string) {
       queryClient.invalidateQueries({ queryKey: queryKeys.gstins.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.compliancePeriods.all });
       queryClient.invalidateQueries({ queryKey: queryKeys.workspace.context(workspaceId) });
+    },
+  });
+}
+
+export function useCreateClientContactMutation(clientId?: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (
+      payload: Omit<ClientContactRecord, "id" | "client_name" | "workspace" | "is_active" | "created_at" | "updated_at">,
+    ) => {
+      const response = await apiClient.post("/client-contacts/", payload);
+      return unwrapApiData<ClientContactRecord>(response);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.clients.contacts(clientId) });
+    },
+  });
+}
+
+export function useUpdateClientContactMutation(clientId?: string, contactId?: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: Partial<ClientContactRecord>) => {
+      const response = await apiClient.patch(`/client-contacts/${contactId}/`, payload);
+      return unwrapApiData<ClientContactRecord>(response);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.clients.contacts(clientId) });
+    },
+  });
+}
+
+export function useDeleteClientContactMutation(clientId?: string) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (contactId: string) => {
+      await apiClient.delete(`/client-contacts/${contactId}/`);
+      return contactId;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.clients.contacts(clientId) });
     },
   });
 }

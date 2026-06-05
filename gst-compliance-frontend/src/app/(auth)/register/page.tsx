@@ -46,7 +46,7 @@ export default function RegisterPage() {
       const user = await authService.register(values);
       queryClient.setQueryData(queryKeys.auth.me, user);
       toast.success("Workspace created successfully.");
-      router.push("/onboarding");
+      router.push("/dashboard");
     } catch (error) {
       toast.error(getErrorMessage(error));
     }

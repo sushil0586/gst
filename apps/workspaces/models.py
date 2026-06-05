@@ -9,6 +9,14 @@ class Workspace(BaseModel):
     name = models.CharField(max_length=255)
     code = models.CharField(max_length=50)
     timezone = models.CharField(max_length=64, default="Asia/Kolkata")
+    office_label = models.CharField(max_length=255, blank=True, default="")
+    address_line_1 = models.CharField(max_length=255, blank=True, default="")
+    address_line_2 = models.CharField(max_length=255, blank=True, default="")
+    city = models.CharField(max_length=128, blank=True, default="")
+    state = models.CharField(max_length=128, blank=True, default="")
+    postal_code = models.CharField(max_length=20, blank=True, default="")
+    contact_email = models.EmailField(blank=True, default="")
+    contact_phone = models.CharField(max_length=32, blank=True, default="")
 
     class Meta:
         db_table = "workspaces"

@@ -1,26 +1,34 @@
 "use client";
 
+import Link from "next/link";
 import { MailCheck } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
 
+import { authService } from "@/lib/auth/auth-service";
+import { getErrorMessage } from "@/lib/api/error-handler";
+import { forgotPasswordSchema, type ForgotPasswordSchema } from "@/lib/validations/auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { forgotPasswordSchema, type ForgotPasswordSchema } from "@/lib/validations/auth";
 
 export default function ForgotPasswordPage() {
   const form = useForm<ForgotPasswordSchema>({
     resolver: zodResolver(forgotPasswordSchema),
     defaultValues: {
-      email: "owner@example.com",
+      email: "",
     },
   });
 
-  const onSubmit = form.handleSubmit((values) => {
-    toast.success(`Mock reset link sent to ${values.email}`);
+  const onSubmit = form.handleSubmit(async (values) => {
+    try {
+      await authService.forgotPassword(values);
+      toast.success("If your account exists, a password reset link has been sent.");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
   });
 
   return (
@@ -33,23 +41,26 @@ export default function ForgotPasswordPage() {
           <div>
             <CardTitle className="text-2xl font-semibold text-slate-950">Reset access</CardTitle>
             <p className="mt-2 text-sm leading-6 text-slate-600">
-              We’ll send a secure mock reset instruction to your registered email.
+              Enter your workspace email and we will send a secure password reset link if your account exists.
             </p>
           </div>
         </CardHeader>
-        <CardContent className="px-6 py-6">
+        <CardContent className="space-y-4 px-6 py-6">
           <form className="space-y-4" onSubmit={onSubmit}>
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
-              <Input id="email" {...form.register("email")} />
+              <Input id="email" type="email" {...form.register("email")} />
               {form.formState.errors.email ? (
                 <p className="text-xs text-rose-600">{form.formState.errors.email.message}</p>
               ) : null}
             </div>
             <Button className="h-10 w-full rounded-xl" type="submit">
-              Send reset link
+              {form.formState.isSubmitting ? "Sending..." : "Send reset link"}
             </Button>
           </form>
+          <Button asChild variant="ghost" className="w-full">
+            <Link href="/login">Back to sign in</Link>
+          </Button>
         </CardContent>
       </Card>
     </div>

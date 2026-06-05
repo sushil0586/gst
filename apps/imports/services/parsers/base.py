@@ -4,6 +4,7 @@ import re
 from collections import Counter
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from calendar import monthrange
 
 from django.utils import timezone
 from openpyxl import load_workbook
@@ -74,6 +75,7 @@ class BaseImportParser:
     def validate_row(self, row_number, normalized_row, raw_row):
         issues = []
         document_group_key = self._transaction_group_key(normalized_row)
+        period_exception = self._extract_period_exception(raw_row)
 
         if not normalized_row["document_number"]:
             issues.append(self._issue(row_number, "document_number", "required", "Document number is required.", raw_row))
@@ -103,6 +105,16 @@ class BaseImportParser:
 
         if normalized_row["document_date"] is None:
             issues.append(self._issue(row_number, "document_date", "required", "Document date is required.", raw_row))
+        elif not self._is_document_date_within_period(normalized_row["document_date"]) and not period_exception["allowed"]:
+            issues.append(
+                self._issue(
+                    row_number,
+                    "document_date",
+                    "period_mismatch",
+                    f"Document date must fall within the selected compliance period {self.import_batch.compliance_period.period}.",
+                    raw_row,
+                )
+            )
 
         if self.require_counterparty_gstin and not normalized_row["counterparty_gstin"]:
             issues.append(
@@ -254,6 +266,14 @@ class BaseImportParser:
             metadata["supply_category"] = supply_category
         if ecommerce_gstin:
             metadata["ecommerce_gstin"] = ecommerce_gstin
+        period_exception = self._extract_period_exception(row)
+        if period_exception["allowed"]:
+            metadata["period_exception"] = {
+                "allowed": True,
+                "reason": period_exception["reason"],
+                "category": period_exception["category"],
+                "selected_period": self.import_batch.compliance_period.period,
+            }
 
         return {
             "transaction_type": self.transaction_type,
@@ -612,3 +632,33 @@ class BaseImportParser:
 
     def _add_decimals(self, left, right):
         return (left or Decimal("0.00")) + (right or Decimal("0.00"))
+
+    def _is_document_date_within_period(self, document_date):
+        if document_date is None:
+            return False
+        period_value = getattr(self.import_batch.compliance_period, "period", "")
+        try:
+            year, month = [int(part) for part in str(period_value).split("-", 1)]
+        except (TypeError, ValueError):
+            return True
+
+        start_date = date(year, month, 1)
+        end_date = date(year, month, monthrange(year, month)[1])
+        return start_date <= document_date <= end_date
+
+    def _extract_period_exception(self, raw_row):
+        if not isinstance(raw_row, dict):
+            return {"allowed": False, "reason": "", "category": ""}
+
+        allow_value = self._coerce_string(raw_row.get("__allow_period_exception")).lower()
+        allowed = allow_value in {"true", "1", "yes", "y"}
+        reason = self._coerce_string(raw_row.get("__period_exception_reason"))
+        category = self._coerce_string(raw_row.get("__period_exception_category"))
+
+        if not allowed or not reason:
+          return {"allowed": False, "reason": "", "category": ""}
+        return {
+            "allowed": True,
+            "reason": reason,
+            "category": category,
+        }

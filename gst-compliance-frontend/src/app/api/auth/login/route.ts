@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { buildBackendErrorPayload, parseBackendResponse } from "@/lib/server/backend-response";
 import { setSessionCookies } from "@/lib/server/session";
 
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000/api/v1";
@@ -19,11 +20,22 @@ export async function POST(request: Request) {
     },
   );
 
-  const payload = await backendResponse.json();
+  const parsed = await parseBackendResponse(backendResponse);
   if (!backendResponse.ok) {
-    return NextResponse.json(payload, { status: backendResponse.status });
+    return NextResponse.json(
+      buildBackendErrorPayload(parsed, "Login request failed."),
+      { status: backendResponse.status },
+    );
   }
 
-  await setSessionCookies(payload.access, payload.refresh);
+  const payload = parsed.json;
+  if (!payload?.access || !payload?.user) {
+    return NextResponse.json(
+      { message: "Backend login response was incomplete or invalid." },
+      { status: 502 },
+    );
+  }
+
+  await setSessionCookies(String(payload.access), typeof payload.refresh === "string" ? payload.refresh : null);
   return NextResponse.json({ user: payload.user });
 }

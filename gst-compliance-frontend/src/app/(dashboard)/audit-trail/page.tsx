@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/common/empty-state";
@@ -26,12 +27,30 @@ function formatDateTime(value?: string | null) {
 }
 
 export default function AuditTrailPage() {
-  const { selectedWorkspaceId, selectedClientId, selectedGstinId, selectedPeriodId } = useWorkspaceContext();
+  const searchParams = useSearchParams();
+  const {
+    workspaces,
+    clients,
+    gstins,
+    periods,
+    selectedWorkspaceId,
+    selectedClientId,
+    selectedGstinId,
+    selectedPeriodId,
+    setSelectedWorkspaceId,
+    setSelectedClientId,
+    setSelectedGstinId,
+    setSelectedPeriodId,
+  } = useWorkspaceContext();
   const [action, setAction] = useState("");
   const [entityType, setEntityType] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedLogId, setSelectedLogId] = useState<string | null>(null);
+  const queryWorkspaceId = searchParams.get("workspace");
+  const queryClientId = searchParams.get("client");
+  const queryGstinId = searchParams.get("gstin");
+  const queryPeriodId = searchParams.get("period") ?? searchParams.get("compliance_period");
 
   const filters = useMemo(
     () => ({
@@ -51,6 +70,41 @@ export default function AuditTrailPage() {
   const auditLogs = auditLogsQuery.data?.items ?? [];
   const selectedLogQuery = useAuditLogQuery(selectedLogId ?? undefined);
   const selectedLog = selectedLogQuery.data ?? null;
+
+  useEffect(() => {
+    if (queryWorkspaceId && queryWorkspaceId !== selectedWorkspaceId && workspaces.some((workspace) => workspace.id === queryWorkspaceId)) {
+      setSelectedWorkspaceId(queryWorkspaceId);
+      return;
+    }
+    if (queryClientId && queryClientId !== selectedClientId && clients.some((client) => client.id === queryClientId)) {
+      setSelectedClientId(queryClientId);
+      return;
+    }
+    if (queryGstinId && queryGstinId !== selectedGstinId && gstins.some((gstin) => gstin.id === queryGstinId)) {
+      setSelectedGstinId(queryGstinId);
+      return;
+    }
+    if (queryPeriodId && queryPeriodId !== selectedPeriodId && periods.some((period) => period.id === queryPeriodId)) {
+      setSelectedPeriodId(queryPeriodId);
+    }
+  }, [
+    clients,
+    gstins,
+    periods,
+    queryClientId,
+    queryGstinId,
+    queryPeriodId,
+    queryWorkspaceId,
+    selectedClientId,
+    selectedGstinId,
+    selectedPeriodId,
+    selectedWorkspaceId,
+    setSelectedClientId,
+    setSelectedGstinId,
+    setSelectedPeriodId,
+    setSelectedWorkspaceId,
+    workspaces,
+  ]);
 
   const handleExport = async () => {
     if (!selectedWorkspaceId) {
@@ -86,10 +140,10 @@ export default function AuditTrailPage() {
         actions={[{ label: "Export XLSX", onClick: handleExport, disabled: !selectedWorkspaceId }]}
       />
 
-      <SectionCard title="Audit filters" description="Narrow the timeline by action, entity type, and date range.">
+      <SectionCard title="Audit filters" description="Narrow the timeline by action, work item type, and date range.">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <Input value={action} onChange={(event) => setAction(event.target.value)} placeholder="Action contains..." />
-          <Input value={entityType} onChange={(event) => setEntityType(event.target.value)} placeholder="Entity type..." />
+          <Input value={entityType} onChange={(event) => setEntityType(event.target.value)} placeholder="Work item type..." />
           <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
           <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
         </div>
@@ -132,7 +186,7 @@ export default function AuditTrailPage() {
             </Table>
           </div>
         ) : (
-          <EmptyState title="No audit logs match these filters" description="Try broadening the date range or clearing action/entity filters." />
+          <EmptyState title="No audit logs match these filters" description="Try broadening the date range or clearing action/work item filters." />
         )}
       </SectionCard>
 
@@ -153,10 +207,10 @@ export default function AuditTrailPage() {
                   <div className="grid gap-4 md:grid-cols-2 text-sm">
                     <div className="space-y-3">
                       <div><span className="text-slate-500">Actor:</span> <span className="font-medium text-slate-900">{selectedLog.actor_name ?? "System"}</span></div>
-                      <div><span className="text-slate-500">Entity:</span> <span className="font-medium text-slate-900">{selectedLog.entity_type}</span></div>
+                      <div><span className="text-slate-500">Work item:</span> <span className="font-medium text-slate-900">{selectedLog.entity_type}</span></div>
                     </div>
                     <div className="space-y-3">
-                      <div><span className="text-slate-500">Entity ID:</span> <span className="font-medium text-slate-900">{selectedLog.entity_id}</span></div>
+                      <div><span className="text-slate-500">Work item ID:</span> <span className="font-medium text-slate-900">{selectedLog.entity_id}</span></div>
                       <div><span className="text-slate-500">Created:</span> <span className="font-medium text-slate-900">{formatDateTime(selectedLog.created_at)}</span></div>
                     </div>
                   </div>

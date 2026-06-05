@@ -164,17 +164,18 @@ export default function OperationsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Filing Operations"
-        description="Support-facing filing queue for unresolved provider states, intervention depth, evidence coverage, and recommended next actions."
+        description="Operator filing queue for unresolved filing states, intervention depth, proof coverage, and recommended next actions."
+        actions={[{ label: "Open Follow-ups", href: "/operations/follow-ups" }]}
       />
 
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
         <div className="panel-card-hero overflow-hidden px-6 py-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="max-w-2xl">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-100">Support command desk</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-indigo-100">Operations command desk</p>
               <h2 className="mt-4 text-3xl font-semibold tracking-tight">Unresolved filing states in one queue</h2>
               <p className="mt-3 max-w-xl text-sm leading-7 text-indigo-100/95">
-                This workspace is for operational intervention only: retrying safe failures, resyncing provider status, and escalating filing issues with preserved evidence.
+                This workspace is for operational intervention only: retrying safe failures, refreshing filing status, and escalating filing issues with preserved proof.
               </p>
             </div>
             <div className="rounded-3xl bg-white/10 p-4 ring-1 ring-white/10 backdrop-blur-sm">
@@ -193,21 +194,21 @@ export default function OperationsPage() {
               <p className="mt-1 text-sm text-indigo-100/90">Safe retry candidates after review.</p>
             </div>
             <div className="rounded-2xl bg-white/10 px-4 py-3">
-              <p className="text-xs uppercase tracking-[0.18em] text-indigo-100">Status resync</p>
+              <p className="text-xs uppercase tracking-[0.18em] text-indigo-100">Status refresh</p>
               <p className="mt-2 text-lg font-semibold">{stats.resync}</p>
-              <p className="mt-1 text-sm text-indigo-100/90">Filings waiting on provider confirmation.</p>
+              <p className="mt-1 text-sm text-indigo-100/90">Filings waiting on confirmation.</p>
             </div>
             <div className="rounded-2xl bg-white/10 px-4 py-3">
               <p className="text-xs uppercase tracking-[0.18em] text-indigo-100">Manual review</p>
               <p className="mt-2 text-lg font-semibold">{stats.review}</p>
-              <p className="mt-1 text-sm text-indigo-100/90">Failures that need support judgment before replay.</p>
+              <p className="mt-1 text-sm text-indigo-100/90">Failures that need operator judgment before replay.</p>
             </div>
           </div>
         </div>
 
         <SectionCard
-          title="Support workflow"
-          description="Keep actions disciplined so evidence and incident history stay clean."
+          title="Operations workflow"
+          description="Keep actions disciplined so proof and incident history stay clean."
           variant="soft"
         >
           <div className="space-y-3">
@@ -217,7 +218,7 @@ export default function OperationsPage() {
               </div>
               <div>
                 <p className="text-sm font-semibold text-slate-900">Retry only safe failures</p>
-                <p className="mt-1 text-sm leading-6 text-slate-600">Use retry when the backend explicitly marks the run as safe to replay.</p>
+                <p className="mt-1 text-sm leading-6 text-slate-600">Use retry only when the system explicitly marks the run as safe to replay.</p>
               </div>
             </div>
             <div className="flex items-start gap-3 rounded-2xl bg-slate-50 px-4 py-4">
@@ -225,8 +226,8 @@ export default function OperationsPage() {
                 <Waypoints className="size-4" />
               </div>
               <div>
-                <p className="text-sm font-semibold text-slate-900">Resync before escalating</p>
-                <p className="mt-1 text-sm leading-6 text-slate-600">If the provider may already be processing, resync status before duplicating actions.</p>
+                <p className="text-sm font-semibold text-slate-900">Refresh before escalating</p>
+                <p className="mt-1 text-sm leading-6 text-slate-600">If the filing may already be processing, refresh status before duplicating actions.</p>
               </div>
             </div>
             <div className="flex items-start gap-3 rounded-2xl bg-slate-50 px-4 py-4">
@@ -243,12 +244,12 @@ export default function OperationsPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
-        <StatCard label="Retry Recommended" value={String(stats.needsRetry)} detail="Filings the backend marked as safe to retry after operational review." tone="warning" variant="soft" icon={RefreshCcw} />
-        <StatCard label="Resync Recommended" value={String(stats.resync)} detail="Filings awaiting ARN or provider status confirmation before another action." tone="primary" variant="soft" icon={TimerReset} />
-        <StatCard label="Review Required" value={String(stats.review)} detail="Provider failures that need support-led review before any replay or requeue." tone="danger" variant="soft" icon={Siren} />
+        <StatCard label="Retry Recommended" value={String(stats.needsRetry)} detail="Filings marked as safe to retry after operational review." tone="warning" variant="soft" icon={RefreshCcw} />
+        <StatCard label="Refresh Recommended" value={String(stats.resync)} detail="Filings awaiting ARN or status confirmation before another action." tone="primary" variant="soft" icon={TimerReset} />
+        <StatCard label="Review Required" value={String(stats.review)} detail="Filing issues that need operator review before any replay or requeue." tone="danger" variant="soft" icon={Siren} />
       </div>
 
-      <SectionCard title="Operations filters" description="Focus the support queue by filing state, return type, and whether resolved items should remain visible." variant="soft">
+      <SectionCard title="Operations filters" description="Focus the operations queue by filing state, return type, and whether resolved items should remain visible." variant="soft">
         <div className="grid gap-3 md:grid-cols-3">
           <Select value={status} onValueChange={setStatus}>
             <SelectTrigger className="h-10 bg-slate-50"><SelectValue placeholder="Filing status" /></SelectTrigger>
@@ -274,7 +275,7 @@ export default function OperationsPage() {
 
       <SectionCard
         title="Operations queue"
-        description="Backend-curated filing operations feed with recommended next steps and support evidence coverage."
+        description="Curated filing operations feed with recommended next steps and proof coverage."
         action={
           <Button asChild size="sm" variant="outline">
             <Link href="/returns">
@@ -296,11 +297,11 @@ export default function OperationsPage() {
                 <TableRow className="hover:bg-transparent">
                   <TableHead>Client / Return</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Provider Stage</TableHead>
+                  <TableHead>Filing Stage</TableHead>
                   <TableHead>Recommended</TableHead>
                   <TableHead>Interventions</TableHead>
-                  <TableHead>Evidence</TableHead>
-                  <TableHead>Last Sync</TableHead>
+                  <TableHead>Proof</TableHead>
+                  <TableHead>Last Refresh</TableHead>
                   <TableHead>Inspect</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -392,41 +393,41 @@ export default function OperationsPage() {
                           <div className="grid gap-4 p-4 xl:grid-cols-[1.05fr_0.95fr]">
                             <div className="space-y-4">
                               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                <p className="text-sm font-semibold text-slate-900">Support status summary</p>
-                                <p className="mt-2 text-sm text-slate-700">{filing.support_status_summary.summary_reason || "No backend guidance recorded yet."}</p>
+                                <p className="text-sm font-semibold text-slate-900">Operator status summary</p>
+                                <p className="mt-2 text-sm text-slate-700">{filing.support_status_summary.summary_reason || "No workflow guidance recorded yet."}</p>
                                 {filing.support_status_summary.latest_message ? (
                                   <p className="mt-2 text-sm text-slate-600">{filing.support_status_summary.latest_message}</p>
                                 ) : null}
                                 {filing.return_type === "gstr3b" && filing.support_status_summary.provider_stage === "draft_saved" ? (
                                   <p className="mt-2 text-sm text-slate-600">
-                                    This GSTR-3B is saved at provider draft stage only. Liability offset and final filing are still pending.
+                                    This GSTR-3B is saved at draft stage only. Liability offset and final filing are still pending.
                                   </p>
                                 ) : null}
                                 {filing.return_type === "gstr3b" && filing.support_status_summary.provider_stage === "offset_applied" ? (
                                   <p className="mt-2 text-sm text-slate-600">
-                                    This GSTR-3B has completed provider offset. Final filing is still pending.
+                                    This GSTR-3B has completed offset. Final filing is still pending.
                                   </p>
                                 ) : null}
                                 {filing.return_type === "gstr3b" && filing.support_status_summary.provider_stage === "file_requested" ? (
                                   <p className="mt-2 text-sm text-slate-600">
-                                    This GSTR-3B has sent the final filing request to the provider. Keep it in confirmation-pending state until ARN or a terminal rejection is synced back.
+                                    This GSTR-3B has sent the final filing request. Keep it in confirmation-pending state until ARN or a terminal rejection is refreshed back.
                                   </p>
                                 ) : null}
                               </div>
                               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                <p className="text-sm font-semibold text-slate-900">Provider evidence snapshot</p>
+                                <p className="text-sm font-semibold text-slate-900">Filing activity snapshot</p>
                                 <p className="mt-2 text-sm text-slate-600">
                                   Stage: {getProviderStageLabel(filing.provider_evidence_summary.provider_stage || "", filing.return_type)}
                                 </p>
                                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                                   <div className="rounded-2xl bg-slate-50 p-3">
-                                    <p className="text-xs uppercase tracking-wide text-slate-500">Operations completed</p>
+                                      <p className="text-xs uppercase tracking-wide text-slate-500">Steps completed</p>
                                     <p className="mt-2 text-sm font-medium text-slate-900">
                                       {filing.provider_evidence_summary.operations_completed.join(", ") || "None"}
                                     </p>
                                   </div>
                                   <div className="rounded-2xl bg-slate-50 p-3">
-                                    <p className="text-xs uppercase tracking-wide text-slate-500">Operations failed</p>
+                                      <p className="text-xs uppercase tracking-wide text-slate-500">Steps failed</p>
                                     <p className="mt-2 text-sm font-medium text-slate-900">
                                       {filing.provider_evidence_summary.operations_failed.join(", ") || "None"}
                                     </p>
@@ -434,7 +435,7 @@ export default function OperationsPage() {
                                 </div>
                                 {filing.provider_evidence_summary.latest_failure?.message ? (
                                   <p className="mt-3 text-sm text-rose-700">
-                                    Failure: {filing.provider_evidence_summary.latest_failure.message}
+                                    Issue: {filing.provider_evidence_summary.latest_failure.message}
                                     {filing.provider_evidence_summary.latest_failure.code ? ` (${filing.provider_evidence_summary.latest_failure.code})` : ""}
                                   </p>
                                 ) : null}
@@ -481,13 +482,13 @@ export default function OperationsPage() {
                                 </div>
                               ) : null}
                               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                <p className="text-sm font-semibold text-slate-900">Tenant rollout</p>
+                                <p className="text-sm font-semibold text-slate-900">Live rollout</p>
                                 <p className="mt-2 text-sm text-slate-700">
                                   {filing.rollout_policy_summary.enforced
                                     ? filing.rollout_policy_summary.policy_present
-                                      ? "Live filing is controlled by an active tenant rollout policy for this context."
-                                      : "Tenant rollout enforcement is on, but no active rollout policy matches this filing context."
-                                    : "Tenant rollout enforcement is currently off. Global provider flags still apply."}
+                                      ? "Live filing is controlled by an active rollout policy for this context."
+                                      : "Rollout enforcement is on, but no active rollout policy matches this filing context."
+                                    : "Rollout enforcement is currently off. Global live-filing controls still apply."}
                                 </p>
                                 <div className="mt-3 grid gap-3 md:grid-cols-2">
                                   <div className="rounded-2xl bg-slate-50 p-3">
@@ -497,7 +498,7 @@ export default function OperationsPage() {
                                     </p>
                                   </div>
                                   <div className="rounded-2xl bg-slate-50 p-3">
-                                    <p className="text-xs uppercase tracking-wide text-slate-500">Status sync</p>
+                                    <p className="text-xs uppercase tracking-wide text-slate-500">Status refresh</p>
                                     <p className="mt-2 text-sm font-medium text-slate-900">
                                       {filing.rollout_policy_summary.live_status_sync_allowed ? "allowed" : "blocked"}
                                     </p>
@@ -515,7 +516,7 @@ export default function OperationsPage() {
                             </div>
                             <div className="space-y-4">
                               <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                                <p className="text-sm font-semibold text-slate-900">Support actions</p>
+                                <p className="text-sm font-semibold text-slate-900">Available actions</p>
                                 <div className="mt-3 space-y-3">
                                   {filing.support_actions_summary.actions.map((action) => (
                                     <div key={action.action} className="rounded-2xl bg-slate-50 p-3">
@@ -546,7 +547,7 @@ export default function OperationsPage() {
                                     ))}
                                   </div>
                                 ) : (
-                                  <p className="mt-3 text-sm text-slate-600">No support interventions recorded yet.</p>
+                                  <p className="mt-3 text-sm text-slate-600">No interventions recorded yet.</p>
                                 )}
                               </div>
                               <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -621,13 +622,13 @@ export default function OperationsPage() {
               <Textarea
                 value={requeueComments}
                 onChange={(event) => setRequeueComments(event.target.value)}
-                placeholder="Summarize the provider review, support decision, and why this filing is being requeued..."
+                placeholder="Summarize the filing review, decision, and why this filing is being requeued..."
                 className="min-h-32 bg-slate-50"
               />
             </div>
           </AppModalBody>
           <AppModalFooter>
-            <div className="text-sm text-slate-500">This action will create a new filing attempt and preserve the support review trail.</div>
+            <div className="text-sm text-slate-500">This action will create a new filing attempt and preserve the review trail.</div>
             <div className="flex flex-col-reverse gap-2 sm:flex-row">
               <Button variant="outline" onClick={() => { setSelectedRequeueFiling(null); setRequeueComments(""); }}>
                 <ActionLabel kind="cancel" label="Cancel" />

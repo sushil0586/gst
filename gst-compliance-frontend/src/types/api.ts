@@ -43,6 +43,14 @@ export type WorkspaceAccessRecord = {
   name: string;
   code: string;
   timezone: string;
+  office_label?: string;
+  address_line_1?: string;
+  address_line_2?: string;
+  city?: string;
+  state?: string;
+  postal_code?: string;
+  contact_email?: string;
+  contact_phone?: string;
   organization_id: string;
   organization_name: string;
   role: string | null;
@@ -88,6 +96,14 @@ export type WorkspaceRecord = {
   name: string;
   code: string;
   timezone: string;
+  office_label: string;
+  address_line_1: string;
+  address_line_2: string;
+  city: string;
+  state: string;
+  postal_code: string;
+  contact_email: string;
+  contact_phone: string;
   is_active: boolean;
 };
 
@@ -110,6 +126,24 @@ export type ClientRecord = {
   transaction_count?: number;
   can_delete?: boolean;
   is_active: boolean;
+};
+
+export type ClientContactRecord = {
+  id: string;
+  client: string;
+  client_name?: string;
+  workspace?: string;
+  name: string;
+  designation: string;
+  mobile_number: string;
+  alternate_mobile_number: string;
+  email: string;
+  is_primary: boolean;
+  preferred_contact_mode: "call" | "whatsapp" | "email" | "sms";
+  notes: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
 };
 
 export type ClientBootstrapRequest = {
@@ -192,6 +226,102 @@ export type CompliancePeriodRecord = {
   locked_by?: number | null;
   locked_by_name?: string | null;
   is_active: boolean;
+};
+
+export type NoticeRecordApi = {
+  id: string;
+  gstin: string;
+  gstin_value?: string;
+  client_id?: string;
+  client_name?: string;
+  workspace_id?: string;
+  reference_number: string;
+  title: string;
+  description: string;
+  status: string;
+  due_date: string | null;
+  assigned_to: number | null;
+  assigned_to_name?: string | null;
+  assigned_to_email?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type OperationalFollowUpRecord = {
+  id: string;
+  workspace: string;
+  client: string;
+  client_name?: string;
+  gstin: string | null;
+  gstin_value?: string | null;
+  compliance_period: string | null;
+  period_label?: string | null;
+  return_preparation: string | null;
+  return_filing: string | null;
+  notice: string | null;
+  contact: string | null;
+  contact_name?: string | null;
+  contact_mobile?: string | null;
+  contact_email?: string | null;
+  contact_name_snapshot: string;
+  mobile_number_snapshot: string;
+  email_snapshot: string;
+  follow_up_type:
+    | "data_request"
+    | "approval_request"
+    | "otp_coordination"
+    | "payment_confirmation"
+    | "notice_document_request"
+    | "return_filing_confirmation"
+    | "mismatch_resolution"
+    | "general";
+  reason: string;
+  pending_with: "customer" | "ca_team" | "reviewer" | "provider" | "government_portal";
+  status: "open" | "in_progress" | "waiting" | "completed" | "cancelled" | "escalated";
+  priority: "low" | "medium" | "high" | "critical";
+  title: string;
+  notes: string;
+  next_action: string;
+  due_at: string;
+  completed_at: string | null;
+  last_contacted_at: string | null;
+  assigned_to: number | null;
+  assigned_to_name?: string | null;
+  completed_by: number | null;
+  escalated_at: string | null;
+  closed_reason: string;
+  return_type?: string | null;
+  is_overdue: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ReturnStatusRegisterRecord = {
+  id: string;
+  workspace: string;
+  workspace_name?: string;
+  client: string;
+  client_name?: string;
+  gstin: string;
+  gstin_value?: string;
+  period: string;
+  return_type: string;
+  status: string;
+  due_date: string | null;
+  preparation_id: string | null;
+  preparation_status: string | null;
+  filing_id: string | null;
+  filing_status: string | null;
+  arn: string | null;
+  filed_at: string | null;
+  owner_name: string | null;
+  blocker_reason: string;
+  pending_with: string;
+  open_follow_up_count: number;
+  overdue_follow_up_count: number;
+  latest_follow_up_title: string | null;
+  status_bucket: "filed" | "customer_pending" | "blocked" | "overdue" | "ready" | "in_progress";
+  is_overdue: boolean;
 };
 
 export type ImportBatchRecord = {
@@ -391,6 +521,21 @@ export type SelfRegistrationPayload = {
   organization_name: string;
   workspace_name: string;
   timezone?: string;
+};
+
+export type ForgotPasswordPayload = {
+  email: string;
+};
+
+export type ResetPasswordPayload = {
+  uid: string;
+  token: string;
+  password: string;
+};
+
+export type ChangePasswordPayload = {
+  current_password: string;
+  new_password: string;
 };
 
 export type TransactionRemediationAssignmentRecord = {
@@ -906,6 +1051,13 @@ export type ProviderAuthSessionRecord = {
   otp_request_payload: Record<string, unknown>;
   auth_token_payload: Record<string, unknown>;
   session_metadata: Record<string, unknown>;
+  freshness_summary: {
+    max_age_minutes: number;
+    verified_at: string | null;
+    expires_at: string | null;
+    is_stale: boolean;
+    stale_reason: string;
+  };
   error_summary: Record<string, unknown>;
   response_contract_confirmed: boolean;
   last_requested_at: string | null;

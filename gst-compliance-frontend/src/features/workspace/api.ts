@@ -67,7 +67,7 @@ export function useCreateWorkspaceMemberMutation(workspaceId?: string) {
 export function useUpdateWorkspaceMemberMutation(workspaceId?: string, memberId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: { role: string }) => {
+    mutationFn: async (payload: { role: string; first_name?: string; last_name?: string; password?: string }) => {
       const response = await apiClient.patch(`/workspace-members/${memberId}/`, payload);
       return unwrapApiData<WorkspaceMemberRecord>(response);
     },

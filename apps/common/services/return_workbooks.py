@@ -33,6 +33,7 @@ def export_gstr1_workbook(*, compliance_period, prepared_return: ReturnPreparati
 
     summary_snapshot = prepared_return.summary_snapshot if prepared_return else {}
     outward_supplies = summary_snapshot.get("outward_supplies", {}) if isinstance(summary_snapshot, dict) else {}
+    period_exceptions = summary_snapshot.get("period_exceptions", {}) if isinstance(summary_snapshot, dict) else {}
     client = compliance_period.gstin.client
     gstin = compliance_period.gstin
 
@@ -80,6 +81,14 @@ def export_gstr1_workbook(*, compliance_period, prepared_return: ReturnPreparati
         title="Validations",
         headers=["Code", "Severity", "Message", "Invoice ID", "Invoice Number", "Field"],
         rows=build_gstr1_validation_rows(transactions),
+    )
+
+    append_data_or_info_sheet(
+        worksheet=workbook.create_sheet("Period Exceptions"),
+        title="Period Exceptions",
+        headers=["Document Number", "Document Date", "Transaction Type", "Category", "Reason", "Selected Period"],
+        rows=build_period_exception_rows(period_exceptions),
+        empty_message="No out-of-period exceptions were captured for this return.",
     )
 
     append_sheet(
@@ -314,6 +323,7 @@ def export_gstr3b_workbook(*, compliance_period, prepared_return: ReturnPreparat
     outward_supplies = summary_snapshot.get("outward_supplies", {}) if isinstance(summary_snapshot, dict) else {}
     itc_summary = summary_snapshot.get("itc_summary", {}) if isinstance(summary_snapshot, dict) else {}
     reconciliation_summary = summary_snapshot.get("reconciliation", {}) if isinstance(summary_snapshot, dict) else {}
+    period_exceptions = summary_snapshot.get("period_exceptions", {}) if isinstance(summary_snapshot, dict) else {}
     client = compliance_period.gstin.client
     gstin = compliance_period.gstin
     latest_run = (
@@ -351,6 +361,7 @@ def export_gstr3b_workbook(*, compliance_period, prepared_return: ReturnPreparat
             ["Deferred / Blocked ITC", itc_summary.get("deferred_blocked_itc", "0.00")],
             ["Net Tax Payable", itc_summary.get("net_tax_payable", "0.00")],
             ["Unresolved Mismatch Count", itc_summary.get("unresolved_mismatch_count", 0)],
+            ["Period Exception Count", period_exceptions.get("count", 0) if isinstance(period_exceptions, dict) else 0],
         ],
     )
 
@@ -512,6 +523,14 @@ def export_gstr3b_workbook(*, compliance_period, prepared_return: ReturnPreparat
         ],
     )
 
+    append_data_or_info_sheet(
+        worksheet=workbook.create_sheet("Period Exceptions"),
+        title="Period Exceptions",
+        headers=["Document Number", "Document Date", "Transaction Type", "Category", "Reason", "Selected Period"],
+        rows=build_period_exception_rows(period_exceptions),
+        empty_message="No out-of-period exceptions were captured for this return.",
+    )
+
     append_sheet(
         worksheet=workbook.create_sheet("Source Transactions"),
         title="Source Transactions",
@@ -590,6 +609,29 @@ def append_data_or_info_sheet(*, worksheet, title: str, headers: list[str], rows
         append_sheet(worksheet=worksheet, title=title, headers=headers, rows=rows)
         return
     append_info_sheet(worksheet=worksheet, title=title, message=empty_message)
+
+
+def build_period_exception_rows(period_exceptions) -> list[list[object]]:
+    if not isinstance(period_exceptions, dict):
+        return []
+    documents = period_exceptions.get("documents")
+    if not isinstance(documents, list):
+        return []
+    rows = []
+    for item in documents:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            [
+                item.get("document_number", ""),
+                item.get("document_date", ""),
+                item.get("transaction_type", ""),
+                str(item.get("category", "general")).replace("_", " "),
+                item.get("reason", ""),
+                item.get("selected_period", ""),
+            ]
+        )
+    return rows
 
 
 def workbook_response(*, workbook: Workbook, filename: str) -> HttpResponse:

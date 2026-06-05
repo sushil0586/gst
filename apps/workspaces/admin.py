@@ -32,14 +32,15 @@ class ImportTemplateInline(admin.TabularInline):
 
 @admin.register(Workspace)
 class WorkspaceAdmin(BaseTenantAdminMixin, admin.ModelAdmin):
-    list_display = ("name", "code", "organization", "timezone", "client_count", "member_count", "is_active")
-    list_filter = ("organization", "timezone", "is_active")
-    search_fields = ("name", "code", "organization__name")
+    list_display = ("name", "office_label", "code", "organization", "city", "timezone", "client_count", "member_count", "is_active")
+    list_filter = ("organization", "timezone", "state", "is_active")
+    search_fields = ("name", "office_label", "code", "organization__name", "city", "contact_email", "contact_phone")
     ordering = ("organization__name", "name")
     autocomplete_fields = ("organization",)
     inlines = [ClientInline, WorkspaceMembershipInline, ImportTemplateInline]
     fieldsets = (
-        (None, {"fields": ("organization", "name", "code", "timezone", "is_active")}),
+        (None, {"fields": ("organization", "name", "office_label", "code", "timezone", "is_active")}),
+        ("Office details", {"fields": ("address_line_1", "address_line_2", "city", "state", "postal_code", "contact_email", "contact_phone")}),
         ("Audit", {"fields": BaseTenantAdminMixin.readonly_fields, "classes": ("collapse",)}),
     )
 

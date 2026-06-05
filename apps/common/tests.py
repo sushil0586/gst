@@ -837,6 +837,7 @@ def test_full_gstr1_workbook_export(dashboard_authenticated_client, dashboard_co
         "Document Summary",
         "Nil Exempt",
         "Validations",
+        "Period Exceptions",
         "1_3_1_3 1 2 3 Taxpayer Details",
         "4 4 B2B",
         "5 5 B2CL (Large)",
@@ -1023,6 +1024,7 @@ def test_full_gstr3b_workbook_export(dashboard_authenticated_client, dashboard_c
         "5.1 Interest Late Fee",
         "6 Payment Of Tax",
         "Reconciliation Impact",
+        "Period Exceptions",
         "Source Transactions",
     ]
     summary_sheet = workbook["Summary"]

@@ -1,3 +1,7 @@
+from django.contrib.auth.password_validation import validate_password
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
 from django.contrib.auth import authenticate, get_user_model
 from rest_framework import exceptions, serializers
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -240,7 +244,59 @@ class WorkspaceMemberCreateSerializer(serializers.Serializer):
 
 
 class WorkspaceMemberUpdateSerializer(serializers.Serializer):
+    first_name = serializers.CharField(max_length=150, required=False)
+    last_name = serializers.CharField(max_length=150, allow_blank=True, required=False)
     role = serializers.ChoiceField(choices=WorkspaceRole.choices, required=False)
+    password = serializers.CharField(min_length=8, write_only=True, required=False)
+
+    def validate_password(self, value):
+        user = self.instance.user if getattr(self, "instance", None) else None
+        validate_password(value, user)
+        return value
+
+
+class ForgotPasswordRequestSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+
+class ResetPasswordConfirmSerializer(serializers.Serializer):
+    uid = serializers.CharField()
+    token = serializers.CharField()
+    password = serializers.CharField(min_length=8, write_only=True)
+
+    def validate(self, attrs):
+        uid = attrs["uid"]
+        token = attrs["token"]
+        password = attrs["password"]
+
+        try:
+            user_id = force_str(urlsafe_base64_decode(uid))
+            user = User.objects.get(pk=user_id)
+        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+            raise serializers.ValidationError({"uid": "Password reset link is invalid."})
+
+        if not default_token_generator.check_token(user, token):
+            raise serializers.ValidationError({"token": "Password reset link is invalid or expired."})
+
+        validate_password(password, user)
+        attrs["user"] = user
+        return attrs
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(min_length=8, write_only=True)
+
+    def validate_current_password(self, value):
+        user = self.context["request"].user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Current password is incorrect.")
+        return value
+
+    def validate_new_password(self, value):
+        user = self.context["request"].user
+        validate_password(value, user)
+        return value
 
 
 class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):

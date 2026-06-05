@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
+import { useSearchParams } from "next/navigation";
 import { AlertTriangle, CircleAlert, Database, GitCompareArrows, Loader2, SearchCheck } from "lucide-react";
 import { toast } from "sonner";
 
@@ -10,17 +11,19 @@ import { ErrorState } from "@/components/common/error-state";
 import { LoadingState } from "@/components/common/loading-state";
 import { PageHeader } from "@/components/common/page-header";
 import { ActionLabel } from "@/components/common/action-label";
-import { AppModalBody, AppModalContent, AppModalHeader } from "@/components/common/app-modal";
+import { AppModalBody, AppModalContent, AppModalFooter, AppModalHeader } from "@/components/common/app-modal";
 import { SectionCard } from "@/components/common/section-card";
 import { StatCard } from "@/components/common/stat-card";
 import { StatusBadge } from "@/components/status/status-badge";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useFetchGstr2BImportBatchMutation, useGstTransactionsQuery } from "@/features/imports";
+import { useProviderAuthSessionsQuery, useRequestProviderOTPMutation, useVerifyProviderOTPMutation } from "@/features/filings";
 import {
   useCreateReconciliationRunMutation,
   useReconciliationRunItemsQuery,
@@ -93,21 +96,91 @@ function actionStatusVariant(status: ReconciliationItemRecord["action_status"]) 
   return "primary" as const;
 }
 
+function hasPeriodException(metadata: Record<string, unknown> | null | undefined) {
+  if (!metadata || typeof metadata !== "object") {
+    return false;
+  }
+  const raw = metadata.period_exception;
+  if (!raw || typeof raw !== "object") {
+    return false;
+  }
+  return (raw as Record<string, unknown>).allowed === true;
+}
+
 export default function ReconciliationPage() {
+  const searchParams = useSearchParams();
   const { user } = useSession();
-  const { selectedWorkspaceId, selectedWorkspace, selectedClientId, selectedClient, selectedGstinId, selectedGstin, selectedPeriodId, selectedPeriod } =
-    useWorkspaceContext();
+  const {
+    workspaces,
+    clients,
+    gstins,
+    periods,
+    selectedWorkspaceId,
+    selectedWorkspace,
+    selectedClientId,
+    selectedClient,
+    selectedGstinId,
+    selectedGstin,
+    selectedPeriodId,
+    selectedPeriod,
+    setSelectedWorkspaceId,
+    setSelectedClientId,
+    setSelectedGstinId,
+    setSelectedPeriodId,
+  } = useWorkspaceContext();
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<ReconciliationItemRecord | null>(null);
   const [matchStatus, setMatchStatus] = useState("all");
   const [actionStatus, setActionStatus] = useState("all");
   const [mismatchReason, setMismatchReason] = useState("all");
   const [search, setSearch] = useState("");
+  const [isFetch2BAuthModalOpen, setIsFetch2BAuthModalOpen] = useState(false);
+  const [pendingFetchAfterOtp, setPendingFetchAfterOtp] = useState(false);
+  const [fetch2BOtp, setFetch2BOtp] = useState("");
+  const queryWorkspaceId = searchParams.get("workspace");
+  const queryClientId = searchParams.get("client");
+  const queryGstinId = searchParams.get("gstin");
+  const queryPeriodId = searchParams.get("period") ?? searchParams.get("compliance_period");
   const [actionForm, setActionForm] = useState({
     action_status: "open" as ReconciliationItemRecord["action_status"],
     assigned_to: "none",
     remarks: "",
   });
+
+  useEffect(() => {
+    if (queryWorkspaceId && queryWorkspaceId !== selectedWorkspaceId && workspaces.some((workspace) => workspace.id === queryWorkspaceId)) {
+      setSelectedWorkspaceId(queryWorkspaceId);
+      return;
+    }
+    if (queryClientId && queryClientId !== selectedClientId && clients.some((client) => client.id === queryClientId)) {
+      setSelectedClientId(queryClientId);
+      return;
+    }
+    if (queryGstinId && queryGstinId !== selectedGstinId && gstins.some((gstin) => gstin.id === queryGstinId)) {
+      setSelectedGstinId(queryGstinId);
+      return;
+    }
+    if (queryPeriodId && queryPeriodId !== selectedPeriodId && periods.some((period) => period.id === queryPeriodId)) {
+      setSelectedPeriodId(queryPeriodId);
+    }
+  }, [
+    clients,
+    gstins,
+    periods,
+    queryClientId,
+    queryGstinId,
+    queryPeriodId,
+    queryWorkspaceId,
+    selectedClientId,
+    selectedGstinId,
+    selectedPeriodId,
+    selectedWorkspaceId,
+    setSelectedClientId,
+    setSelectedGstinId,
+    setSelectedPeriodId,
+    setSelectedWorkspaceId,
+    workspaces,
+  ]);
 
   const runFilters = useMemo(
     () => ({
@@ -152,6 +225,18 @@ export default function ReconciliationPage() {
     gstin: selectedGstinId ?? undefined,
     compliance_period: selectedPeriodId ?? undefined,
   });
+  const providerAuthFilters = useMemo(
+    () => ({
+      workspace: selectedWorkspaceId ?? undefined,
+      client: selectedClientId ?? undefined,
+      gstin: selectedGstinId ?? undefined,
+      provider: "whitebooks" as const,
+    }),
+    [selectedWorkspaceId, selectedClientId, selectedGstinId],
+  );
+  const providerAuthSessionsQuery = useProviderAuthSessionsQuery(providerAuthFilters);
+  const requestProviderOTPMutation = useRequestProviderOTPMutation(providerAuthFilters);
+  const verifyProviderOTPMutation = useVerifyProviderOTPMutation(providerAuthFilters);
   const updateItemMutation = useUpdateReconciliationItemMutation(activeRunId ?? undefined, {
     match_status: matchStatus !== "all" ? matchStatus : undefined,
     action_status: actionStatus !== "all" ? actionStatus : undefined,
@@ -189,6 +274,58 @@ export default function ReconciliationPage() {
     }
   };
 
+  const activeProviderAuthSession = providerAuthSessionsQuery.data?.items[0];
+  const activeProviderAuthFreshness = activeProviderAuthSession?.freshness_summary;
+  const activeProviderAuthReady = Boolean(
+    activeProviderAuthSession?.txn &&
+      activeProviderAuthSession?.response_contract_confirmed &&
+      !activeProviderAuthFreshness?.is_stale,
+  );
+  const activeProviderAuthPending = Boolean(
+    activeProviderAuthSession &&
+      !activeProviderAuthReady &&
+      (activeProviderAuthSession.status === "otp_requested" || activeProviderAuthSession.status === "auth_token_received"),
+  );
+  const canRequestFetch2BOtp = Boolean(
+    selectedWorkspaceId &&
+      selectedClientId &&
+      selectedGstinId &&
+      !requestProviderOTPMutation.isPending &&
+      !verifyProviderOTPMutation.isPending,
+  );
+  const canVerifyFetch2BOtp = Boolean(
+    activeProviderAuthSession?.id &&
+      fetch2BOtp.trim() &&
+      !verifyProviderOTPMutation.isPending &&
+      !requestProviderOTPMutation.isPending,
+  );
+
+  const performFetchGstr2B = async () => {
+    if (!selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId) {
+      toast.error("Select workspace, client, GSTIN, and period before fetching GSTR-2B.");
+      return false;
+    }
+
+    const batch = await fetchGstr2bMutation.mutateAsync({
+      workspace: selectedWorkspaceId,
+      client: selectedClientId,
+      gstin: selectedGstinId,
+      compliance_period: selectedPeriodId,
+      provider: "whitebooks",
+    });
+    toast.success(
+      batch.transaction_count > 0
+        ? `Fetched ${batch.transaction_count} GSTR-2B transaction(s) from the connected filing channel.`
+        : "GSTR-2B fetched from the connected filing channel. Review the imported rows before running reconciliation.",
+    );
+    return true;
+  };
+
+  const openFetch2BAuthModal = (shouldContinueAfterOtp = true) => {
+    setPendingFetchAfterOtp(shouldContinueAfterOtp);
+    setIsFetch2BAuthModalOpen(true);
+  };
+
   const handleFetchGstr2B = async () => {
     if (!selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId) {
       toast.error("Select workspace, client, GSTIN, and period before fetching GSTR-2B.");
@@ -199,19 +336,69 @@ export default function ReconciliationPage() {
       return;
     }
 
+    if (!activeProviderAuthReady) {
+      openFetch2BAuthModal(true);
+      return;
+    }
+
     try {
-      const batch = await fetchGstr2bMutation.mutateAsync({
+      await performFetchGstr2B();
+    } catch (error) {
+      const message = getErrorMessage(error);
+      if (message.toLowerCase().includes("provider auth session") || message.toLowerCase().includes("otp")) {
+        openFetch2BAuthModal(true);
+      }
+      toast.error(getErrorMessage(error));
+    }
+  };
+
+  const handleRequestFetch2BOtp = async () => {
+    if (!selectedWorkspaceId || !selectedClientId || !selectedGstinId) {
+      toast.error("Select workspace, client, and GSTIN before requesting OTP.");
+      return;
+    }
+
+    try {
+      const session = await requestProviderOTPMutation.mutateAsync({
         workspace: selectedWorkspaceId,
         client: selectedClientId,
         gstin: selectedGstinId,
-        compliance_period: selectedPeriodId,
         provider: "whitebooks",
       });
-      toast.success(
-        batch.transaction_count > 0
-          ? `Fetched ${batch.transaction_count} GSTR-2B transaction(s) from WhiteBooks.`
-          : "GSTR-2B fetched from WhiteBooks. Review the imported rows before running reconciliation.",
-      );
+      setFetch2BOtp("");
+      toast.success(session.txn ? "OTP requested. Enter the OTP for this GSTIN to continue." : "OTP requested. Enter the OTP to continue.");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
+  };
+
+  const handleVerifyFetch2BOtp = async () => {
+    if (!activeProviderAuthSession?.id) {
+      toast.error("Request OTP first for this GSTIN.");
+      return;
+    }
+
+    try {
+      const session = await verifyProviderOTPMutation.mutateAsync({
+        sessionId: activeProviderAuthSession.id,
+        otp: fetch2BOtp.trim(),
+        txn: activeProviderAuthSession.txn || undefined,
+      });
+      setFetch2BOtp("");
+
+      if (!session.response_contract_confirmed) {
+        toast.error("OTP was accepted, but this GSTIN session is still not ready. Request OTP again if the status does not refresh.");
+        return;
+      }
+
+      toast.success("Verification complete for this GSTIN. Continuing GSTR-2B fetch...");
+      if (pendingFetchAfterOtp) {
+        const didFetch = await performFetchGstr2B();
+        if (didFetch) {
+          setIsFetch2BAuthModalOpen(false);
+          setPendingFetchAfterOtp(false);
+        }
+      }
     } catch (error) {
       toast.error(getErrorMessage(error));
     }
@@ -260,6 +447,91 @@ export default function ReconciliationPage() {
   const staleRunMessage = run?.invalidation_reason
     ? run.invalidation_reason.replace(/_/g, " ")
     : "Source imports changed after this reconciliation run and the results now need a rerun.";
+  const purchasePeriodExceptionCount = useMemo(
+    () => (purchaseTransactionsQuery.data?.items ?? []).filter((transaction) => hasPeriodException(transaction.metadata)).length,
+    [purchaseTransactionsQuery.data?.items],
+  );
+  const portalPeriodExceptionCount = useMemo(
+    () => (portalTransactionsQuery.data?.items ?? []).filter((transaction) => hasPeriodException(transaction.metadata)).length,
+    [portalTransactionsQuery.data?.items],
+  );
+  const totalPeriodExceptionCount = purchasePeriodExceptionCount + portalPeriodExceptionCount;
+  const fetch2BLatestMessage = useMemo(() => {
+    if (requestProviderOTPMutation.isError) {
+      return {
+        tone: "danger" as const,
+        title: "Couldn’t request OTP",
+        description: getErrorMessage(requestProviderOTPMutation.error),
+      };
+    }
+    if (verifyProviderOTPMutation.isError) {
+      return {
+        tone: "danger" as const,
+        title: "Couldn’t verify OTP",
+        description: getErrorMessage(verifyProviderOTPMutation.error),
+      };
+    }
+    if (providerAuthSessionsQuery.isError) {
+      return {
+        tone: "danger" as const,
+        title: "Couldn’t load session status",
+        description: getErrorMessage(providerAuthSessionsQuery.error),
+      };
+    }
+    if (activeProviderAuthReady) {
+      return {
+        tone: "success" as const,
+        title: "Session ready for this GSTIN",
+        description: pendingFetchAfterOtp
+          ? "Verification is complete. GSTR-2B can be fetched for this GSTIN now."
+          : "A valid WhiteBooks session is already active for this GSTIN for up to 6 hours.",
+      };
+    }
+    if (activeProviderAuthFreshness?.is_stale) {
+      return {
+        tone: "warning" as const,
+        title: "Session expired for this GSTIN",
+        description: activeProviderAuthFreshness.stale_reason || "Request OTP again to continue fetching GSTR-2B.",
+      };
+    }
+    if (activeProviderAuthSession?.error_summary && Object.keys(activeProviderAuthSession.error_summary).length > 0) {
+      return {
+        tone: "danger" as const,
+        title: "Verification is required again",
+        description: String(
+          activeProviderAuthSession.error_summary.message ??
+            activeProviderAuthSession.error_summary.code ??
+            "The current GSTR-2B access session cannot be used. Request OTP again for this GSTIN.",
+        ),
+      };
+    }
+    if (activeProviderAuthPending) {
+      return {
+        tone: "warning" as const,
+        title: "Enter OTP to continue",
+        description: "An OTP was requested for this GSTIN. Verify it to continue fetching GSTR-2B.",
+      };
+    }
+    return {
+      tone: "info" as const,
+      title: "Verification needed to fetch GSTR-2B",
+      description:
+        "This GSTIN does not have an active WhiteBooks session right now. Request and verify OTP to continue. The session stays active only for this selected workspace, client, and GSTIN.",
+    };
+  }, [
+    activeProviderAuthFreshness?.is_stale,
+    activeProviderAuthFreshness?.stale_reason,
+    activeProviderAuthPending,
+    activeProviderAuthReady,
+    activeProviderAuthSession?.error_summary,
+    pendingFetchAfterOtp,
+    providerAuthSessionsQuery.error,
+    providerAuthSessionsQuery.isError,
+    requestProviderOTPMutation.error,
+    requestProviderOTPMutation.isError,
+    verifyProviderOTPMutation.error,
+    verifyProviderOTPMutation.isError,
+  ]);
 
   const handleExport = async () => {
     if (!selectedWorkspaceId || !selectedClientId || !selectedPeriodId || !activeRunId) {
@@ -291,10 +563,10 @@ export default function ReconciliationPage() {
     <div className="space-y-6">
       <PageHeader
         title="2B Reconciliation"
-        description="Compare books against imported GSTR-2B transactions, review mismatches, and action exceptions before return preparation."
+        description="Compare books against imported GSTR-2B transactions, review mismatches, and clear exceptions before return preparation."
         actions={[
           {
-            label: fetchGstr2bMutation.isPending ? "Fetching 2B..." : "Fetch 2B from WhiteBooks",
+            label: fetchGstr2bMutation.isPending ? "Fetching 2B..." : "Fetch 2B from filing channel",
             onClick: handleFetchGstr2B,
             disabled: isPeriodLocked || !selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId,
           },
@@ -399,6 +671,16 @@ export default function ReconciliationPage() {
                   </p>
                 </div>
               </div>
+            ) : totalPeriodExceptionCount > 0 ? (
+              <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-4">
+                <CircleAlert className="mt-0.5 size-4 shrink-0 text-amber-600" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-amber-900">Period exceptions are included in the source set</p>
+                  <p className="mt-1 text-sm leading-6 text-amber-700">
+                    {totalPeriodExceptionCount} imported transaction{totalPeriodExceptionCount === 1 ? "" : "s"} in the current books or 2B set {totalPeriodExceptionCount === 1 ? "was" : "were"} accepted through an out-of-period override. Review those reasons before relying on this reconciliation for return work.
+                  </p>
+                </div>
+              </div>
             ) : null}
           </div>
         </SectionCard>
@@ -413,7 +695,7 @@ export default function ReconciliationPage() {
         </div>
         {!selectedClientId || !selectedPeriodId ? (
           <div className="mt-4">
-            <EmptyState title="Select reconciliation context first" description="Choose client and compliance period from the topbar before running the GSTR-2B engine." />
+            <EmptyState title="Select reconciliation context first" description="Choose client and compliance period from the topbar before running GSTR-2B matching." />
           </div>
         ) : isPeriodLocked ? (
           <div className="mt-4">
@@ -426,7 +708,7 @@ export default function ReconciliationPage() {
           <div className="mt-4">
             <ErrorState
               title="Purchase and GSTR-2B data required"
-              description="Upload purchase register and GSTR-2B transactions for this period, or fetch the 2B directly from WhiteBooks, before starting reconciliation."
+              description="Upload purchase register and GSTR-2B transactions for this period, or fetch the 2B directly from the connected filing channel, before starting reconciliation."
             />
           </div>
         ) : activeRunIsStale || staleRunCount > 0 ? (
@@ -445,16 +727,28 @@ export default function ReconciliationPage() {
               </Button>
             </div>
           </div>
+        ) : totalPeriodExceptionCount > 0 ? (
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
+            <div className="flex items-start gap-3">
+              <CircleAlert className="mt-0.5 size-4 shrink-0 text-amber-700" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-amber-950">Period exceptions detected in this reconciliation context</p>
+                <p className="mt-1 text-sm leading-6 text-amber-800">
+                  Books rows with period exceptions: {purchasePeriodExceptionCount}. 2B rows with period exceptions: {portalPeriodExceptionCount}. Review those imported transactions before approving or filing the return.
+                </p>
+              </div>
+            </div>
+          </div>
         ) : null}
       </SectionCard>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <StatCard label="Matched" value={String(run?.matched_count ?? 0)} detail="Transactions aligned exactly across books and 2B." tone="success" variant="soft" icon={SearchCheck} />
         <StatCard label="Partial Match" value={String(run?.partial_match_count ?? 0)} detail="Within tolerance but still needs a quick review." tone="warning" variant="soft" icon={GitCompareArrows} />
-        <StatCard label="Missing in 2B" value={String(run?.missing_in_portal_count ?? 0)} detail="Present in books but missing on the portal side." tone="danger" variant="soft" icon={AlertTriangle} />
+        <StatCard label="Missing in 2B" value={String(run?.missing_in_portal_count ?? 0)} detail="Present in books but missing from the 2B side." tone="danger" variant="soft" icon={AlertTriangle} />
         <StatCard label="Missing in Books" value={String(run?.missing_in_books_count ?? 0)} detail="Present in 2B but not available in the purchase register." tone="primary" variant="soft" icon={Database} />
         <StatCard label="Duplicates" value={String(run?.duplicate_count ?? 0)} detail="Potential duplicate invoices requiring cleanup before filing." tone="warning" variant="soft" icon={GitCompareArrows} />
-        <StatCard label="ITC at Risk" value={`Rs. ${formatMoney(run?.total_itc_at_risk)}`} detail="Portal-side tax exposure across unresolved mismatches." tone="danger" variant="soft" icon={CircleAlert} />
+        <StatCard label="ITC at Risk" value={`Rs. ${formatMoney(run?.total_itc_at_risk)}`} detail="Tax exposure across unresolved mismatches." tone="danger" variant="soft" icon={CircleAlert} />
       </div>
 
       <SectionCard title="Run history" description="Latest reconciliation runs for the selected working context.">
@@ -511,7 +805,7 @@ export default function ReconciliationPage() {
             </Table>
           </div>
         ) : (
-          <EmptyState title="No reconciliation runs yet" description="Run GSTR-2B reconciliation once purchase and portal data are available for this period." />
+          <EmptyState title="No reconciliation runs yet" description="Run GSTR-2B reconciliation once purchase and 2B data are available for this period." />
         )}
       </SectionCard>
 
@@ -615,7 +909,7 @@ export default function ReconciliationPage() {
                   </div>
                 </SectionCard>
 
-                <SectionCard title="Update action" description="Placeholder assignee support is limited to the current signed-in user for now.">
+                <SectionCard title="Update action" description="Assignee selection is currently limited to the signed-in user for this build.">
                   <div className="space-y-4">
                     <Select value={actionForm.assigned_to} onValueChange={(value) => setActionForm((current) => ({ ...current, assigned_to: value }))}>
                       <SelectTrigger className="h-10 bg-slate-50"><SelectValue placeholder="Assigned to" /></SelectTrigger>
@@ -656,6 +950,123 @@ export default function ReconciliationPage() {
               </>
             ) : null}
           </AppModalBody>
+        </AppModalContent>
+      </Dialog>
+
+      <Dialog
+        open={isFetch2BAuthModalOpen}
+        onOpenChange={(open) => {
+          setIsFetch2BAuthModalOpen(open);
+          if (!open) {
+            setPendingFetchAfterOtp(false);
+            setFetch2BOtp("");
+          }
+        }}
+      >
+        <AppModalContent size="md">
+          <AppModalHeader
+            title="Verification needed to fetch GSTR-2B"
+            description={`Use OTP for ${selectedClient?.legal_name ?? "the selected client"}${selectedGstin?.gstin ? ` • ${selectedGstin.gstin}` : ""}. This session is saved only for the selected workspace, client, GSTIN, and provider.`}
+          />
+
+          <AppModalBody className="space-y-5">
+            <div
+              className={`rounded-2xl border px-4 py-4 text-sm ${
+                fetch2BLatestMessage.tone === "danger"
+                  ? "border-rose-200 bg-rose-50 text-rose-900"
+                  : fetch2BLatestMessage.tone === "warning"
+                    ? "border-amber-200 bg-amber-50 text-amber-900"
+                    : fetch2BLatestMessage.tone === "success"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                      : "border-sky-200 bg-sky-50 text-sky-900"
+              }`}
+            >
+              <p className="font-medium">{fetch2BLatestMessage.title}</p>
+              <p className="mt-1">{fetch2BLatestMessage.description}</p>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className={`rounded-2xl border px-4 py-3 text-sm ${activeProviderAuthSession?.last_requested_at ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+                <p className="font-medium">1. Request OTP</p>
+                <p className="mt-1">{activeProviderAuthSession?.last_requested_at ? "OTP requested for this GSTIN." : "Send OTP to the configured WhiteBooks contact email."}</p>
+              </div>
+              <div className={`rounded-2xl border px-4 py-3 text-sm ${activeProviderAuthSession?.verified_at ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+                <p className="font-medium">2. Verify OTP</p>
+                <p className="mt-1">{activeProviderAuthSession?.verified_at ? "OTP verified for this GSTIN." : "Enter the OTP exactly as received."}</p>
+              </div>
+              <div className={`rounded-2xl border px-4 py-3 text-sm ${activeProviderAuthReady ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+                <p className="font-medium">3. Fetch GSTR-2B</p>
+                <p className="mt-1">{activeProviderAuthReady ? "Verification complete. GSTR-2B can be fetched now." : "Fetch continues automatically after verification succeeds."}</p>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="fetch2b-whitebooks-txn">Session reference</Label>
+                <Input
+                  id="fetch2b-whitebooks-txn"
+                  readOnly
+                  value={activeProviderAuthSession?.txn || ""}
+                  placeholder="Auto-captured when returned by the gateway"
+                  className="h-11 bg-slate-50"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="fetch2b-whitebooks-otp">OTP</Label>
+                <Input
+                  id="fetch2b-whitebooks-otp"
+                  value={fetch2BOtp}
+                  onChange={(event) => setFetch2BOtp(event.target.value)}
+                  placeholder="Enter OTP"
+                  className="h-11 bg-slate-50"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <p className="text-sm text-slate-500">Session reference</p>
+                <p className="mt-2 font-semibold text-slate-900">{activeProviderAuthSession?.txn || "Pending"}</p>
+              </div>
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <p className="text-sm text-slate-500">Last OTP request</p>
+                <p className="mt-2 font-semibold text-slate-900">{formatDateTime(activeProviderAuthSession?.last_requested_at)}</p>
+              </div>
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <p className="text-sm text-slate-500">Session status</p>
+                <p className="mt-2 font-semibold text-slate-900">
+                  {activeProviderAuthReady
+                    ? "Active for this GSTIN"
+                    : activeProviderAuthFreshness?.is_stale
+                      ? "Expired"
+                      : activeProviderAuthPending
+                        ? "Needs OTP verification"
+                        : "Not started"}
+                </p>
+              </div>
+            </div>
+          </AppModalBody>
+
+          <AppModalFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsFetch2BAuthModalOpen(false);
+                setPendingFetchAfterOtp(false);
+                setFetch2BOtp("");
+              }}
+            >
+              Close
+            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={handleRequestFetch2BOtp} disabled={!canRequestFetch2BOtp}>
+                {requestProviderOTPMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Request OTP"}
+              </Button>
+              <Button onClick={handleVerifyFetch2BOtp} disabled={!canVerifyFetch2BOtp}>
+                {verifyProviderOTPMutation.isPending || fetchGstr2bMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Verify OTP and continue"}
+              </Button>
+            </div>
+          </AppModalFooter>
         </AppModalContent>
       </Dialog>
     </div>

@@ -60,6 +60,7 @@ LOCAL_APPS = [
     "apps.filings",
     "apps.approvals",
     "apps.notices",
+    "apps.customer_operations",
     "apps.audit_logs",
 ]
 
@@ -330,6 +331,7 @@ EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
 EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=False)
 EMAIL_USE_SSL = env.bool("EMAIL_USE_SSL", default=False)
 EMAIL_TIMEOUT = env.int("EMAIL_TIMEOUT", default=10)
+APP_FRONTEND_URL = env("APP_FRONTEND_URL", default="http://localhost:3000")
 
 WHITEBOOKS_SANDBOX_MODE = env.bool("WHITEBOOKS_SANDBOX_MODE", default=True)
 WHITEBOOKS_BASE_URL = env("WHITEBOOKS_BASE_URL", default="")
@@ -344,6 +346,7 @@ WHITEBOOKS_IP_ADDRESS = env("WHITEBOOKS_IP_ADDRESS", default="")
 WHITEBOOKS_TIMEOUT_SECONDS = env.int("WHITEBOOKS_TIMEOUT_SECONDS", default=30)
 WHITEBOOKS_SSL_VERIFY = env.bool("WHITEBOOKS_SSL_VERIFY", default=True)
 WHITEBOOKS_CA_BUNDLE = env("WHITEBOOKS_CA_BUNDLE", default="")
+WHITEBOOKS_AUTH_SESSION_MAX_AGE_MINUTES = env.int("WHITEBOOKS_AUTH_SESSION_MAX_AGE_MINUTES", default=360)
 WHITEBOOKS_ENABLE_GSTR1_SAVE_LIVE = env.bool("WHITEBOOKS_ENABLE_GSTR1_SAVE_LIVE", default=False)
 WHITEBOOKS_ENABLE_GSTR1_PROCEED_LIVE = env.bool("WHITEBOOKS_ENABLE_GSTR1_PROCEED_LIVE", default=False)
 WHITEBOOKS_ENABLE_GSTR1_FILE_LIVE = env.bool("WHITEBOOKS_ENABLE_GSTR1_FILE_LIVE", default=False)
@@ -400,6 +403,9 @@ if not DEBUG:
         raise ImproperlyConfigured("JWT_SIGNING_KEY must be set to a strong production value.")
     if WHITEBOOKS_BASE_URL and not WHITEBOOKS_SSL_VERIFY:
         raise ImproperlyConfigured("WHITEBOOKS_SSL_VERIFY must remain enabled outside local debugging.")
+
+if WHITEBOOKS_AUTH_SESSION_MAX_AGE_MINUTES <= 0:
+    raise ImproperlyConfigured("WHITEBOOKS_AUTH_SESSION_MAX_AGE_MINUTES must be greater than zero.")
 
 LOGGING = {
     "version": 1,

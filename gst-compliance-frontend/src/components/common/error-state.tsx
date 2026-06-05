@@ -4,7 +4,7 @@ import { typography } from "@/design-system";
 
 export function ErrorState({
   title = "We couldn’t load this section",
-  description = "This is a mock interface, but the state component is ready for real API failures later.",
+  description = "Refresh the page or resolve the underlying data issue before continuing.",
 }: {
   title?: string;
   description?: string;

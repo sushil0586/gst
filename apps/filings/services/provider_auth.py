@@ -6,13 +6,12 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from apps.audit_logs.services.audit import record_audit_log
-from apps.filings.models import ProviderAuthSession, ReturnFiling
 from apps.common.security_events import log_security_event
+from apps.filings.models import ProviderAuthSession, ReturnFiling
 from apps.filings.providers import (
     FilingProviderAuthenticationError,
     FilingProviderSessionLimitError,
 )
-from apps.filings.providers.registry import get_filing_provider
 
 
 SENSITIVE_PROVIDER_KEYS = {
@@ -43,8 +42,13 @@ def _sanitize_provider_payload(payload):
 
 
 def request_provider_otp_session(*, validated_data, user):
+    from apps.filings.providers.registry import get_filing_provider
+
     provider_code = validated_data.get("provider", ReturnFiling.Provider.WHITEBOOKS)
-    email = validated_data.get("email") or settings.WHITEBOOKS_CONTACT_EMAIL
+    if provider_code == ReturnFiling.Provider.WHITEBOOKS:
+        email = settings.WHITEBOOKS_CONTACT_EMAIL
+    else:
+        email = validated_data.get("email") or settings.WHITEBOOKS_CONTACT_EMAIL
     provider = get_filing_provider(provider_code)
     request_otp = getattr(provider, "request_otp", None)
     if not callable(request_otp):
@@ -133,6 +137,8 @@ def request_provider_otp_session(*, validated_data, user):
 
 
 def verify_provider_otp_session(*, auth_session, otp, txn, user):
+    from apps.filings.providers.registry import get_filing_provider
+
     resolved_txn = txn or auth_session.txn
     if not resolved_txn:
         raise serializers.ValidationError({"txn": "A provider txn value is required to exchange OTP for an auth token."})

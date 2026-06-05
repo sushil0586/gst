@@ -25,6 +25,12 @@ def read_sample_upload(filename: str) -> SimpleUploadedFile:
     return SimpleUploadedFile(filename, path.read_bytes(), content_type="text/csv")
 
 
+def response_bytes(response):
+    if getattr(response, "streaming", False):
+        return b"".join(response.streaming_content)
+    return response.content
+
+
 @pytest.fixture
 def pilot_client(db):
     return APIClient()
@@ -196,7 +202,7 @@ def test_phase1_pilot_workflow_end_to_end(pilot_client):
         f"/api/v1/exports/return-summary/?workspace={workspace.id}&client={client_id}&gstin={gstin_id}&compliance_period={period_id}"
     )
     assert export_response.status_code == 200
-    workbook = load_workbook(BytesIO(export_response.content))
+    workbook = load_workbook(BytesIO(response_bytes(export_response)))
     assert workbook.active.max_row >= 2
 
 
@@ -207,7 +213,7 @@ def test_export_with_empty_data_returns_valid_xlsx(pilot_client):
     workspace = Workspace.objects.first()
     response = pilot_client.get(f"/api/v1/exports/transactions/?workspace={workspace.id}")
     assert response.status_code == 200
-    workbook = load_workbook(BytesIO(response.content))
+    workbook = load_workbook(BytesIO(response_bytes(response)))
     assert workbook.active.max_row == 1
 
 

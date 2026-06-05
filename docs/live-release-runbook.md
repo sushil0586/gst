@@ -8,6 +8,7 @@ Use this runbook before enabling or expanding live provider filing for a tenant.
 
 1. Environment flags are correct:
    - `WHITEBOOKS_SANDBOX_MODE`
+   - `WHITEBOOKS_AUTH_SESSION_MAX_AGE_MINUTES`
    - `WHITEBOOKS_ENABLE_GSTR1_SAVE_LIVE`
    - `WHITEBOOKS_ENABLE_GSTR1_PROCEED_LIVE`
    - `WHITEBOOKS_ENABLE_GSTR1_FILE_LIVE`
@@ -19,8 +20,18 @@ Use this runbook before enabling or expanding live provider filing for a tenant.
    - `FILING_ALERT_EMAIL_ENABLED`
    - `FILING_SUPPORT_RECOVERY_ROLES`
    - `FILING_DEFAULT_ALERT_RECIPIENT_ROLES`
+   - `EMAIL_BACKEND`
+   - `DEFAULT_FROM_EMAIL`
+   - `APP_FRONTEND_URL`
+   Production expectation:
+   - `FILING_ENFORCE_TENANT_ROLLOUT=True`
+   - `FILING_ENFORCE_MAKER_CHECKER=True`
+   - `FILING_ALERT_EMAIL_ENABLED=True` once routing is configured
+   - live filing flags enabled only for the exact operations being released
+   - `WHITEBOOKS_SANDBOX_MODE=False` only in the intended live environment
+   - `APP_FRONTEND_URL` points to the live browser URL used in password-reset emails
 2. Provider credentials are present for the target environment.
-3. A valid provider auth session exists for the target GSTIN.
+3. A valid, non-stale provider auth session exists for the target GSTIN.
 4. A rollout policy exists for the exact target scope:
    - workspace
    - optional client
@@ -30,6 +41,10 @@ Use this runbook before enabling or expanding live provider filing for a tenant.
 5. Alert routing policy is understood:
    - either explicit `OperationalAlertRoutingRule` entries exist
    - or the environment default recipient roles are intentionally accepted
+6. Password recovery is operational:
+   - forgot-password email is delivered
+   - reset link lands on the correct frontend URL
+   - a changed password can be used immediately to sign in
 
 ## Tenant Enablement Checklist
 
@@ -59,6 +74,64 @@ Use this runbook before enabling or expanding live provider filing for a tenant.
    - ARN is captured, or
    - a provider rejection is normalized
 6. Confirm audit logs and filing events were recorded.
+
+## Staging UAT Checklist
+
+Run this before any first production release decision:
+
+1. Apply backend migrations on staging:
+   - `./venv/bin/python manage.py migrate`
+2. Confirm backend configuration is production-safe:
+   - `WHITEBOOKS_SSL_VERIFY=True`
+   - `FILING_ENFORCE_TENANT_ROLLOUT=True`
+   - `FILING_ENFORCE_MAKER_CHECKER=True`
+   - `APP_FRONTEND_URL` matches the real staging browser URL
+   - `EMAIL_*` values are real and working
+3. Run the auth smoke path:
+   - login
+   - logout
+   - change password
+   - forgot-password
+   - reset-password from the received email
+4. Run the customer user-management path:
+   - add a workspace member
+   - assign the intended role
+   - sign in as that member
+   - confirm access is limited to the expected workflow
+5. Run the notices path:
+   - create a notice
+   - assign owner
+   - set due date
+   - update status
+6. Run the live-data path:
+   - create client
+   - create GSTIN
+   - create compliance period
+   - confirm registers load live data with no mock fallback
+7. Run the filing control path:
+   - create or verify provider auth session
+   - confirm the auth session is fresh
+   - prepare return
+   - approve return
+   - attempt filing only if rollout policy allows it
+8. Capture evidence for signoff:
+   - screenshots of auth reset flow
+   - screenshot of workspace team role assignment
+   - screenshot of notice update flow
+   - screenshot of filing status and support evidence
+
+## Deploy Check Notes
+
+Before production, run:
+
+1. `./venv/bin/python manage.py check`
+2. `./venv/bin/python manage.py check --deploy`
+
+Expected interpretation:
+
+- `SECRET_KEY` warnings during local verification are not relevant if staging/production use strong real secrets
+- `drf_spectacular` warnings are schema/documentation quality issues, not known release blockers for runtime behavior
+- `WHITEBOOKS_SSL_VERIFY` must stay enabled outside local debugging
 
 ## Release Decision
 

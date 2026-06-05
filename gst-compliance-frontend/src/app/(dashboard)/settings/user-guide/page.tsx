@@ -16,9 +16,9 @@ const navigationItems = [
   { label: "2B Reconciliation", href: "/reconciliation", purpose: "Run purchase vs GSTR-2B reconciliation and action mismatch items." },
   { label: "Returns", href: "/returns", purpose: "Prepare GSTR-1 and GSTR-3B, review readiness, and export workbooks." },
   { label: "Approvals", href: "/approvals", purpose: "Review and action approval requests." },
-  { label: "Notices", href: "/notices", purpose: "Current workflow shell for notice management coverage." },
+  { label: "Notices", href: "/notices", purpose: "Track notice ownership, deadlines, and response status against the active GSTIN context." },
   { label: "Reports", href: "/reports", purpose: "Review transactions, correct metadata, use bulk remediation, and manage ownership and follow-ups." },
-  { label: "Audit Trail", href: "/audit-trail", purpose: "Inspect audit logs and export evidence." },
+  { label: "Audit Trail", href: "/audit-trail", purpose: "Inspect audit logs and export proof." },
   { label: "Settings", href: "/settings", purpose: "Open team management, pilot readiness, and this guide." },
 ];
 
@@ -63,7 +63,7 @@ const practicalFlow = [
   },
   {
     title: "7. Review audit and manager controls",
-    detail: "Use audit logs and the dashboard close-manager section for evidence, follow-up management, digests, and close reporting.",
+    detail: "Use audit logs and the dashboard close-manager section for proof, follow-up management, digests, and close reporting.",
     links: [
       { label: "Open Dashboard", href: "/dashboard" },
       { label: "Open Audit Trail", href: "/audit-trail" },
@@ -83,9 +83,9 @@ const uatPacks = [
     detail: "Covers audit logs, workbook exports, close-manager reporting, digests, and automation reporting.",
   },
   {
-    title: "Shell and support coverage",
+    title: "Operational coverage extension",
     cases: "UAT-039 to UAT-040",
-    detail: "Covers notices placeholder flow and settings-based documentation access.",
+    detail: "Covers notice register operations plus settings-based documentation and readiness access.",
   },
 ];
 
@@ -183,7 +183,7 @@ export default function UserGuidePage() {
           <li>GSTR-1 depends on sales-side data; reconciliation depends on purchase plus GSTR-2B data.</li>
           <li>Locked periods should block imports, reconciliation, return preparation, and transaction edits.</li>
           <li>Client and period drill-down pages are reached from the Clients module, not from the sidebar directly.</li>
-          <li>The Notices page is intentionally a workflow shell in the current phase and should be tested as a navigation and rendering surface.</li>
+          <li>Use Notices as a live register for ownership, due dates, and response status, while keeping detailed legal response handling in your operating process.</li>
         </ul>
         <div className="mt-4 flex flex-wrap gap-3">
           <Button asChild size="sm">

@@ -4,7 +4,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import WorkspaceMembership, WorkspaceRole
 from apps.audit_logs.models import AuditLog
-from apps.clients.models import Client
+from apps.clients.models import Client, ClientContact
 from apps.compliance_periods.models import CompliancePeriod
 from apps.gst_transactions.models import GSTTransaction
 from apps.gstins.models import GSTIN, GSTINTaxpayerProfile
@@ -221,6 +221,99 @@ def test_bootstrap_rejects_duplicate_client_code_in_workspace(clients_owner_clie
 
 
 @pytest.mark.django_db
+def test_bootstrap_rejects_duplicate_gstin_in_same_workspace(clients_owner_client, clients_context):
+    existing_client = Client.objects.create(
+        workspace=clients_context["workspace"],
+        legal_name="Existing GSTIN Client",
+        trade_name="Existing GSTIN",
+        client_code="GSTIN-001",
+        pan="ABCDE1234G",
+        email="existing-gstin@example.com",
+        created_by=clients_context["owner"],
+        updated_by=clients_context["owner"],
+    )
+    GSTIN.objects.create(
+        client=existing_client,
+        gstin="03AMSPK6726B1Z5",
+        registration_type="regular",
+        state_code="03",
+        created_by=clients_context["owner"],
+        updated_by=clients_context["owner"],
+    )
+
+    response = clients_owner_client.post(
+        "/api/v1/clients/bootstrap/",
+        {
+            "workspace": str(clients_context["workspace"].id),
+            "legal_name": "New Client Same Workspace",
+            "trade_name": "",
+            "client_code": "GSTIN-002",
+            "pan": "ABCDE1234H",
+            "email": "new-gstin@example.com",
+            "gstin": "03AMSPK6726B1Z5",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.data["errors"]["gstin"][0] == "This GSTIN already exists in the selected workspace."
+
+
+@pytest.mark.django_db
+def test_bootstrap_allows_same_gstin_in_different_workspace(clients_owner_client, clients_context):
+    existing_client = Client.objects.create(
+        workspace=clients_context["workspace"],
+        legal_name="Existing GSTIN Client",
+        trade_name="Existing GSTIN",
+        client_code="GSTIN-001",
+        pan="ABCDE1234G",
+        email="existing-gstin@example.com",
+        created_by=clients_context["owner"],
+        updated_by=clients_context["owner"],
+    )
+    GSTIN.objects.create(
+        client=existing_client,
+        gstin="03AMSPK6726B1Z5",
+        registration_type="regular",
+        state_code="03",
+        created_by=clients_context["owner"],
+        updated_by=clients_context["owner"],
+    )
+
+    other_workspace = Workspace.objects.create(
+        organization=clients_context["workspace"].organization,
+        name="Second Workspace",
+        code="SECOND-WS",
+        created_by=clients_context["owner"],
+        updated_by=clients_context["owner"],
+    )
+    WorkspaceMembership.objects.create(
+        user=clients_context["owner"],
+        workspace=other_workspace,
+        role=WorkspaceRole.OWNER,
+        created_by=clients_context["owner"],
+        updated_by=clients_context["owner"],
+    )
+
+    response = clients_owner_client.post(
+        "/api/v1/clients/bootstrap/",
+        {
+            "workspace": str(other_workspace.id),
+            "legal_name": "Other CA Client",
+            "trade_name": "",
+            "client_code": "GSTIN-OTHER",
+            "pan": "ABCDE1234J",
+            "email": "other-ca@example.com",
+            "gstin": "03AMSPK6726B1Z5",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    assert response.data["data"]["gstin"]["gstin"] == "03AMSPK6726B1Z5"
+
+
+@pytest.mark.django_db
 def test_owner_can_delete_client_when_no_transactions_exist(clients_owner_client, clients_context):
     client = Client.objects.create(
         workspace=clients_context["workspace"],
@@ -315,6 +408,139 @@ def test_owner_cannot_delete_client_when_transactions_exist(clients_owner_client
     assert response.data["errors"]["client"] == "This client cannot be deleted because active transactions exist against it."
     client.refresh_from_db()
     assert client.is_active is True
+
+
+@pytest.mark.django_db
+def test_owner_can_create_client_contact(clients_owner_client, clients_context):
+    client = Client.objects.create(
+        workspace=clients_context["workspace"],
+        legal_name="Contact Client",
+        trade_name="Contact",
+        client_code="CNT-001",
+        pan="ABCDE1234P",
+        email="ops@example.com",
+        created_by=clients_context["owner"],
+        updated_by=clients_context["owner"],
+    )
+
+    response = clients_owner_client.post(
+        "/api/v1/client-contacts/",
+        {
+            "client": str(client.id),
+            "name": "Rohit Sharma",
+            "designation": "Accounts Manager",
+            "mobile_number": "9876543210",
+            "email": "rohit@example.com",
+            "is_primary": True,
+            "preferred_contact_mode": "call",
+            "notes": "Primary monthly filing coordinator.",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    data = response.data["data"]
+    assert data["name"] == "Rohit Sharma"
+    assert data["client_name"] == "Contact Client"
+    assert data["is_primary"] is True
+    assert ClientContact.objects.filter(client=client, name="Rohit Sharma", is_primary=True).exists()
+    assert AuditLog.objects.filter(action="client_contact.created", client_id_ref=client.id).exists()
+
+
+@pytest.mark.django_db
+def test_primary_client_contact_switches_previous_primary(clients_owner_client, clients_context):
+    client = Client.objects.create(
+        workspace=clients_context["workspace"],
+        legal_name="Switch Client",
+        trade_name="Switch",
+        client_code="CNT-002",
+        pan="ABCDE1234Q",
+        email="ops@example.com",
+        created_by=clients_context["owner"],
+        updated_by=clients_context["owner"],
+    )
+    primary_contact = ClientContact.objects.create(
+        client=client,
+        name="Old Primary",
+        mobile_number="9000000001",
+        is_primary=True,
+        created_by=clients_context["owner"],
+        updated_by=clients_context["owner"],
+    )
+
+    response = clients_owner_client.post(
+        "/api/v1/client-contacts/",
+        {
+            "client": str(client.id),
+            "name": "New Primary",
+            "mobile_number": "9000000002",
+            "is_primary": True,
+            "preferred_contact_mode": "whatsapp",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    primary_contact.refresh_from_db()
+    assert primary_contact.is_primary is False
+    assert ClientContact.objects.get(name="New Primary").is_primary is True
+
+
+@pytest.mark.django_db
+def test_viewer_cannot_manage_client_contacts(clients_viewer_client, clients_context):
+    client = Client.objects.create(
+        workspace=clients_context["workspace"],
+        legal_name="Protected Contact Client",
+        trade_name="Protected Contact",
+        client_code="CNT-003",
+        pan="ABCDE1234R",
+        email="ops@example.com",
+        created_by=clients_context["owner"],
+        updated_by=clients_context["owner"],
+    )
+
+    response = clients_viewer_client.post(
+        "/api/v1/client-contacts/",
+        {
+            "client": str(client.id),
+            "name": "Blocked User",
+            "mobile_number": "9000000003",
+            "preferred_contact_mode": "call",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_owner_can_soft_delete_client_contact(clients_owner_client, clients_context):
+    client = Client.objects.create(
+        workspace=clients_context["workspace"],
+        legal_name="Delete Contact Client",
+        trade_name="Delete Contact",
+        client_code="CNT-004",
+        pan="ABCDE1234S",
+        email="ops@example.com",
+        created_by=clients_context["owner"],
+        updated_by=clients_context["owner"],
+    )
+    contact = ClientContact.objects.create(
+        client=client,
+        name="Delete Me",
+        mobile_number="9000000004",
+        is_primary=True,
+        created_by=clients_context["owner"],
+        updated_by=clients_context["owner"],
+    )
+
+    response = clients_owner_client.delete(f"/api/v1/client-contacts/{contact.id}/")
+
+    assert response.status_code == 200
+    contact.refresh_from_db()
+    assert contact.is_active is False
+    assert contact.is_primary is False
+    assert AuditLog.objects.filter(action="client_contact.deleted", client_id_ref=client.id).exists()
 
 
 @pytest.mark.django_db

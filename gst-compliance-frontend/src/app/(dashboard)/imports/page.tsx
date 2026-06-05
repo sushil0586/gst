@@ -151,6 +151,13 @@ const fieldHints: Partial<Record<MappingField, string>> = {
   ecommerce_gstin: "Useful for operator/e-commerce reporting sections.",
 };
 
+const periodExceptionOptions = [
+  { value: "late_reported_invoice", label: "Late reported invoice" },
+  { value: "amendment_adjustment", label: "Amendment / adjustment" },
+  { value: "credit_debit_note_linkage", label: "Credit / debit note linkage" },
+  { value: "ca_manual_override", label: "CA manual override" },
+] as const;
+
 const filingMetadataFields: MappingField[] = ["hsn_code", "uqc", "quantity", "is_service", "supply_category", "ecommerce_gstin"];
 
 const mappingSections: Array<{
@@ -296,6 +303,9 @@ export default function ImportsPage() {
   const [rowCorrectionTarget, setRowCorrectionTarget] = useState<ImportRowErrorRecord | null>(null);
   const [rowCorrectionDraft, setRowCorrectionDraft] = useState<Record<string, string>>({});
   const [rowCorrectionSubmitAttempted, setRowCorrectionSubmitAttempted] = useState(false);
+  const [allowPeriodException, setAllowPeriodException] = useState(false);
+  const [periodExceptionReason, setPeriodExceptionReason] = useState("");
+  const [periodExceptionCategory, setPeriodExceptionCategory] = useState<string>(periodExceptionOptions[0].value);
   const [rowDiscardTarget, setRowDiscardTarget] = useState<ImportRowErrorRecord | null>(null);
   const [batchDiscardTarget, setBatchDiscardTarget] = useState<ImportBatchRecord | null>(null);
   const [batchReplacementTarget, setBatchReplacementTarget] = useState<ImportBatchRecord | null>(null);
@@ -591,6 +601,7 @@ export default function ImportsPage() {
     return ids;
   }, [rowErrors]);
   const rowCorrectionEntries = useMemo(() => Object.entries(rowCorrectionDraft), [rowCorrectionDraft]);
+  const rowCorrectionNeedsPeriodException = rowCorrectionTarget?.error_code === "period_mismatch";
   const lineageDetails = useMemo(() => {
     if (!selectedBatch) {
       return [];
@@ -655,12 +666,18 @@ export default function ImportsPage() {
       ),
     );
     setRowCorrectionSubmitAttempted(false);
+    setAllowPeriodException(error.error_code === "period_mismatch");
+    setPeriodExceptionReason("");
+    setPeriodExceptionCategory(periodExceptionOptions[0].value);
   };
 
   const closeRowCorrectionDialog = () => {
     setRowCorrectionTarget(null);
     setRowCorrectionDraft({});
     setRowCorrectionSubmitAttempted(false);
+    setAllowPeriodException(false);
+    setPeriodExceptionReason("");
+    setPeriodExceptionCategory(periodExceptionOptions[0].value);
   };
 
   const openRowDiscardDialog = (error: ImportRowErrorRecord) => {
@@ -718,13 +735,28 @@ export default function ImportsPage() {
       toast.error("Add corrected row values before reprocessing the batch.");
       return;
     }
+    if (rowCorrectionNeedsPeriodException && allowPeriodException && !periodExceptionReason.trim()) {
+      toast.error("Provide a reason before allowing an out-of-period document.");
+      return;
+    }
     try {
       await correctImportRowMutation.mutateAsync({
         batchId: selectedBatchId,
         rowNumber: rowCorrectionTarget.row_number,
         rawRow: rowCorrectionDraft,
+        exceptionContext: rowCorrectionNeedsPeriodException
+          ? {
+              allow_period_override: allowPeriodException,
+              reason: periodExceptionReason.trim(),
+              category: periodExceptionCategory,
+            }
+          : undefined,
       });
-      toast.success("Row correction applied and batch reprocessed.");
+      toast.success(
+        rowCorrectionNeedsPeriodException && allowPeriodException
+          ? "Period exception recorded, row corrected, and batch reprocessed."
+          : "Row correction applied and batch reprocessed.",
+      );
       closeRowCorrectionDialog();
     } catch (error) {
       toast.error(getErrorMessage(error));
@@ -1746,6 +1778,66 @@ export default function ImportsPage() {
                       <p className="text-sm text-rose-600">At least one editable source field is required before reprocessing.</p>
                     ) : null}
                   </SectionCard>
+
+                  {rowCorrectionNeedsPeriodException ? (
+                    <SectionCard
+                      title="Period exception"
+                      description="Use this only when an out-of-period invoice is being intentionally accepted for a genuine GST exception scenario."
+                    >
+                      <div className="space-y-4">
+                        <label className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-4">
+                          <input
+                            type="checkbox"
+                            className="mt-1 size-4 rounded border-slate-300"
+                            checked={allowPeriodException}
+                            onChange={(event) => setAllowPeriodException(event.target.checked)}
+                          />
+                          <div>
+                            <p className="text-sm font-semibold text-amber-900">Allow this out-of-period document</p>
+                            <p className="mt-1 text-sm leading-6 text-amber-800">
+                              Keep the selected compliance period and record why this invoice is still being taken up here.
+                            </p>
+                          </div>
+                        </label>
+
+                        {allowPeriodException ? (
+                          <div className="grid gap-4 md:grid-cols-[0.42fr_0.58fr]">
+                            <div className="space-y-2">
+                              <label className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                                Exception category
+                              </label>
+                              <Select value={periodExceptionCategory} onValueChange={setPeriodExceptionCategory}>
+                                <SelectTrigger className="h-10 bg-slate-50">
+                                  <SelectValue placeholder="Select category" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {periodExceptionOptions.map((option) => (
+                                    <SelectItem key={option.value} value={option.value}>
+                                      {option.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
+                                Reason
+                              </label>
+                              <Input
+                                value={periodExceptionReason}
+                                onChange={(event) => setPeriodExceptionReason(event.target.value)}
+                                placeholder="Example: supplier filed late, but the invoice still needs controlled follow-up in this cycle"
+                              />
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {rowCorrectionSubmitAttempted && rowCorrectionNeedsPeriodException && allowPeriodException && !periodExceptionReason.trim() ? (
+                          <p className="text-sm text-rose-600">A reason is required when allowing an out-of-period document.</p>
+                        ) : null}
+                      </div>
+                    </SectionCard>
+                  ) : null}
 
                   <SectionCard
                     title="Next step after save"

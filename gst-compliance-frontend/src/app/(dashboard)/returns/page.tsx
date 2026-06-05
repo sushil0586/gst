@@ -49,7 +49,7 @@ import {
 import { downloadFile } from "@/lib/api/download";
 import { useReconciliationRunsQuery } from "@/features/reconciliation";
 import { useSession } from "@/lib/query/session-provider";
-import { getErrorMessage } from "@/lib/api/error-handler";
+import { getErrorMessage, getFieldErrors } from "@/lib/api/error-handler";
 import { useWorkspaceContext } from "@/store/workspace-context";
 import type { ReturnFilingAttemptRecord, ReturnFilingRecord, ReturnPreparationRecord, WhiteBooksAuthSessionRecord, WhiteBooksProviderStage } from "@/types/api";
 
@@ -78,6 +78,10 @@ function getFilingStatusVariant(status?: ReturnFilingRecord["status"]) {
   if (status === "submitted" || status === "queued_for_filing" || status === "approved" || status === "needs_retry") return "warning" as const;
   if (status === "failed" || status === "cancelled") return "danger" as const;
   return "primary" as const;
+}
+
+function getPrimaryFieldError(error: unknown, fieldName: string) {
+  return getFieldErrors(error)?.[fieldName]?.[0] ?? null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -178,18 +182,18 @@ function getProceedGuidance(attempt?: ReturnFilingAttemptRecord | null) {
   }
 
   if (retryable || nextAction === "retry_filing") {
-    return {
-      title: "Proceed step can be retried",
-      description:
-        "WhiteBooks saved the draft, but the proceed-to-file step hit a temporary issue. Review the provider message below, then retry the filing when you are ready.",
-      variant: "warning" as const,
-    };
+      return {
+        title: "Proceed step can be retried",
+        description:
+        "The filing channel saved the draft, but the proceed-to-file step hit a temporary issue. Review the filing message below, then retry when you are ready.",
+        variant: "warning" as const,
+      };
   }
 
   return {
     title: "Proceed step needs review before retry",
     description:
-      "WhiteBooks saved the draft, but the proceed-to-file step was rejected. Review the provider message and response evidence before attempting another filing run.",
+      "The filing channel saved the draft, but the proceed-to-file step was rejected. Review the filing message and saved proof before attempting another filing run.",
     variant: "danger" as const,
   };
 }
@@ -206,7 +210,7 @@ function getRecommendedAction(
   if (filing?.status === "needs_retry" || retryable || nextAction === "retry_filing") {
     return {
       title: "Recommended next action",
-      description: "Retry this filing attempt after reviewing the latest provider failure details. The draft-save evidence has been preserved.",
+      description: "Retry this filing attempt after reviewing the latest filing issue details. The draft-save proof has been preserved.",
       tone: "warning" as const,
     };
   }
@@ -232,7 +236,7 @@ function getRecommendedAction(
       title: "Recommended next action",
       description:
         filing?.return_type === "gstr3b"
-          ? "Treat this GSTR-3B as confirmation-pending. Resync for ARN or terminal provider status before telling operations the return is filed."
+          ? "Treat this GSTR-3B as confirmation-pending. Refresh for ARN or terminal filing status before telling operations the return is filed."
           : "Treat this filing as confirmation-pending. Resync for ARN or terminal status before telling operations that the return is filed.",
       tone: "primary" as const,
     };
@@ -242,13 +246,13 @@ function getRecommendedAction(
     if (filing?.return_type === "gstr3b" || nextAction === "await_offset_automation") {
       return {
         title: "Recommended next action",
-        description: "Treat this as a saved GSTR-3B draft only. The provider save completed, but liability offset and final filing still need to happen before this can move forward.",
+        description: "Treat this as a saved GSTR-3B draft only. The draft save completed, but liability offset and final filing still need to happen before this can move forward.",
         tone: "primary" as const,
       };
     }
     return {
       title: "Recommended next action",
-      description: "Treat this as a saved draft only. Review the linked auth session and provider evidence before continuing with proceed or any manual portal action.",
+      description: "Treat this as a saved draft only. Review the linked access session and filing proof before continuing with proceed or any manual portal action.",
       tone: "primary" as const,
     };
   }
@@ -256,7 +260,7 @@ function getRecommendedAction(
   if (filing?.status === "failed") {
     return {
       title: "Recommended next action",
-      description: "Review the failure details and provider evidence before retrying. Only retry if the issue is clearly operational rather than a provider rejection.",
+      description: "Review the failure details and filing proof before retrying. Only retry if the issue is clearly operational rather than a channel rejection.",
       tone: "danger" as const,
     };
   }
@@ -266,7 +270,7 @@ function getRecommendedAction(
 
 function getFilingEventLabel(eventType: string) {
   if (eventType === "filing.draft_save_requested") return "draft save requested";
-  if (eventType === "filing.draft_saved") return "draft saved to WhiteBooks";
+  if (eventType === "filing.draft_saved") return "draft saved to filing channel";
   if (eventType === "filing.draft_save_failed") return "draft save failed";
   if (eventType === "filing.offset_requested") return "offset requested";
   if (eventType === "filing.offset_applied") return "offset applied";
@@ -336,6 +340,63 @@ function getReadinessVariant(status?: "ready" | "ready_with_warnings" | "blocked
   return "primary" as const;
 }
 
+function formatSummaryKey(key: string) {
+  const labels: Record<string, string> = {
+    b2b_taxable_value: "B2B taxable value",
+    b2b_tax_amount: "B2B tax amount",
+    b2c_taxable_value: "B2C taxable value",
+    b2c_tax_amount: "B2C tax amount",
+    credit_note_taxable_value: "Credit note taxable value",
+    credit_note_tax_amount: "Credit note tax amount",
+    debit_note_taxable_value: "Debit note taxable value",
+    debit_note_tax_amount: "Debit note tax amount",
+    total_taxable_value: "Total taxable value",
+    total_tax_amount: "Total tax amount",
+    document_count: "Document count",
+    outward_taxable_value: "Outward taxable value",
+    outward_tax_liability: "Outward tax liability",
+    eligible_itc: "Eligible ITC",
+    itc_at_risk: "ITC at risk",
+    deferred_blocked_itc: "Deferred / blocked ITC",
+    net_tax_payable: "Net tax payable",
+    unresolved_mismatch_count: "Unresolved mismatch count",
+    latest_run_id: "Latest reconciliation run",
+    matched_count: "Matched count",
+    partial_match_count: "Partial match count",
+    missing_in_books_count: "Missing in books count",
+    missing_in_portal_count: "Missing in 2B count",
+    duplicate_count: "Duplicate count",
+  };
+  return labels[key] ?? key.replace(/_/g, " ");
+}
+
+function hasPeriodException(metadata: Record<string, unknown> | null | undefined) {
+  if (!metadata || typeof metadata !== "object") {
+    return false;
+  }
+  const raw = metadata.period_exception;
+  if (!raw || typeof raw !== "object") {
+    return false;
+  }
+  return (raw as Record<string, unknown>).allowed === true;
+}
+
+function getPeriodExceptionCountFromSummary(summary: Record<string, unknown> | null | undefined) {
+  if (!summary || typeof summary !== "object") {
+    return 0;
+  }
+  const raw = summary.period_exceptions;
+  if (!raw || typeof raw !== "object") {
+    return 0;
+  }
+  const count = (raw as Record<string, unknown>).count;
+  return typeof count === "number" ? count : 0;
+}
+
+function getFirstBlockingMessage(messages: Array<string | null | false | undefined>) {
+  return messages.find((message): message is string => Boolean(message)) ?? null;
+}
+
 function buildIssueActionHref(
   actionTarget?: string | null,
   issueCode?: string,
@@ -367,6 +428,10 @@ export default function ReturnsPage() {
   const searchParams = useSearchParams();
   const { user } = useSession();
   const {
+    workspaces,
+    clients,
+    gstins,
+    periods,
     selectedWorkspace,
     selectedWorkspaceId,
     selectedClient,
@@ -375,17 +440,60 @@ export default function ReturnsPage() {
     selectedGstinId,
     selectedPeriod,
     selectedPeriodId,
+    setSelectedWorkspaceId,
+    setSelectedClientId,
+    setSelectedGstinId,
+    setSelectedPeriodId,
   } = useWorkspaceContext();
   const [manualSelectedReturnId, setManualSelectedReturnId] = useState<string | null>(null);
   const [dismissedQueryReturnId, setDismissedQueryReturnId] = useState<string | null>(null);
   const [isMarkFiledOpen, setIsMarkFiledOpen] = useState(false);
   const [arn, setArn] = useState("");
-  const [whiteBooksEmail, setWhiteBooksEmail] = useState("");
   const [whiteBooksOtp, setWhiteBooksOtp] = useState("");
   const [whiteBooksTxn, setWhiteBooksTxn] = useState("");
+  const [filingActionFeedback, setFilingActionFeedback] = useState<{ tone: "warning" | "danger" | "success"; message: string } | null>(null);
+  const queryWorkspaceId = searchParams.get("workspace");
+  const queryClientId = searchParams.get("client");
+  const queryGstinId = searchParams.get("gstin");
+  const queryPeriodId = searchParams.get("period") ?? searchParams.get("compliance_period");
   const selectedReturnFromQuery = searchParams.get("returnId");
   const selectedFocusFromQuery = searchParams.get("focus");
   const filingLifecycleRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (queryWorkspaceId && queryWorkspaceId !== selectedWorkspaceId && workspaces.some((workspace) => workspace.id === queryWorkspaceId)) {
+      setSelectedWorkspaceId(queryWorkspaceId);
+      return;
+    }
+    if (queryClientId && queryClientId !== selectedClientId && clients.some((client) => client.id === queryClientId)) {
+      setSelectedClientId(queryClientId);
+      return;
+    }
+    if (queryGstinId && queryGstinId !== selectedGstinId && gstins.some((gstin) => gstin.id === queryGstinId)) {
+      setSelectedGstinId(queryGstinId);
+      return;
+    }
+    if (queryPeriodId && queryPeriodId !== selectedPeriodId && periods.some((period) => period.id === queryPeriodId)) {
+      setSelectedPeriodId(queryPeriodId);
+    }
+  }, [
+    clients,
+    gstins,
+    periods,
+    queryClientId,
+    queryGstinId,
+    queryPeriodId,
+    queryWorkspaceId,
+    selectedClientId,
+    selectedGstinId,
+    selectedPeriodId,
+    selectedWorkspaceId,
+    setSelectedClientId,
+    setSelectedGstinId,
+    setSelectedPeriodId,
+    setSelectedWorkspaceId,
+    workspaces,
+  ]);
 
   const filters = useMemo(
     () => ({
@@ -526,6 +634,15 @@ export default function ReturnsPage() {
     : "Source imports changed after the last reconciliation run.";
   const salesTransactionCount = salesTransactionsQuery.data?.count ?? 0;
   const purchaseTransactionCount = purchaseTransactionsQuery.data?.count ?? 0;
+  const salesPeriodExceptionCount = useMemo(
+    () => (salesTransactionsQuery.data?.items ?? []).filter((transaction) => hasPeriodException(transaction.metadata)).length,
+    [salesTransactionsQuery.data?.items],
+  );
+  const purchasePeriodExceptionCount = useMemo(
+    () => (purchaseTransactionsQuery.data?.items ?? []).filter((transaction) => hasPeriodException(transaction.metadata)).length,
+    [purchaseTransactionsQuery.data?.items],
+  );
+  const totalPeriodExceptionCount = salesPeriodExceptionCount + purchasePeriodExceptionCount;
   const readiness = readinessQuery.data;
   const activeFilingProviderStage = getProviderStage(activeFiling?.latest_attempt);
   const latestProviderMessage = getProviderMessage(activeFiling?.latest_attempt);
@@ -534,6 +651,7 @@ export default function ReturnsPage() {
   const latestOffsetProviderResponse = getOffsetProviderResponse(activeFiling?.latest_attempt);
   const latestStatusProviderResponse = getStatusProviderResponse(activeFiling?.latest_attempt);
   const latestTrackProviderResponse = getTrackProviderResponse(activeFiling?.latest_attempt);
+  const activeWhiteBooksAuthFreshness = activeWhiteBooksAuthSession?.freshness_summary;
   const latestFailureSummary = getFailureSummary(activeFiling?.latest_attempt);
   const providerEvidenceSummary = activeFiling?.provider_evidence_summary;
   const proceedGuidance = getProceedGuidance(activeFiling?.latest_attempt);
@@ -547,6 +665,28 @@ export default function ReturnsPage() {
   const requeueSupportAction = supportActionsSummary?.actions.find((action) => action.action === "requeue_after_review");
   const isCurrentAuthSessionLinked =
     Boolean(linkedAuthSessionId) && activeWhiteBooksAuthSession?.id === linkedAuthSessionId;
+  const filingAuthOtpRequested = Boolean(activeWhiteBooksAuthSession?.last_requested_at);
+  const filingAuthOtpVerified =
+    activeWhiteBooksAuthSession?.status === "auth_token_received" ||
+    activeWhiteBooksAuthSession?.status === "session_active";
+  const liveFilingConfirmed = Boolean(activeWhiteBooksAuthSession?.response_contract_confirmed);
+  const filingAuthFresh = !activeWhiteBooksAuthFreshness?.is_stale;
+  const filingQueuedBeforeLiveSubmission =
+    activeFiling?.status === "queued_for_filing" &&
+    !activeFiling?.submitted_at &&
+    !activeFiling?.provider_reference_id &&
+    (activeFiling?.latest_attempt?.status === "created" || activeFiling?.latest_attempt?.status === "queued");
+  const filingNeedsFreshOtpRestart = Boolean(
+    filingQueuedBeforeLiveSubmission && (!filingAuthOtpVerified || !liveFilingConfirmed || !filingAuthFresh),
+  );
+  const filingRestartReady = Boolean(
+    filingQueuedBeforeLiveSubmission && filingAuthOtpVerified && liveFilingConfirmed && filingAuthFresh,
+  );
+  const filingAlreadyInFlight =
+    (activeFiling?.status === "queued_for_filing" && !filingRestartReady) ||
+    activeFiling?.status === "submitted" ||
+    activeFiling?.status === "filed" ||
+    activeFiling?.status === "arn_received";
 
   const isPeriodLocked = Boolean(selectedPeriod?.is_locked);
   const canPrepare = Boolean(selectedWorkspaceId && selectedClientId && selectedGstinId && selectedPeriodId && !isPeriodLocked);
@@ -554,6 +694,138 @@ export default function ReturnsPage() {
   const activeReadiness =
     exportReturnType === "gstr1" ? readiness?.gstr1 : exportReturnType === "gstr3b" ? readiness?.gstr3b : null;
   const isReturnFlowBlockedByStaleSource = Boolean(activeReturn?.is_blocked_by_stale_reconciliation || isReconciliationStale);
+  const canRequestOtp = Boolean(selectedWorkspaceId && selectedClientId) && !requestWhiteBooksOTPMutation.isPending;
+  const canVerifyOtp =
+    Boolean(activeWhiteBooksAuthSession) &&
+    Boolean(whiteBooksOtp.trim()) &&
+    !verifyWhiteBooksOTPMutation.isPending;
+  const startFilingDisabledReason = getFirstBlockingMessage([
+    activeReturn?.status !== "approved" ? "Approve this return before starting filing." : null,
+    isReturnFlowBlockedByStaleSource ? "Re-run reconciliation and refresh the return draft before filing." : null,
+    !activeWhiteBooksAuthSession ? "Request OTP first to create a filing access session." : null,
+    !filingAuthOtpVerified ? "Verify OTP successfully before starting filing." : null,
+    !liveFilingConfirmed ? "Finish OTP verification for this GSTIN before live filing can start." : null,
+    !filingAuthFresh ? activeWhiteBooksAuthFreshness?.stale_reason || "The filing access session is stale. Request OTP again." : null,
+    filingNeedsFreshOtpRestart
+      ? "An earlier filing attempt was queued before OTP verification finished. Request a fresh OTP for this GSTIN, verify it, then use Resume filing. The verified session stays active for up to 6 hours."
+      : null,
+    filingAlreadyInFlight ? `A filing run is already ${activeFiling?.status?.replace(/_/g, " ") || "in progress"} for this return.` : null,
+  ]);
+  const retryFilingDisabledReason = getFirstBlockingMessage([
+    !activeFiling ? "Start a filing run first." : null,
+    activeFiling && !retrySupportAction?.allowed ? retrySupportAction?.reason || supportActionsSummary?.summary_reason || "Retry is not recommended right now." : null,
+  ]);
+  const resyncDisabledReason = getFirstBlockingMessage([
+    !activeFiling ? "Start a filing run first." : null,
+    activeFiling && !resyncSupportAction?.allowed ? resyncSupportAction?.reason || supportActionsSummary?.summary_reason || "Status refresh is not available right now." : null,
+  ]);
+  const requeueDisabledReason = getFirstBlockingMessage([
+    !activeFiling ? "Start a filing run first." : null,
+    activeFiling && !requeueSupportAction?.allowed ? requeueSupportAction?.reason || supportActionsSummary?.summary_reason || "Requeue is not allowed right now." : null,
+  ]);
+  const filingNextStep = !activeReturn
+    ? null
+    : activeReturn.status !== "approved"
+      ? {
+          title: "Approve the return first",
+          description: "Live filing starts only after this draft is approved.",
+          tone: "warning" as const,
+        }
+      : isReturnFlowBlockedByStaleSource
+        ? {
+            title: "Re-run reconciliation before filing",
+            description: "Source data changed after reconciliation, so the return draft must be refreshed first.",
+            tone: "danger" as const,
+          }
+        : !activeWhiteBooksAuthSession
+          ? {
+              title: "Request OTP",
+              description: "Start the filing access session for this GSTIN by sending OTP to the registered email.",
+              tone: "primary" as const,
+            }
+          : !filingAuthOtpVerified
+            ? {
+                title: "Verify OTP",
+                description: "Enter the OTP from the filing email to verify the live access session.",
+                tone: "primary" as const,
+              }
+            : !liveFilingConfirmed
+              ? {
+                  title: "Finish live OTP verification",
+                  description: "Complete OTP verification for this GSTIN. Once verified, the filing session stays active for up to 6 hours.",
+                  tone: "warning" as const,
+                }
+              : !filingAuthFresh
+                ? {
+                    title: "Request a fresh OTP",
+                    description: activeWhiteBooksAuthFreshness?.stale_reason || "This filing session expired before filing could start.",
+                    tone: "warning" as const,
+                  }
+                : filingNeedsFreshOtpRestart || filingRestartReady
+                  ? {
+                      title: "Resume the queued filing",
+                      description: "An earlier filing run was queued before live verification completed. You can safely resume it now.",
+                      tone: "primary" as const,
+                    }
+                  : filingAlreadyInFlight
+                    ? {
+                        title: "Filing already in progress",
+                        description: `A filing run is already ${activeFiling?.status?.replace(/_/g, " ") || "active"} for this return.`,
+                        tone: "warning" as const,
+                      }
+                    : {
+                        title: "Start live filing",
+                        description: "Approval and OTP verification are complete. You can now start the filing run.",
+                        tone: "success" as const,
+                      };
+  const primaryFilingGuidance = filingActionFeedback
+    ? {
+        title: filingActionFeedback.tone === "success" ? "Latest filing update" : "Action needed before filing can continue",
+        description: filingActionFeedback.message,
+        tone: filingActionFeedback.tone,
+      }
+    : filingNextStep;
+  const otpAccessLatestMessage = !selectedWorkspaceId || !selectedClientId
+    ? {
+        tone: "danger" as const,
+        title: "Choose the correct filing context first",
+        description: "Select the workspace and client before requesting OTP, so the session is created for the right GSTIN and client.",
+      }
+    : filingNeedsFreshOtpRestart
+      ? {
+          tone: "warning" as const,
+          title: "Fresh OTP needed for this GSTIN",
+          description: "An earlier filing attempt was queued too early. Request a fresh OTP, verify it, then use Resume filing.",
+        }
+      : !activeWhiteBooksAuthSession
+        ? {
+            tone: "primary" as const,
+            title: "No active filing session yet",
+            description: "Request OTP to create a filing session for this GSTIN.",
+          }
+        : !filingAuthOtpVerified
+          ? {
+              tone: "primary" as const,
+              title: "Enter and verify OTP",
+              description: "Use the OTP sent to the registered filing email to activate this GSTIN session.",
+            }
+          : !liveFilingConfirmed
+            ? {
+                tone: "warning" as const,
+                title: "Session not ready yet",
+                description: "OTP is captured, but the filing session is still not ready. Request and verify a fresh OTP for this GSTIN before filing.",
+              }
+            : !filingAuthFresh
+              ? {
+                  tone: "warning" as const,
+                  title: "Session expired",
+                  description: activeWhiteBooksAuthFreshness?.stale_reason || "This filing session expired. Request OTP again to continue.",
+                }
+              : {
+                  tone: "success" as const,
+                  title: "Session active for this GSTIN",
+                  description: "OTP is verified and the filing session is active for up to 6 hours for this GSTIN.",
+                };
 
   useEffect(() => {
     if (
@@ -571,6 +843,16 @@ export default function ReturnsPage() {
 
     return () => window.clearTimeout(timer);
   }, [activeReturn, selectedFocusFromQuery, selectedReturnFromQuery, selectedReturnId]);
+
+  useEffect(() => {
+    setFilingActionFeedback(null);
+  }, [selectedReturnId]);
+
+  const getFilingActionErrorMessage = (error: unknown) =>
+    getPrimaryFieldError(error, "provider_auth") ||
+    getPrimaryFieldError(error, "prepared_return") ||
+    getPrimaryFieldError(error, "approval_request") ||
+    getErrorMessage(error);
 
   const handlePrepare = async (returnType: "gstr1" | "gstr3b") => {
     if (!selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId) {
@@ -618,7 +900,10 @@ export default function ReturnsPage() {
         entity_id: activeReturn.id,
         requested_to: user.id,
         status: "pending",
-        comments: "Please review this return draft.",
+        comments:
+          returnPeriodExceptionCount > 0
+            ? `Please review this return draft. Note: ${returnPeriodExceptionCount} source transaction(s) were accepted under a period exception.`
+            : "Please review this return draft.",
       });
       toast.success("Approval request created.");
     } catch (error) {
@@ -649,13 +934,14 @@ export default function ReturnsPage() {
 
   const handleStartPortalFiling = async () => {
     if (!activeReturn || !selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId) {
-      toast.error("Select a full return context before starting provider filing.");
+      toast.error("Select a full return context before starting filing.");
       return;
     }
     const linkedApproval = (approvalsQuery.data?.items ?? []).find(
       (item) => item.entity_id === activeReturn.id && item.status === "approved",
     );
     try {
+      setFilingActionFeedback(null);
       await startFilingMutation.mutateAsync({
         workspace: selectedWorkspaceId,
         client: selectedClientId,
@@ -667,45 +953,60 @@ export default function ReturnsPage() {
         approval_request: linkedApproval?.id,
         confirmation_note: "Started from returns workspace.",
       });
+      setFilingActionFeedback({ tone: "success", message: "Filing request accepted. Use the status cards below to track gateway progress." });
       toast.success("Provider filing started.");
     } catch (error) {
-      toast.error(getErrorMessage(error));
+      const message = getFilingActionErrorMessage(error);
+      setFilingActionFeedback({ tone: "warning", message });
+      toast.error(message);
     }
   };
 
   const handleRetryFiling = async () => {
     if (!activeFiling) return;
     try {
+      setFilingActionFeedback(null);
       await retryFilingMutation.mutateAsync({
         filingId: activeFiling.id,
         comments: "Retry requested from returns workspace.",
       });
+      setFilingActionFeedback({ tone: "success", message: "Retry request accepted. Refresh status after the provider processes the next attempt." });
       toast.success("Filing retry started.");
     } catch (error) {
-      toast.error(getErrorMessage(error));
+      const message = getFilingActionErrorMessage(error);
+      setFilingActionFeedback({ tone: "warning", message });
+      toast.error(message);
     }
   };
 
   const handleResyncFiling = async () => {
     if (!activeFiling) return;
     try {
+      setFilingActionFeedback(null);
       await resyncFilingMutation.mutateAsync(activeFiling.id);
-      toast.success("Filing status resynced.");
+      setFilingActionFeedback({ tone: "success", message: "Status refresh requested. Check the filing progress section for the next provider update." });
+      toast.success("Filing status refreshed.");
     } catch (error) {
-      toast.error(getErrorMessage(error));
+      const message = getFilingActionErrorMessage(error);
+      setFilingActionFeedback({ tone: "warning", message });
+      toast.error(message);
     }
   };
 
   const handleRequeueAfterReview = async () => {
     if (!activeFiling) return;
     try {
+      setFilingActionFeedback(null);
       await requeueAfterReviewMutation.mutateAsync({
         filingId: activeFiling.id,
-        comments: "Requeued after support review from returns workspace.",
+        comments: "Requeued after operator review from returns workspace.",
       });
+      setFilingActionFeedback({ tone: "success", message: "Requeue request accepted. Resume tracking in the filing progress section below." });
       toast.success("Filing requeued after review.");
     } catch (error) {
-      toast.error(getErrorMessage(error));
+      const message = getFilingActionErrorMessage(error);
+      setFilingActionFeedback({ tone: "warning", message });
+      toast.error(message);
     }
   };
 
@@ -714,7 +1015,7 @@ export default function ReturnsPage() {
     try {
       await escalateFilingAlertsMutation.mutateAsync({
         filingId: activeFiling.id,
-        comments: "Escalated from returns workspace for routed support follow-up.",
+        comments: "Escalated from returns workspace for routed follow-up.",
       });
       toast.success("Operational alerts escalated.");
     } catch (error) {
@@ -724,19 +1025,19 @@ export default function ReturnsPage() {
 
   const handleRequestWhiteBooksOtp = async () => {
     if (!selectedWorkspaceId || !selectedClientId) {
-      toast.error("Select workspace and client before starting WhiteBooks authentication.");
+      toast.error("Select workspace and client before starting filing access verification.");
       return;
     }
     try {
+      setFilingActionFeedback(null);
       const session = await requestWhiteBooksOTPMutation.mutateAsync({
         workspace: selectedWorkspaceId,
         client: selectedClientId,
         gstin: selectedGstinId ?? undefined,
         provider: "whitebooks",
-        email: whiteBooksEmail.trim() || user?.email || undefined,
       });
       setWhiteBooksTxn(session.txn || "");
-      toast.success("WhiteBooks OTP requested.");
+      toast.success("Provider OTP requested.");
     } catch (error) {
       toast.error(getErrorMessage(error));
     }
@@ -744,24 +1045,31 @@ export default function ReturnsPage() {
 
   const handleVerifyWhiteBooksOtp = async () => {
     if (!activeWhiteBooksAuthSession) {
-      toast.error("Request a WhiteBooks OTP first.");
+      toast.error("Request an OTP first.");
       return;
     }
     if (!whiteBooksOtp.trim()) {
-      toast.error("Enter the OTP received from WhiteBooks.");
+      toast.error("Enter the OTP you received.");
       return;
     }
     try {
+      setFilingActionFeedback(null);
       const session = await verifyWhiteBooksOTPMutation.mutateAsync({
         sessionId: activeWhiteBooksAuthSession.id,
         otp: whiteBooksOtp.trim(),
         txn: whiteBooksTxn.trim() || activeWhiteBooksAuthSession.txn || undefined,
       });
       setWhiteBooksTxn(session.txn || "");
+      setFilingActionFeedback({
+        tone: "success",
+        message: session.response_contract_confirmed
+          ? "OTP verified. This filing session is now active for this GSTIN and can be used for up to 6 hours."
+          : "OTP verified. If filing is still locked, request a fresh OTP for this GSTIN and verify it again before resuming.",
+      });
       toast.success(
         session.response_contract_confirmed
-          ? "WhiteBooks session activated."
-          : "WhiteBooks auth token captured. Session mapping is still pending contract confirmation.",
+          ? "Provider session activated."
+          : "Provider auth token captured. Session mapping is still pending contract confirmation.",
       );
     } catch (error) {
       toast.error(getErrorMessage(error));
@@ -772,6 +1080,7 @@ export default function ReturnsPage() {
   const outwardSupplies = (summary.outward_supplies as Record<string, unknown> | undefined) ?? {};
   const itcSummary = (summary.itc_summary as Record<string, unknown> | undefined) ?? {};
   const reconciliationSummary = (summary.reconciliation as Record<string, unknown> | undefined) ?? {};
+  const returnPeriodExceptionCount = getPeriodExceptionCountFromSummary(summary);
 
   const handleExport = async () => {
     if (!selectedWorkspaceId || !selectedClientId || !selectedPeriodId) {
@@ -832,7 +1141,7 @@ export default function ReturnsPage() {
                 {selectedClient?.legal_name ?? "Choose a client"}{selectedPeriod ? ` for ${selectedPeriod.period}` : ""}
               </h2>
               <p className="mt-3 max-w-xl text-sm leading-7 text-indigo-100/95">
-                Move from prepared books to approval-ready returns, then into controlled filing with provider evidence and readiness checks intact.
+                Move from prepared books to approval-ready returns, then into controlled filing with proof and readiness checks intact.
               </p>
             </div>
             <div className="rounded-3xl bg-white/10 p-4 ring-1 ring-white/10 backdrop-blur-sm">
@@ -867,7 +1176,7 @@ export default function ReturnsPage() {
 
         <SectionCard
           title="Return workflow focus"
-          description="Use this page to validate readiness before approvals and provider filing begin."
+          description="Use this page to validate readiness before approvals and filing begin."
           variant="soft"
         >
           <div className="space-y-3">
@@ -904,6 +1213,17 @@ export default function ReturnsPage() {
                   <p className="text-sm font-semibold text-rose-900">Reconciliation is no longer current</p>
                   <p className="mt-1 text-sm leading-6 text-rose-700">
                     Source imports were changed after the last reconciliation run. Re-run reconciliation before approving, filing, or sharing this return output.
+                  </p>
+                </div>
+              </div>
+            ) : null}
+            {totalPeriodExceptionCount > 0 ? (
+              <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-4">
+                <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-amber-900">Out-of-period source exceptions are part of this return context</p>
+                  <p className="mt-1 text-sm leading-6 text-amber-700">
+                    {totalPeriodExceptionCount} source transaction{totalPeriodExceptionCount === 1 ? "" : "s"} {totalPeriodExceptionCount === 1 ? "was" : "were"} accepted through a period exception. Review those reasons before approving, exporting, or filing this return.
                   </p>
                 </div>
               </div>
@@ -973,6 +1293,21 @@ export default function ReturnsPage() {
               </div>
               <Button asChild size="sm" variant="outline" className="border-rose-200 bg-white text-rose-900 hover:bg-rose-100">
                 <Link href="/reconciliation">Open reconciliation</Link>
+              </Button>
+            </div>
+          </div>
+        ) : totalPeriodExceptionCount > 0 ? (
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
+            <div className="flex items-start gap-3">
+              <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600" />
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-amber-950">Period exceptions detected in return inputs</p>
+                <p className="mt-1 leading-6">
+                  Sales rows with period exceptions: {salesPeriodExceptionCount}. Purchase rows with period exceptions: {purchasePeriodExceptionCount}. Review the affected source transactions in Reports before finalizing the return.
+                </p>
+              </div>
+              <Button asChild size="sm" variant="outline" className="border-amber-200 bg-white text-amber-900 hover:bg-amber-100">
+                <Link href="/reports">Open reports</Link>
               </Button>
             </div>
           </div>
@@ -1204,8 +1539,12 @@ export default function ReturnsPage() {
       >
         <AppModalContent size="xl">
           <AppModalHeader
-            title="Return detail"
-            description="Review the prepared summary, reconciliation impact, and filing status before approval or manual filing."
+            title={activeReturn ? `${activeReturn.return_type.toUpperCase()} review summary` : "Return detail"}
+            description={
+              activeReturn
+                ? `${activeReturn.client_name ?? "Client"} • ${activeReturn.gstin_value ?? ""} • ${activeReturn.compliance_period_label ?? ""}`
+                : "Review the prepared summary, reconciliation impact, and filing status before approval or manual filing."
+            }
           />
           <AppModalBody>
           <div className="space-y-6">
@@ -1216,8 +1555,40 @@ export default function ReturnsPage() {
             ) : activeReturn ? (
               <>
                 <SectionCard
-                  title={`${activeReturn.return_type.toUpperCase()} filing status`}
-                  description={`${activeReturn.client_name ?? "Client"} • ${activeReturn.gstin_value ?? ""} • ${activeReturn.compliance_period_label ?? ""}`}
+                  title="At a glance"
+                  description="A quick summary of where this draft stands before you review the full totals."
+                >
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-2xl bg-slate-50 p-4">
+                      <p className="text-sm text-slate-500">Return stage</p>
+                      <p className="mt-2 text-lg font-semibold text-slate-900">{activeReturn.status.replace(/_/g, " ")}</p>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 p-4">
+                      <p className="text-sm text-slate-500">Approval state</p>
+                      <p className="mt-2 text-lg font-semibold text-slate-900">
+                        {activeReturn.approved_by_name ? "Approved" : activeApproval ? activeApproval.status.replace(/_/g, " ") : "Pending"}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 p-4">
+                      <p className="text-sm text-slate-500">Filing proof</p>
+                      <p className="mt-2 text-lg font-semibold text-slate-900">{activeReturn.arn || "Not captured"}</p>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 p-4">
+                      <p className="text-sm text-slate-500">Review attention</p>
+                      <p className="mt-2 text-lg font-semibold text-slate-900">
+                        {isReturnFlowBlockedByStaleSource
+                          ? "Re-run reconciliation"
+                          : totalPeriodExceptionCount > 0
+                            ? `${totalPeriodExceptionCount} source exception${totalPeriodExceptionCount === 1 ? "" : "s"}`
+                            : "No special flags"}
+                      </p>
+                    </div>
+                  </div>
+                </SectionCard>
+
+                <SectionCard
+                  title={`${activeReturn.return_type.toUpperCase()} workflow status`}
+                  description="Prepared ownership, approval progress, filing proof, and source review warnings for this draft."
                   action={<StatusBadge label={activeReturn.status.replace(/_/g, " ")} variant={getStatusVariant(activeReturn.status)} />}
                 >
                   {isReturnFlowBlockedByStaleSource ? (
@@ -1236,16 +1607,32 @@ export default function ReturnsPage() {
                       </div>
                     </div>
                   ) : null}
-                  <div className="grid gap-4 md:grid-cols-2 text-sm">
-                    <div className="space-y-3">
-                      <div><span className="text-slate-500">Prepared by:</span> <span className="font-medium text-slate-900">{activeReturn.prepared_by_name ?? "System"}</span></div>
-                      <div><span className="text-slate-500">Approved by:</span> <span className="font-medium text-slate-900">{activeReturn.approved_by_name ?? "Pending"}</span></div>
-                      <div><span className="text-slate-500">Filed by:</span> <span className="font-medium text-slate-900">{activeReturn.filed_by_name ?? "Pending"}</span></div>
+                  {totalPeriodExceptionCount > 0 ? (
+                    <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
+                      <div className="flex items-start gap-3">
+                        <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600" />
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-amber-950">Period exceptions exist in the source transactions behind this return</p>
+                          <p className="mt-1 leading-6">
+                            Sales rows with exceptions: {salesPeriodExceptionCount}. Purchase rows with exceptions: {purchasePeriodExceptionCount}. Keep those justifications in mind before approval or filing.
+                          </p>
+                        </div>
+                        <Button asChild size="sm" variant="outline" className="border-amber-200 bg-white text-amber-900 hover:bg-amber-100">
+                          <Link href="/reports">Review source rows</Link>
+                        </Button>
+                      </div>
                     </div>
-                    <div className="space-y-3">
-                      <div><span className="text-slate-500">Prepared / Updated:</span> <span className="font-medium text-slate-900">{formatDateTime(activeReturn.updated_at)}</span></div>
+                  ) : null}
+                  <div className="grid gap-4 text-sm md:grid-cols-2">
+                    <div className="space-y-3 rounded-2xl bg-slate-50 p-4">
+                      <div><span className="text-slate-500">Prepared by:</span> <span className="font-medium text-slate-900">{activeReturn.prepared_by_name ?? "System"}</span></div>
+                      <div><span className="text-slate-500">Prepared / updated:</span> <span className="font-medium text-slate-900">{formatDateTime(activeReturn.updated_at)}</span></div>
+                      <div><span className="text-slate-500">Approved by:</span> <span className="font-medium text-slate-900">{activeReturn.approved_by_name ?? "Pending"}</span></div>
+                    </div>
+                    <div className="space-y-3 rounded-2xl bg-slate-50 p-4">
+                      <div><span className="text-slate-500">Filed by:</span> <span className="font-medium text-slate-900">{activeReturn.filed_by_name ?? "Pending"}</span></div>
                       <div><span className="text-slate-500">Filed at:</span> <span className="font-medium text-slate-900">{formatDateTime(activeReturn.filed_at)}</span></div>
-                      <div><span className="text-slate-500">ARN:</span> <span className="font-medium text-slate-900">{activeReturn.arn || "Not captured"}</span></div>
+                      <div><span className="text-slate-500">ARN / filing proof:</span> <span className="font-medium text-slate-900">{activeReturn.arn || "Not captured"}</span></div>
                     </div>
                   </div>
                 </SectionCard>
@@ -1254,7 +1641,7 @@ export default function ReturnsPage() {
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                     {Object.entries(outwardSupplies).map(([key, value]) => (
                       <div key={key} className="rounded-2xl bg-slate-50 p-4">
-                        <p className="text-sm capitalize text-slate-500">{key.replace(/_/g, " ")}</p>
+                        <p className="text-sm text-slate-500">{formatSummaryKey(key)}</p>
                         <p className="mt-2 text-lg font-semibold text-slate-900">
                           {key.includes("count") ? String(value) : `Rs. ${formatMoney(String(value))}`}
                         </p>
@@ -1268,7 +1655,7 @@ export default function ReturnsPage() {
                     <div className="grid gap-3 md:grid-cols-2">
                       {Object.entries(itcSummary).map(([key, value]) => (
                         <div key={key} className="rounded-2xl bg-slate-50 p-4">
-                          <p className="text-sm capitalize text-slate-500">{key.replace(/_/g, " ")}</p>
+                          <p className="text-sm text-slate-500">{formatSummaryKey(key)}</p>
                           <p className="mt-2 text-lg font-semibold text-slate-900">
                             {key.includes("count") ? String(value) : `Rs. ${formatMoney(String(value))}`}
                           </p>
@@ -1285,7 +1672,7 @@ export default function ReturnsPage() {
                     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                       {Object.entries(reconciliationSummary).map(([key, value]) => (
                         <div key={key} className="rounded-2xl bg-slate-50 p-4">
-                          <p className="text-sm capitalize text-slate-500">{key.replace(/_/g, " ")}</p>
+                          <p className="text-sm text-slate-500">{formatSummaryKey(key)}</p>
                           <p className="mt-2 text-lg font-semibold text-slate-900">{String(value ?? "—")}</p>
                         </div>
                       ))}
@@ -1296,9 +1683,53 @@ export default function ReturnsPage() {
                 </SectionCard>
 
                 <SectionCard
-                  title="Actions"
-                  description="Advance the draft through review, provider filing, and fallback manual filing."
+                  title="Filing flow"
+                  description="Follow this simple sequence: approve the draft, complete OTP verification, then start live filing."
                 >
+                  {primaryFilingGuidance ? (
+                    <div
+                      className={`mb-4 rounded-2xl border px-4 py-4 text-sm ${
+                        primaryFilingGuidance.tone === "danger"
+                          ? "border-rose-200 bg-rose-50 text-rose-900"
+                          : primaryFilingGuidance.tone === "warning"
+                            ? "border-amber-200 bg-amber-50 text-amber-900"
+                            : primaryFilingGuidance.tone === "success"
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                              : "border-sky-200 bg-sky-50 text-sky-900"
+                      }`}
+                    >
+                      <p
+                        className={
+                          primaryFilingGuidance.tone === "danger"
+                            ? "font-medium text-rose-950"
+                            : primaryFilingGuidance.tone === "warning"
+                              ? "font-medium text-amber-950"
+                              : primaryFilingGuidance.tone === "success"
+                                ? "font-medium text-emerald-950"
+                                : "font-medium text-sky-950"
+                        }
+                      >
+                        {primaryFilingGuidance.title}
+                      </p>
+                      <p className="mt-1">{primaryFilingGuidance.description}</p>
+                    </div>
+                  ) : null}
+                  <div className="mb-4 grid gap-3 md:grid-cols-3">
+                    <div className={`rounded-2xl border px-4 py-3 text-sm ${activeReturn.status === "approved" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+                      <p className="font-medium">1. Approval</p>
+                      <p className="mt-1">{activeReturn.status === "approved" ? "Approved and ready for the OTP step." : "Approve the return before live filing can begin."}</p>
+                    </div>
+                    <div className={`rounded-2xl border px-4 py-3 text-sm ${filingAuthOtpVerified ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+                      <p className="font-medium">2. OTP verification</p>
+                      <p className="mt-1">{filingAuthOtpVerified ? "OTP accepted for this filing session." : "Request OTP, then verify it in the section below."}</p>
+                    </div>
+                    <div className={`rounded-2xl border px-4 py-3 text-sm ${!startFilingDisabledReason ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+                      <p className="font-medium">3. Live filing</p>
+                      <p className="mt-1">
+                        {startFilingDisabledReason ?? (filingRestartReady ? "Fresh OTP verified. You can now resume the earlier filing run." : "Live filing can start now.")}
+                      </p>
+                    </div>
+                  </div>
                   <div className="flex flex-wrap gap-2">
                     <Button
                       variant="outline"
@@ -1316,22 +1747,16 @@ export default function ReturnsPage() {
                     <Button
                       onClick={handleStartPortalFiling}
                       disabled={
-                        activeReturn.status !== "approved" ||
-                        isReturnFlowBlockedByStaleSource ||
-                        startFilingMutation.isPending ||
-                        activeFiling?.status === "submitted" ||
-                        activeFiling?.status === "filed" ||
-                        activeFiling?.status === "arn_received" ||
-                        activeFiling?.status === "queued_for_filing"
+                        Boolean(startFilingDisabledReason) || startFilingMutation.isPending
                       }
                     >
                       {startFilingMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-                      <span className="ml-2">Start WhiteBooks filing</span>
+                      <span className="ml-2">{filingRestartReady ? "Resume filing" : "Start filing"}</span>
                     </Button>
                     <Button
                       variant="outline"
                       onClick={handleRetryFiling}
-                      disabled={!activeFiling || !retrySupportAction?.allowed || retryFilingMutation.isPending}
+                      disabled={Boolean(retryFilingDisabledReason) || retryFilingMutation.isPending}
                     >
                       {retryFilingMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <RefreshCcw className="size-4" />}
                       <span className="ml-2">Retry filing</span>
@@ -1339,18 +1764,14 @@ export default function ReturnsPage() {
                     <Button
                       variant="outline"
                       onClick={handleResyncFiling}
-                      disabled={!activeFiling || !resyncSupportAction?.allowed || resyncFilingMutation.isPending}
+                      disabled={Boolean(resyncDisabledReason) || resyncFilingMutation.isPending}
                     >
-                      {resyncFilingMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Resync status"}
+                      {resyncFilingMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Refresh status"}
                     </Button>
                     <Button
                       variant="outline"
                       onClick={handleRequeueAfterReview}
-                      disabled={
-                        !activeFiling ||
-                        !requeueSupportAction?.allowed ||
-                        requeueAfterReviewMutation.isPending
-                      }
+                      disabled={Boolean(requeueDisabledReason) || requeueAfterReviewMutation.isPending}
                     >
                       {requeueAfterReviewMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Requeue after review"}
                     </Button>
@@ -1361,6 +1782,16 @@ export default function ReturnsPage() {
                     >
                       Mark filed
                     </Button>
+                  </div>
+                  <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
+                    <p className="font-medium text-slate-900">When other actions unlock</p>
+                    <p className="mt-1">
+                      <span className="font-medium text-slate-900">Retry filing</span> becomes useful only after a real filing run fails.
+                      {" "}
+                      <span className="font-medium text-slate-900">Refresh status</span> becomes useful after a filing run has reached the gateway.
+                      {" "}
+                      <span className="font-medium text-slate-900">Requeue after review</span> is reserved for controlled recovery after support review.
+                    </p>
                   </div>
                   {activeApproval ? (
                     <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
@@ -1374,8 +1805,8 @@ export default function ReturnsPage() {
 
                 <div ref={filingLifecycleRef}>
                 <SectionCard
-                  title="Provider filing lifecycle"
-                  description="Track WhiteBooks-backed filing attempts, live draft-save progress, and provider events without overstating filing completion."
+                  title="Filing progress & access"
+                  description="Use this section for OTP access, current filing progress, and confirmation updates after the main filing step."
                   action={
                     activeFiling ? (
                       <div className="flex flex-wrap items-center gap-2">
@@ -1392,9 +1823,9 @@ export default function ReturnsPage() {
                     <div className="rounded-2xl border border-slate-200 bg-white p-4">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
-                          <p className="text-sm font-semibold text-slate-900">WhiteBooks authentication</p>
+                          <p className="text-sm font-semibold text-slate-900">OTP access check</p>
                           <p className="mt-1 text-sm text-slate-600">
-                            Request an OTP and capture the auth-token response here before switching filing from sandbox to live WhiteBooks transport.
+                            This filing session is saved for the selected workspace, client, GSTIN, and provider only. If the same customer has multiple clients or GSTINs, each filing context needs its own OTP session.
                           </p>
                         </div>
                         {activeWhiteBooksAuthSession ? (
@@ -1407,24 +1838,31 @@ export default function ReturnsPage() {
                         )}
                       </div>
 
-                      <div className="mt-4 grid gap-4 md:grid-cols-3">
+                      <div
+                        className={`mt-4 rounded-2xl border px-4 py-4 text-sm ${
+                          otpAccessLatestMessage.tone === "danger"
+                            ? "border-rose-200 bg-rose-50 text-rose-900"
+                            : otpAccessLatestMessage.tone === "warning"
+                              ? "border-amber-200 bg-amber-50 text-amber-900"
+                              : otpAccessLatestMessage.tone === "success"
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                                : "border-sky-200 bg-sky-50 text-sky-900"
+                        }`}
+                      >
+                        <p className="font-medium">
+                          {otpAccessLatestMessage.title}
+                        </p>
+                        <p className="mt-1">{otpAccessLatestMessage.description}</p>
+                      </div>
+
+                      <div className="mt-4 grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
-                          <Label htmlFor="whitebooks-email">WhiteBooks email</Label>
-                          <Input
-                            id="whitebooks-email"
-                            value={whiteBooksEmail}
-                            onChange={(event) => setWhiteBooksEmail(event.target.value)}
-                            placeholder={user?.email ?? "ops@example.com"}
-                            className="h-11 bg-slate-50"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="whitebooks-txn">TXN</Label>
+                          <Label htmlFor="whitebooks-txn">Session reference</Label>
                           <Input
                             id="whitebooks-txn"
                             value={whiteBooksTxn}
                             onChange={(event) => setWhiteBooksTxn(event.target.value)}
-                            placeholder={activeWhiteBooksAuthSession?.txn || "Auto-captured if WhiteBooks returns it"}
+                            placeholder={activeWhiteBooksAuthSession?.txn || "Auto-captured when returned by the gateway"}
                             className="h-11 bg-slate-50"
                           />
                         </div>
@@ -1444,14 +1882,14 @@ export default function ReturnsPage() {
                         <Button
                           variant="outline"
                           onClick={handleRequestWhiteBooksOtp}
-                          disabled={!selectedWorkspaceId || !selectedClientId || requestWhiteBooksOTPMutation.isPending}
+                          disabled={!canRequestOtp}
                         >
                           {requestWhiteBooksOTPMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Request OTP"}
                         </Button>
                         <Button
                           variant="outline"
                           onClick={handleVerifyWhiteBooksOtp}
-                          disabled={!activeWhiteBooksAuthSession || verifyWhiteBooksOTPMutation.isPending}
+                          disabled={!canVerifyOtp}
                         >
                           {verifyWhiteBooksOTPMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Verify OTP"}
                         </Button>
@@ -1459,21 +1897,21 @@ export default function ReturnsPage() {
 
                       {whiteBooksAuthSessionsQuery.isLoading ? (
                         <div className="mt-4">
-                          <LoadingState message="Loading WhiteBooks auth status..." />
-                        </div>
-                      ) : whiteBooksAuthSessionsQuery.isError ? (
-                        <div className="mt-4">
-                          <ErrorState description={getErrorMessage(whiteBooksAuthSessionsQuery.error)} />
+                          <LoadingState message="Loading filing access status..." />
                         </div>
                       ) : activeWhiteBooksAuthSession ? (
                         <div className="mt-4 space-y-3">
+                          <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                            <p className="font-medium text-slate-900">Current session facts</p>
+                            <p className="mt-1">
+                              {activeWhiteBooksAuthSession.txn
+                                ? "This saved session belongs only to the selected workspace, client, GSTIN, and provider."
+                                : "The session will show a saved reference after WhiteBooks returns it for this GSTIN."}
+                            </p>
+                          </div>
                           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                             <div className="rounded-2xl bg-slate-50 p-4">
-                              <p className="text-sm text-slate-500">Email</p>
-                              <p className="mt-2 font-semibold text-slate-900">{activeWhiteBooksAuthSession.email}</p>
-                            </div>
-                            <div className="rounded-2xl bg-slate-50 p-4">
-                              <p className="text-sm text-slate-500">TXN</p>
+                              <p className="text-sm text-slate-500">Session reference</p>
                               <p className="mt-2 font-semibold text-slate-900">{activeWhiteBooksAuthSession.txn || "Pending"}</p>
                             </div>
                             <div className="rounded-2xl bg-slate-50 p-4">
@@ -1481,42 +1919,34 @@ export default function ReturnsPage() {
                               <p className="mt-2 font-semibold text-slate-900">{formatDateTime(activeWhiteBooksAuthSession.last_requested_at)}</p>
                             </div>
                             <div className="rounded-2xl bg-slate-50 p-4">
-                              <p className="text-sm text-slate-500">Response contract</p>
+                              <p className="text-sm text-slate-500">Session status</p>
                               <p className="mt-2 font-semibold text-slate-900">
-                                {activeWhiteBooksAuthSession.response_contract_confirmed ? "Confirmed" : "Pending confirmation"}
+                                {activeWhiteBooksAuthSession.response_contract_confirmed
+                                  ? "Active for this GSTIN"
+                                  : filingAuthOtpVerified
+                                    ? "Waiting for final confirmation"
+                                    : filingAuthOtpRequested
+                                      ? "Needs OTP verification"
+                                      : "Not started"}
+                              </p>
+                            </div>
+                            <div className="rounded-2xl bg-slate-50 p-4">
+                              <p className="text-sm text-slate-500">Session expiry</p>
+                              <p className="mt-2 font-semibold text-slate-900">
+                                {activeWhiteBooksAuthFreshness?.expires_at
+                                  ? formatDateTime(activeWhiteBooksAuthFreshness.expires_at)
+                                  : "Starts after OTP verification"}
                               </p>
                             </div>
                           </div>
-                          {activeWhiteBooksAuthSession.error_summary && Object.keys(activeWhiteBooksAuthSession.error_summary).length > 0 ? (
-                            <ErrorState
-                              title="WhiteBooks authentication issue"
-                              description={String(
-                                activeWhiteBooksAuthSession.error_summary.message ??
-                                  activeWhiteBooksAuthSession.error_summary.code ??
-                                  "A WhiteBooks authentication issue was recorded.",
-                              )}
-                            />
-                          ) : null}
-                          {!activeWhiteBooksAuthSession.response_contract_confirmed ? (
-                            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                              Auth token capture is working, but live filing still stays disabled until we confirm the real WhiteBooks auth-token success payload.
-                            </div>
-                          ) : null}
                         </div>
-                      ) : (
-                        <div className="mt-4">
-                          <EmptyState
-                            title="No WhiteBooks auth session yet"
-                            description="Request an OTP here to create the first WhiteBooks authentication session for this client context."
-                          />
-                        </div>
-                      )}
+                      ) : null}
                     </div>
 
                     {!activeFiling ? (
                       <EmptyState
-                        title="No provider filing started"
-                        description="Approve the return first, then start the WhiteBooks filing flow to create provider attempts and event history."
+                        title="No filing run started"
+                        description="Approve the return first, then start filing to create attempt history and status updates."
                       />
                     ) : (
                       <div className="space-y-5">
@@ -1524,16 +1954,16 @@ export default function ReturnsPage() {
                         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
                           {activeFiling.return_type === "gstr3b" ? (
                             <>
-                              <p className="font-medium text-amber-950">Saved to WhiteBooks draft, offset still pending</p>
+                              <p className="font-medium text-amber-950">Saved to draft, offset still pending</p>
                               <p className="mt-1">
-                                This GSTR-3B has been pushed to WhiteBooks as a draft save only. Liability offset, final filing, and ARN capture are still separate steps.
+                                This GSTR-3B has been saved as a draft only. Liability offset, final filing, and ARN capture are still separate steps.
                               </p>
                             </>
                           ) : (
                             <>
-                              <p className="font-medium text-amber-950">Saved to WhiteBooks draft, not filed</p>
+                              <p className="font-medium text-amber-950">Saved to draft, not filed</p>
                               <p className="mt-1">
-                                This return has been pushed to WhiteBooks as a draft save only. Final GST filing, ARN capture, and portal completion are still separate steps.
+                                This return has been saved as a draft only. Final GST filing, ARN capture, and portal completion are still separate steps.
                               </p>
                             </>
                           )}
@@ -1542,18 +1972,18 @@ export default function ReturnsPage() {
 
                       {activeFilingProviderStage === "proceeded_to_file" ? (
                         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                          <p className="font-medium text-amber-950">Proceeded in WhiteBooks, not filed</p>
+                          <p className="font-medium text-amber-950">Proceeded in filing flow, not filed</p>
                           <p className="mt-1">
-                            WhiteBooks has accepted the draft and the proceed-to-file step, but final GST filing automation, ARN capture, and portal completion are still pending implementation.
+                            The filing channel has accepted the draft and the proceed-to-file step, but final GST filing automation, ARN capture, and portal completion are still pending implementation.
                           </p>
                         </div>
                       ) : null}
 
                       {activeFilingProviderStage === "offset_applied" ? (
                         <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-                          <p className="font-medium text-sky-950">Offset applied in WhiteBooks, final filing still pending</p>
+                          <p className="font-medium text-sky-950">Offset applied in filing flow, final filing still pending</p>
                           <p className="mt-1">
-                            WhiteBooks has accepted the GSTR-3B draft save and liability offset, but final filing and ARN capture are still pending.
+                            The filing channel has accepted the GSTR-3B draft save and liability offset, but final filing and ARN capture are still pending.
                           </p>
                         </div>
                       ) : null}
@@ -1564,14 +1994,14 @@ export default function ReturnsPage() {
                             <>
                               <p className="font-medium text-sky-950">GSTR-3B final filing requested, awaiting ARN or rejection status</p>
                               <p className="mt-1">
-                                WhiteBooks accepted the GSTR-3B final filing request, but this return must still be treated as confirmation-pending until ARN or a terminal provider response is synced back.
+                                The filing channel accepted the GSTR-3B final filing request, but this return must still be treated as confirmation-pending until ARN or a terminal response is refreshed back.
                               </p>
                             </>
                           ) : (
                             <>
                               <p className="font-medium text-sky-950">Final filing requested, awaiting confirmation</p>
                               <p className="mt-1">
-                                WhiteBooks accepted the final filing request, but this return should still be treated as confirmation-pending until ARN or terminal status is synced back.
+                                The filing channel accepted the final filing request, but this return should still be treated as confirmation-pending until ARN or terminal status is refreshed back.
                               </p>
                             </>
                           )}
@@ -1620,7 +2050,7 @@ export default function ReturnsPage() {
 
                       {supportActionsSummary?.summary_reason ? (
                         <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
-                          <p className="font-medium text-slate-900">Backend support action guidance</p>
+                          <p className="font-medium text-slate-900">Recommended next action</p>
                           <p className="mt-1">{supportActionsSummary.summary_reason}</p>
                           <p className="mt-2 text-xs uppercase tracking-wide text-slate-500">
                             Recommended: {supportActionsSummary.recommended_action.replace(/_/g, " ")}
@@ -1643,9 +2073,9 @@ export default function ReturnsPage() {
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-700">
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
-                              <p className="font-medium text-slate-900">Support status summary</p>
+                              <p className="font-medium text-slate-900">Operator status summary</p>
                               <p className="mt-1 text-sm text-slate-600">
-                                Compact operator snapshot for current filing state, guidance, evidence, and intervention depth.
+                                Compact operator snapshot for current filing state, guidance, proof, and intervention depth.
                               </p>
                             </div>
                             <StatusBadge
@@ -1666,7 +2096,7 @@ export default function ReturnsPage() {
                               <p className="mt-2 font-medium text-slate-900">{supportStatusSummary.filing_status.replace(/_/g, " ")}</p>
                             </div>
                             <div className="rounded-2xl bg-white p-3">
-                              <p className="text-xs uppercase tracking-wide text-slate-500">Provider stage</p>
+                              <p className="text-xs uppercase tracking-wide text-slate-500">Filing stage</p>
                               <p className="mt-2 font-medium text-slate-900">
                                 {getProviderStageLabel((supportStatusSummary.provider_stage || "") as WhiteBooksProviderStage, activeFiling.return_type)}
                               </p>
@@ -1676,7 +2106,7 @@ export default function ReturnsPage() {
                               <p className="mt-2 font-medium text-slate-900">{supportStatusSummary.intervention_count}</p>
                             </div>
                             <div className="rounded-2xl bg-white p-3">
-                              <p className="text-xs uppercase tracking-wide text-slate-500">Evidence flags</p>
+                              <p className="text-xs uppercase tracking-wide text-slate-500">Snapshots available</p>
                               <p className="mt-2 font-medium text-slate-900">
                                 {[
                                   supportStatusSummary.evidence_flags.save_response ? "save" : null,
@@ -1704,10 +2134,8 @@ export default function ReturnsPage() {
                         <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm text-slate-700">
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
-                              <p className="font-medium text-slate-900">Tenant rollout summary</p>
-                              <p className="mt-1 text-sm text-slate-600">
-                                Backend rollout controls for this workspace, GSTIN, provider, and return type context.
-                              </p>
+                              <p className="font-medium text-slate-900">Live rollout summary</p>
+                              <p className="mt-1 text-sm text-slate-600">Live filing controls for this workspace, GSTIN, channel, and return type context.</p>
                             </div>
                             <StatusBadge
                               label={rolloutPolicySummary.live_submission_allowed ? "live enabled" : "live blocked"}
@@ -1728,7 +2156,7 @@ export default function ReturnsPage() {
                               <p className="mt-2 font-medium text-slate-900">{rolloutPolicySummary.live_submission_allowed ? "Allowed" : "Blocked"}</p>
                             </div>
                             <div className="rounded-2xl bg-slate-50 p-3">
-                              <p className="text-xs uppercase tracking-wide text-slate-500">Status sync</p>
+                              <p className="text-xs uppercase tracking-wide text-slate-500">Status refresh</p>
                               <p className="mt-2 font-medium text-slate-900">{rolloutPolicySummary.live_status_sync_allowed ? "Allowed" : "Blocked"}</p>
                             </div>
                           </div>
@@ -1825,15 +2253,15 @@ export default function ReturnsPage() {
 
                       {latestProviderMessage ? (
                         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-                          <p className="font-medium text-slate-900">Latest provider message</p>
+                          <p className="font-medium text-slate-900">Latest filing message</p>
                           <p className="mt-1">{latestProviderMessage}</p>
                         </div>
                       ) : null}
 
                       {latestFailureSummary ? (
                         <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
-                          <p className="font-medium text-rose-950">Latest provider failure</p>
-                          <p className="mt-1">{getRecordString(latestFailureSummary, "message") || activeFiling?.latest_attempt?.failure_message || "Provider step failed."}</p>
+                          <p className="font-medium text-rose-950">Latest filing issue</p>
+                          <p className="mt-1">{getRecordString(latestFailureSummary, "message") || activeFiling?.latest_attempt?.failure_message || "Filing step failed."}</p>
                           <p className="mt-2 text-xs uppercase tracking-wide text-rose-700">
                             Code: {getRecordString(latestFailureSummary, "code") || activeFiling?.latest_attempt?.failure_code || "n/a"}
                             {" • "}
@@ -1847,10 +2275,7 @@ export default function ReturnsPage() {
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
                               <p className="font-medium text-slate-900">Auth session used for this draft save</p>
-                              <p className="mt-1">
-                                Session <span className="font-mono text-xs">{linkedAuthSessionId}</span>
-                                {activeWhiteBooksAuthSession?.email ? ` • ${activeWhiteBooksAuthSession.email}` : ""}
-                              </p>
+                              <p className="mt-1">Session <span className="font-mono text-xs">{linkedAuthSessionId}</span></p>
                             </div>
                             <StatusBadge
                               label={isCurrentAuthSessionLinked ? "current session" : "historical session"}
@@ -1859,7 +2284,7 @@ export default function ReturnsPage() {
                           </div>
                           {!isCurrentAuthSessionLinked ? (
                             <p className="mt-3 text-sm text-slate-600">
-                              The latest WhiteBooks auth session in this workspace is different from the one used for the saved draft. Re-authenticate only if you intend to continue with a new provider session.
+                              The latest filing access session in this workspace is different from the one used for the saved draft. Re-verify only if you intend to continue with a new session.
                             </p>
                           ) : null}
                         </div>
@@ -1869,10 +2294,8 @@ export default function ReturnsPage() {
                         <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm text-slate-700">
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
-                              <p className="font-medium text-slate-900">Provider evidence snapshot</p>
-                              <p className="mt-1 text-sm text-slate-600">
-                                A compact backend summary of the latest provider evidence stored on this filing attempt.
-                              </p>
+                              <p className="font-medium text-slate-900">Filing activity snapshot</p>
+                              <p className="mt-1 text-sm text-slate-600">A compact summary of the latest filing proof stored on this attempt.</p>
                             </div>
                             <StatusBadge
                               label={getProviderStageLabel((providerEvidenceSummary.provider_stage || "") as WhiteBooksProviderStage, activeFiling.return_type)}
@@ -1905,7 +2328,7 @@ export default function ReturnsPage() {
                               </p>
                             </div>
                             <div className="rounded-2xl bg-slate-50 p-3">
-                              <p className="text-xs uppercase tracking-wide text-slate-500">Evidence stored</p>
+                              <p className="text-xs uppercase tracking-wide text-slate-500">Proof stored</p>
                               <p className="mt-2 font-medium text-slate-900">
                                 {[
                                   providerEvidenceSummary.evidence_available.save_response ? "save" : null,
@@ -1934,17 +2357,17 @@ export default function ReturnsPage() {
 
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <div className="rounded-2xl bg-slate-50 p-4">
-                          <p className="text-sm text-slate-500">Provider stage</p>
+                          <p className="text-sm text-slate-500">Filing stage</p>
                           <div className="mt-2">
                             <StatusBadge label={getProviderStageLabel(activeFilingProviderStage, activeFiling.return_type)} variant={getProviderStageVariant(activeFilingProviderStage)} />
                           </div>
                         </div>
                         <div className="rounded-2xl bg-slate-50 p-4">
-                          <p className="text-sm text-slate-500">Provider</p>
+                          <p className="text-sm text-slate-500">Filing channel</p>
                           <p className="mt-2 font-semibold text-slate-900">{activeFiling.provider}</p>
                         </div>
                         <div className="rounded-2xl bg-slate-50 p-4">
-                          <p className="text-sm text-slate-500">Provider Ref</p>
+                          <p className="text-sm text-slate-500">Filing reference</p>
                           <p className="mt-2 font-semibold text-slate-900">{activeFiling.provider_reference_id || "Pending"}</p>
                         </div>
                         <div className="rounded-2xl bg-slate-50 p-4">
@@ -1959,18 +2382,18 @@ export default function ReturnsPage() {
 
                       {activeFiling.error_summary && Object.keys(activeFiling.error_summary).length > 0 ? (
                         <ErrorState
-                          title="Provider filing issue"
-                          description={String(activeFiling.error_summary.message ?? activeFiling.error_summary.code ?? "A provider-side issue was recorded.")}
+                          title="Filing issue"
+                          description={String(activeFiling.error_summary.message ?? activeFiling.error_summary.code ?? "A filing-side issue was recorded.")}
                         />
                       ) : null}
 
                       {latestSavedProviderResponse ? (
                         <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                           <summary className="cursor-pointer list-none font-medium text-slate-900">
-                            Support evidence: sanitized WhiteBooks draft-save response
+                            Operator snapshot: sanitized draft-save response
                           </summary>
                           <p className="mt-2 text-sm text-slate-600">
-                            This payload is stored after redaction so support can inspect the WhiteBooks draft-save result without exposing live secrets.
+                            This payload is stored after redaction so operators can inspect the draft-save result without exposing live secrets.
                           </p>
                           <pre className="mt-3 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">
                             {JSON.stringify(latestSavedProviderResponse, null, 2)}
@@ -1981,10 +2404,10 @@ export default function ReturnsPage() {
                       {latestOffsetProviderResponse ? (
                         <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                           <summary className="cursor-pointer list-none font-medium text-slate-900">
-                            Support evidence: sanitized WhiteBooks offset response
+                            Operator snapshot: sanitized offset response
                           </summary>
                           <p className="mt-2 text-sm text-slate-600">
-                            This payload is stored after redaction so support can inspect the WhiteBooks liability-offset result without exposing live secrets.
+                            This payload is stored after redaction so operators can inspect the liability-offset result without exposing live secrets.
                           </p>
                           <pre className="mt-3 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">
                             {JSON.stringify(latestOffsetProviderResponse, null, 2)}
@@ -1995,10 +2418,10 @@ export default function ReturnsPage() {
                       {latestStatusProviderResponse || latestTrackProviderResponse ? (
                         <details className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                           <summary className="cursor-pointer list-none font-medium text-slate-900">
-                            Support evidence: sanitized WhiteBooks status sync responses
+                            Operator snapshot: sanitized status refresh responses
                           </summary>
                           <p className="mt-2 text-sm text-slate-600">
-                            These payloads are captured during resync so support can inspect ARN, status, or rejection details without exposing live secrets.
+                            These payloads are captured during refresh so operators can inspect ARN, status, or rejection details without exposing live secrets.
                           </p>
                           {latestStatusProviderResponse ? (
                             <>
@@ -2037,7 +2460,7 @@ export default function ReturnsPage() {
                                     <TableHead>Attempt</TableHead>
                                     <TableHead>Status</TableHead>
                                     <TableHead>Stage</TableHead>
-                                    <TableHead>Provider Ref</TableHead>
+                                    <TableHead>Filing Ref</TableHead>
                                     <TableHead>Completed</TableHead>
                                   </TableRow>
                                 </TableHeader>
@@ -2059,7 +2482,7 @@ export default function ReturnsPage() {
                               </Table>
                             </div>
                           ) : (
-                            <EmptyState title="No filing attempts recorded" description="Attempts will appear here after provider filing starts." />
+                            <EmptyState title="No filing attempts recorded" description="Attempts will appear here after filing starts." />
                           )}
                         </div>
 
@@ -2070,7 +2493,7 @@ export default function ReturnsPage() {
                                 <div>
                                   <p className="text-sm font-semibold text-slate-900">Intervention history</p>
                                   <p className="mt-1 text-sm text-slate-700">
-                                    Recent support-sensitive actions like resync, retry, reviewed requeue, and provider-stage failures.
+                                    Recent operator actions like refresh, retry, reviewed requeue, and filing-stage failures.
                                   </p>
                                 </div>
                                 <StatusBadge label={`${interventionEvents.length} recent`} variant="warning" />

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { format } from "date-fns";
 import { useSearchParams } from "next/navigation";
+import { CircleAlert } from "lucide-react";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/common/empty-state";
@@ -75,6 +76,37 @@ function formatCurrency(value: string) {
 
 function formatDate(value: string) {
   return format(new Date(value), "dd MMM yyyy");
+}
+
+type PeriodExceptionMetadata = {
+  allowed: boolean;
+  reason: string;
+  category: string;
+  selected_period?: string;
+};
+
+function getPeriodException(metadata: Record<string, unknown> | null | undefined): PeriodExceptionMetadata | null {
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+  const raw = metadata.period_exception;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const candidate = raw as Record<string, unknown>;
+  if (candidate.allowed !== true) {
+    return null;
+  }
+  return {
+    allowed: true,
+    reason: typeof candidate.reason === "string" ? candidate.reason : "",
+    category: typeof candidate.category === "string" ? candidate.category : "general",
+    selected_period: typeof candidate.selected_period === "string" ? candidate.selected_period : undefined,
+  };
+}
+
+function formatPeriodExceptionCategory(value: string) {
+  return value.replace(/_/g, " ");
 }
 
 type EditableLineItem = {
@@ -625,6 +657,10 @@ export default function ReportsPage() {
     const activeIds = new Set(activeRemediationBucket.transactionIds);
     return baseTransactions.filter((transaction) => activeIds.has(transaction.id));
   }, [activeRemediationBucket, showRemediationOnly, transactionsQuery.data?.items]);
+  const periodExceptionCount = useMemo(
+    () => displayedTransactions.filter((transaction) => getPeriodException(transaction.metadata)).length,
+    [displayedTransactions],
+  );
   const remediationMetrics = useMemo(
     () => ({
       totalVisibleRows: displayedTransactions.length,
@@ -1171,6 +1207,11 @@ export default function ReportsPage() {
         title="Transaction Review"
         description="Review normalized GST transactions after import, inspect source context, and isolate rows that need follow-up before reconciliation."
         actions={[
+          {
+            label: "Return Status Register",
+            href: "/reports/return-status",
+            disabled: !selectedWorkspaceId,
+          },
           {
             label: "Export XLSX",
             onClick: handleExport,
@@ -1906,71 +1947,98 @@ export default function ReportsPage() {
         ) : transactionsQuery.isError ? (
           <ErrorState title="We couldn’t load GST transactions" description={getErrorMessage(transactionsQuery.error)} />
         ) : displayedTransactions.length > 0 ? (
-          <div className="overflow-hidden rounded-2xl border border-slate-200">
-            <Table>
-              <TableHeader className="bg-slate-50">
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="w-12">
-                    <input
-                      type="checkbox"
-                      checked={allVisibleSelected}
-                      onChange={toggleSelectAllVisible}
-                      aria-label="Select all visible transactions"
-                    />
-                  </TableHead>
-                  <TableHead>Document</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Counterparty</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Taxable</TableHead>
-                  <TableHead>Total</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {displayedTransactions.map((transaction) => (
-                  <TableRow key={transaction.id}>
-                    <TableCell>
+          <div className="space-y-4">
+            {periodExceptionCount > 0 ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 rounded-full bg-amber-100 p-1 text-amber-700">
+                    <CircleAlert className="size-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-amber-950">Period exceptions present in this review set</p>
+                    <p className="mt-1 text-sm leading-6 text-amber-800">
+                      {periodExceptionCount} transaction{periodExceptionCount === 1 ? "" : "s"} {periodExceptionCount === 1 ? "was" : "were"} accepted under an out-of-period exception. Review the recorded reason before reconciliation or filing.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+            <div className="overflow-hidden rounded-2xl border border-slate-200">
+              <Table>
+                <TableHeader className="bg-slate-50">
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="w-12">
                       <input
                         type="checkbox"
-                        checked={selectedTransactionIds.includes(transaction.id)}
-                        onChange={() => toggleTransactionSelection(transaction.id)}
-                        aria-label={`Select transaction ${transaction.document_number}`}
+                        checked={allVisibleSelected}
+                        onChange={toggleSelectAllVisible}
+                        aria-label="Select all visible transactions"
                       />
-                    </TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="font-medium text-slate-900">{transaction.document_number}</p>
-                        <p className="text-xs text-slate-500">{transaction.document_type}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell>{formatDate(transaction.document_date)}</TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="text-sm text-slate-900">{transaction.counterparty_name || "Unnamed counterparty"}</p>
-                        <p className="text-xs text-slate-500">{transaction.counterparty_gstin || "GSTIN unavailable"}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell className="capitalize">{transaction.transaction_type.replace(/_/g, " ")}</TableCell>
-                    <TableCell>{formatCurrency(transaction.taxable_value)}</TableCell>
-                    <TableCell>{formatCurrency(transaction.total_amount)}</TableCell>
-                    <TableCell>
-                      <StatusBadge label={transaction.status} variant={transaction.status === "locked" ? "primary" : transaction.status === "review" ? "warning" : "success"} />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <button
-                        type="button"
-                        className="text-sm font-medium text-indigo-600 hover:text-indigo-700"
-                        onClick={() => setSelectedTransactionId(transaction.id)}
-                      >
-                        View detail
-                      </button>
-                    </TableCell>
+                    </TableHead>
+                    <TableHead>Document</TableHead>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Counterparty</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Taxable</TableHead>
+                    <TableHead>Total</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {displayedTransactions.map((transaction) => {
+                    const periodException = getPeriodException(transaction.metadata);
+                    return (
+                      <TableRow key={transaction.id}>
+                        <TableCell>
+                          <input
+                            type="checkbox"
+                            checked={selectedTransactionIds.includes(transaction.id)}
+                            onChange={() => toggleTransactionSelection(transaction.id)}
+                            aria-label={`Select transaction ${transaction.document_number}`}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="font-medium text-slate-900">{transaction.document_number}</p>
+                              {periodException ? (
+                                <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-amber-800">
+                                  Period exception
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="text-xs text-slate-500">{transaction.document_type}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>{formatDate(transaction.document_date)}</TableCell>
+                        <TableCell>
+                          <div>
+                            <p className="text-sm text-slate-900">{transaction.counterparty_name || "Unnamed counterparty"}</p>
+                            <p className="text-xs text-slate-500">{transaction.counterparty_gstin || "GSTIN unavailable"}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell className="capitalize">{transaction.transaction_type.replace(/_/g, " ")}</TableCell>
+                        <TableCell>{formatCurrency(transaction.taxable_value)}</TableCell>
+                        <TableCell>{formatCurrency(transaction.total_amount)}</TableCell>
+                        <TableCell>
+                          <StatusBadge label={transaction.status} variant={transaction.status === "locked" ? "primary" : transaction.status === "review" ? "warning" : "success"} />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <button
+                            type="button"
+                            className="text-sm font-medium text-indigo-600 hover:text-indigo-700"
+                            onClick={() => setSelectedTransactionId(transaction.id)}
+                          >
+                            View detail
+                          </button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
           </div>
         ) : (
           <EmptyState
@@ -2026,6 +2094,32 @@ export default function ReportsPage() {
                     <div className="rounded-2xl bg-slate-50 p-4"><p className="text-sm text-slate-500">IGST / CESS</p><p className="mt-2 text-lg font-semibold text-slate-900">{formatCurrency(transactionDetailQuery.data.igst_amount)} / {formatCurrency(transactionDetailQuery.data.cess_amount)}</p></div>
                   </div>
                 </SectionCard>
+                {getPeriodException(transactionDetailQuery.data.metadata) ? (
+                  <SectionCard title="Period exception" description="This document was accepted through a controlled out-of-period override.">
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <div>
+                          <p className="text-xs font-medium uppercase tracking-[0.18em] text-amber-700">Exception category</p>
+                          <p className="mt-1 text-sm font-semibold capitalize text-amber-950">
+                            {formatPeriodExceptionCategory(getPeriodException(transactionDetailQuery.data.metadata)?.category ?? "general")}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs font-medium uppercase tracking-[0.18em] text-amber-700">Selected period</p>
+                          <p className="mt-1 text-sm font-semibold text-amber-950">
+                            {getPeriodException(transactionDetailQuery.data.metadata)?.selected_period ?? selectedPeriod?.period ?? "Current period"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="mt-4">
+                        <p className="text-xs font-medium uppercase tracking-[0.18em] text-amber-700">Recorded reason</p>
+                        <p className="mt-1 text-sm leading-6 text-amber-950">
+                          {getPeriodException(transactionDetailQuery.data.metadata)?.reason || "No reason recorded."}
+                        </p>
+                      </div>
+                    </div>
+                  </SectionCard>
+                ) : null}
                 <SectionCard
                   title="Correction workflow"
                   description="Update filing metadata and line-item details to resolve readiness warnings without re-importing the source file."
@@ -2484,7 +2578,7 @@ export default function ReportsPage() {
             </div>
           </AppModalBody>
           <AppModalFooter>
-            <div className="text-sm text-slate-500">Follow-ups support reminders, manager reviews, and checkpoint tracking for close work.</div>
+            <div className="text-sm text-slate-500">Follow-ups cover reminders, manager reviews, and checkpoint tracking for close work.</div>
             <div className="flex items-center gap-3">
             <Button variant="outline" onClick={() => setIsFollowUpOpen(false)}>
               <ActionLabel kind="cancel" label="Cancel" />

@@ -1,1 +1,1 @@
-export { notices } from "@/data/notices";
+export { useCreateNoticeMutation, useNoticeQuery, useNoticesQuery, useUpdateNoticeMutation } from "@/features/notices/api";

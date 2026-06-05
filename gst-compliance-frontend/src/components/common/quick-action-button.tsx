@@ -55,7 +55,7 @@ export function QuickActionButton({
     <Button
       size="lg"
       className="h-10 rounded-xl px-4"
-      onClick={() => toast.success(`${label} flow is ready for backend wiring.`)}
+      onClick={() => toast.success(`${label} flow is ready for live workflow connection.`)}
     >
       <Icon className="size-4" />
       {label}

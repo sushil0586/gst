@@ -150,6 +150,7 @@ class ImportBatchViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, G
             import_batch=batch,
             row_number=serializer.validated_data["row_number"],
             raw_row=serializer.validated_data["raw_row"],
+            exception_context=serializer.validated_data.get("exception_context"),
             user=request.user,
         )
         output = ImportBatchSerializer(updated_batch, context=self.get_serializer_context())

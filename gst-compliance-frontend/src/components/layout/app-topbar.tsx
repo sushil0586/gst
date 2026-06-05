@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { Bell, ChevronRight, Menu, PanelTop, SlidersHorizontal } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { Bell, ChevronRight, Menu, PanelTop, Search, SlidersHorizontal } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -22,11 +22,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { StatusBadge } from "@/components/status/status-badge";
+import { hasPermission, permissions } from "@/lib/permissions";
 import { useSession } from "@/lib/query/session-provider";
 import { initialsFromName } from "@/lib/utils/formatters";
 import { useWorkspaceContext } from "@/store/workspace-context";
+import type { ClientRecord } from "@/types/api";
 
 function toTitle(segment: string) {
   return segment
@@ -43,12 +47,150 @@ function toPageTitle(pathname: string) {
   return toTitle(segments[segments.length - 1] ?? "Dashboard");
 }
 
+function matchesClientSearch(client: ClientRecord, rawQuery: string) {
+  const query = rawQuery.trim().toLowerCase();
+  if (!query) {
+    return true;
+  }
+
+  return [
+    client.legal_name,
+    client.trade_name,
+    client.client_code,
+    client.pan,
+    client.email,
+  ]
+    .filter(Boolean)
+    .some((value) => value.toLowerCase().includes(query));
+}
+
+function ClientContextPicker({
+  clients,
+  selectedClientId,
+  onSelectClient,
+  forceOpenSignal,
+}: {
+  clients: ClientRecord[];
+  selectedClientId?: string;
+  onSelectClient: (id: string) => void;
+  forceOpenSignal: number;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const selectedClient = clients.find((client) => client.id === selectedClientId) ?? null;
+  const filteredClients = useMemo(
+    () => clients.filter((client) => matchesClientSearch(client, query)),
+    [clients, query],
+  );
+
+  useEffect(() => {
+    if (!open) {
+      setQuery("");
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (forceOpenSignal > 0) {
+      setOpen(true);
+    }
+  }, [forceOpenSignal]);
+
+  const disabled = clients.length === 0;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className="topbar-select min-w-[13rem] justify-between gap-2 rounded-full border-slate-200/80 px-3 font-normal text-slate-700"
+          disabled={disabled}
+        >
+          <span className="truncate">
+            {selectedClient?.legal_name ?? "Client"}
+          </span>
+          <span className="flex items-center gap-2 text-slate-400">
+            <span className="hidden text-[11px] font-medium uppercase tracking-[0.18em] md:inline">
+              Ctrl/Cmd+K
+            </span>
+            <Search className="size-3.5 shrink-0" />
+          </span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[24rem] rounded-3xl border border-slate-200 bg-white p-3 shadow-[0_28px_80px_-36px_rgba(15,23,42,0.28)]">
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-slate-900">Find client</p>
+            <p className="text-xs text-slate-500">
+              Search by legal name, trade name, client code, PAN, or email.
+            </p>
+          </div>
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search client"
+            autoFocus
+          />
+          <div className="max-h-72 space-y-1 overflow-y-auto pr-1">
+            {filteredClients.length > 0 ? (
+              filteredClients.map((client) => {
+                const isSelected = client.id === selectedClientId;
+                return (
+                  <div
+                    key={client.id}
+                    className="flex items-center gap-2 rounded-2xl border border-slate-200/80 bg-slate-50/70 px-2 py-2"
+                  >
+                    <button
+                      type="button"
+                      className="flex min-w-0 flex-1 flex-col items-start rounded-xl px-2 py-1 text-left transition hover:bg-white"
+                      onClick={() => {
+                        onSelectClient(client.id);
+                        setOpen(false);
+                      }}
+                    >
+                      <span className="truncate text-sm font-medium text-slate-900">
+                        {client.legal_name}
+                      </span>
+                      <span className="truncate text-xs text-slate-500">
+                        {client.client_code} • {client.pan}
+                      </span>
+                    </button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={isSelected ? "secondary" : "ghost"}
+                      onClick={() => {
+                        onSelectClient(client.id);
+                        router.push(`/clients/${client.id}`);
+                        setOpen(false);
+                      }}
+                    >
+                      Open
+                    </Button>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-500">
+                No matching clients found in this workspace.
+              </div>
+            )}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function CompactContextSelectors({
   className,
   showLabels = false,
+  clientSearchSignal = 0,
 }: {
   className?: string;
   showLabels?: boolean;
+  clientSearchSignal?: number;
 }) {
   const {
     workspaces,
@@ -90,23 +232,12 @@ function CompactContextSelectors({
 
       <div>
         {showLabels ? <span className="field-label">Client</span> : null}
-        <Select
-          value={selectedClientId}
-          onValueChange={(value) => {
-            setSelectedClientId(value);
-          }}
-        >
-          <SelectTrigger className="topbar-select min-w-[9rem]">
-            <SelectValue placeholder="Client" />
-          </SelectTrigger>
-          <SelectContent>
-            {clients.map((client) => (
-              <SelectItem key={client.id} value={client.id}>
-                {client.legal_name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <ClientContextPicker
+          clients={clients}
+          selectedClientId={selectedClientId}
+          onSelectClient={setSelectedClientId}
+          forceOpenSignal={clientSearchSignal}
+        />
       </div>
 
       <div>
@@ -156,12 +287,50 @@ function CompactContextSelectors({
 
 export function AppTopbar({ onMenuClick }: { onMenuClick: () => void }) {
   const pathname = usePathname();
-  const { user, session, logout } = useSession();
-  const { selectedPeriod } = useWorkspaceContext();
+  const { user, session, permissions: sessionPermissions, logout } = useSession();
+  const { selectedPeriod, clients } = useWorkspaceContext();
   const [contextOpen, setContextOpen] = useState(false);
+  const [clientSearchSignal, setClientSearchSignal] = useState(0);
+  const canManageWorkspaces = hasPermission(sessionPermissions, permissions.manageSettings)
+    || hasPermission(sessionPermissions, permissions.manageUsers)
+    || Boolean(session?.is_platform_admin);
 
   const breadcrumbParts = pathname.split("/").filter(Boolean);
   const pageTitle = toPageTitle(pathname);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement
+        && (
+          target.isContentEditable
+          || target.tagName === "INPUT"
+          || target.tagName === "TEXTAREA"
+          || target.tagName === "SELECT"
+        )
+      ) {
+        return;
+      }
+
+      const isSearchShortcut = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k";
+      const isSlashShortcut = !event.metaKey && !event.ctrlKey && !event.altKey && event.key === "/";
+
+      if (!isSearchShortcut && !isSlashShortcut) {
+        return;
+      }
+
+      if (clients.length === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      setClientSearchSignal((value) => value + 1);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [clients.length]);
 
   return (
     <>
@@ -200,7 +369,10 @@ export function AppTopbar({ onMenuClick }: { onMenuClick: () => void }) {
             </div>
 
             <div className="hidden flex-1 justify-center xl:flex">
-              <CompactContextSelectors className="flex flex-wrap items-center gap-2" />
+              <CompactContextSelectors
+                className="flex flex-wrap items-center gap-2"
+                clientSearchSignal={clientSearchSignal}
+              />
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
@@ -252,6 +424,11 @@ export function AppTopbar({ onMenuClick }: { onMenuClick: () => void }) {
                   <DropdownMenuSeparator />
                   <DropdownMenuItem>Profile settings</DropdownMenuItem>
                   <DropdownMenuItem>Notification preferences</DropdownMenuItem>
+                  {canManageWorkspaces ? (
+                    <DropdownMenuItem asChild>
+                      <Link href="/settings/workspaces">Workspace management</Link>
+                    </DropdownMenuItem>
+                  ) : null}
                   <DropdownMenuItem onClick={logout}>Sign out</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -276,6 +453,7 @@ export function AppTopbar({ onMenuClick }: { onMenuClick: () => void }) {
             <CompactContextSelectors
               className="grid gap-4"
               showLabels
+              clientSearchSignal={clientSearchSignal}
             />
           </div>
         </SheetContent>

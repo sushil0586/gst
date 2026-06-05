@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm, useWatch } from "react-hook-form";
-import { CheckCircle2, ChevronRight, Layers3, ShieldCheck } from "lucide-react";
+import { CheckCircle2, ChevronRight, Layers3, ShieldCheck, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import { useCreateClientMutation } from "@/features/clients";
 import { useCreateCompliancePeriodMutation } from "@/features/compliance-periods";
 import { useCreateGstinMutation, useSearchTaxpayerMutation } from "@/features/gstins";
 import { useCreateOrganizationMutation, useCreateWorkspaceMutation } from "@/features/workspace";
+import { GST_REGISTRATION_TYPE_OPTIONS, normalizeRegistrationType } from "@/lib/constants/gst-registration-types";
 import { getErrorMessage } from "@/lib/api/error-handler";
 import { clientFormSchema, compliancePeriodFormSchema, gstinFormSchema, type ClientFormValues, type CompliancePeriodFormValues, type GstinFormValues } from "@/lib/validations/foundation";
 import { organizationWorkspaceSchema, type OrganizationWorkspaceValues } from "@/lib/validations/onboarding";
@@ -59,6 +60,12 @@ function buildSuggestedClientEmail(legalName: string) {
 
   const localPart = slug || "client";
   return `finance@${localPart}.example.com`;
+}
+
+function buildCurrentPeriodLabel(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
 }
 
 function StepShell({
@@ -113,6 +120,7 @@ export default function OnboardingPage() {
     isLoading,
   } = useWorkspaceContext();
   const [step, setStep] = useState(0);
+  const [showFreshWorkspaceBanner, setShowFreshWorkspaceBanner] = useState(false);
 
   const createOrganizationMutation = useCreateOrganizationMutation();
   const createWorkspaceMutation = useCreateWorkspaceMutation();
@@ -120,15 +128,15 @@ export default function OnboardingPage() {
   const createGstinMutation = useCreateGstinMutation(selectedClientId);
   const searchTaxpayerMutation = useSearchTaxpayerMutation(selectedWorkspaceId);
   const createPeriodMutation = useCreateCompliancePeriodMutation(selectedGstinId);
-  const [taxpayerLookupGstin, setTaxpayerLookupGstin] = useState("29ABCDE1234F1Z5");
+  const [taxpayerLookupGstin, setTaxpayerLookupGstin] = useState("");
 
   const workspaceForm = useForm<OrganizationWorkspaceValues>({
     resolver: zodResolver(organizationWorkspaceSchema),
     defaultValues: {
-      organization_name: "Acme Compliance Group",
-      organization_code: "ACMEGST",
-      workspace_name: "Primary Workspace",
-      workspace_code: "PRIMARY",
+      organization_name: "",
+      organization_code: "",
+      workspace_name: "",
+      workspace_code: "",
       timezone: "Asia/Kolkata",
     },
   });
@@ -136,20 +144,20 @@ export default function OnboardingPage() {
     resolver: zodResolver(clientFormSchema),
     defaultValues: {
       workspace: selectedWorkspaceId ?? "",
-      legal_name: "Orion Retail Private Limited",
-      trade_name: "Orion Retail",
-      client_code: "ORION-001",
-      pan: "ABCDE1234F",
-      email: "finance@orion.example.com",
+      legal_name: "",
+      trade_name: "",
+      client_code: "",
+      pan: "",
+      email: "",
     },
   });
   const gstinForm = useForm<GstinFormValues>({
     resolver: zodResolver(gstinFormSchema),
     defaultValues: {
       client: selectedClientId ?? "",
-      gstin: "29ABCDE1234F1Z5",
+      gstin: "",
       registration_type: "regular",
-      state_code: "29",
+      state_code: "",
       whitebooks_gst_username: "",
     },
   });
@@ -157,11 +165,23 @@ export default function OnboardingPage() {
     resolver: zodResolver(compliancePeriodFormSchema),
     defaultValues: {
       gstin: selectedGstinId ?? "",
-      period: "2026-04",
+      period: buildCurrentPeriodLabel(),
       return_type: "GSTR-3B",
       status: "open",
-      due_date: "2026-05-20",
+      due_date: "",
     },
+  });
+  const clientLegalName = useWatch({
+    control: clientForm.control,
+    name: "legal_name",
+  });
+  const clientPan = useWatch({
+    control: clientForm.control,
+    name: "pan",
+  });
+  const gstinValue = useWatch({
+    control: gstinForm.control,
+    name: "gstin",
   });
   const registrationType = useWatch({
     control: gstinForm.control,
@@ -175,6 +195,12 @@ export default function OnboardingPage() {
     control: periodForm.control,
     name: "status",
   });
+  const isWorkspaceCreated = workspaces.length > 0;
+  const isFoundationSetup = step >= 1 || isWorkspaceCreated;
+  const onboardingHeading = isFoundationSetup ? "First client setup" : "Workspace onboarding";
+  const onboardingDescription = isFoundationSetup
+    ? "Your CA workspace is ready. Now set up the first client, GSTIN, and period that monthly work will run on."
+    : "Create the minimum operating setup once so every future module has a stable context.";
 
   useEffect(() => {
     clientForm.setValue("workspace", selectedWorkspaceId ?? "");
@@ -185,6 +211,43 @@ export default function OnboardingPage() {
   useEffect(() => {
     periodForm.setValue("gstin", selectedGstinId ?? "");
   }, [periodForm, selectedGstinId]);
+
+  useEffect(() => {
+    if (step === 0 && workspaces.length === 1 && selectedWorkspaceId) {
+      setStep(1);
+    }
+  }, [selectedWorkspaceId, step, workspaces.length]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const isFreshWorkspaceSetup = params.get("setup") === "workspace-created";
+    if (!isFreshWorkspaceSetup) {
+      return;
+    }
+    setShowFreshWorkspaceBanner(true);
+    params.delete("setup");
+    const search = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`);
+  }, []);
+
+  useEffect(() => {
+    if (!clientLegalName?.trim()) {
+      return;
+    }
+    if (!clientForm.getValues("client_code").trim() && clientPan.trim().length >= 4) {
+      clientForm.setValue("client_code", buildSuggestedClientCode(clientLegalName, clientPan));
+    }
+    if (!clientForm.getValues("email").trim()) {
+      clientForm.setValue("email", buildSuggestedClientEmail(clientLegalName));
+    }
+  }, [clientForm, clientLegalName, clientPan]);
+
+  useEffect(() => {
+    const normalizedGstin = gstinValue.trim().toUpperCase();
+    if (normalizedGstin.length >= 2 && !gstinForm.getValues("state_code").trim()) {
+      gstinForm.setValue("state_code", normalizedGstin.slice(0, 2));
+    }
+  }, [gstinForm, gstinValue]);
 
   useEffect(() => {
     if (!isLoading && !requiresOnboarding) {
@@ -275,7 +338,7 @@ export default function OnboardingPage() {
         shouldDirty: true,
       });
       if (result.registration_type) {
-        gstinForm.setValue("registration_type", result.registration_type, {
+        gstinForm.setValue("registration_type", normalizeRegistrationType(result.registration_type), {
           shouldDirty: true,
         });
       }
@@ -334,7 +397,7 @@ export default function OnboardingPage() {
               </div>
               <CardTitle className="mt-4 text-xl font-semibold">Workspace onboarding</CardTitle>
               <p className="text-sm leading-6 text-slate-300">
-                Complete the minimal operating setup once, then every future module has a stable context.
+                {onboardingDescription}
               </p>
             </CardHeader>
             <CardContent className="flex min-h-[396px] flex-col px-6 py-6">
@@ -351,7 +414,7 @@ export default function OnboardingPage() {
               <div className="mt-auto rounded-2xl bg-white/8 px-4 py-4">
                 <p className="text-sm font-medium text-white">Onboarding outcome</p>
                 <p className="mt-2 text-sm leading-6 text-slate-300">
-                  This setup creates the minimum monthly workspace context so imports, reconciliation, returns, approvals, and exports stay aligned.
+                  This creates the first live operating context for your CA workspace so imports, reconciliation, returns, approvals, notices, and follow-ups stay aligned.
                 </p>
               </div>
             </CardContent>
@@ -431,7 +494,7 @@ export default function OnboardingPage() {
                 <form onSubmit={submitClientStep}>
                   <StepShell
                     title={steps[step]}
-                    description="Set up the first operating client that will own GSTINs, periods, imports, and returns."
+                    description="Create the first client for this workspace. You can fetch taxpayer details first, or enter the basics manually and continue."
                     footer={
                       <Button type="submit" className="h-11 min-w-36">
                         Create client <ChevronRight className="size-4" />
@@ -439,15 +502,20 @@ export default function OnboardingPage() {
                     }
                     aside={
                       <div className="rounded-2xl border border-indigo-100 bg-indigo-50/70 px-4 py-4">
+                        <p className="text-sm font-medium text-slate-900">Workspace ready</p>
+                        <p className="mt-1 text-sm leading-6 text-slate-600">
+                          Your organization and workspace are already set up. Add the first client below so returns, notices, follow-ups, and reports have a real working context.
+                        </p>
+                        <div className="my-4 border-t border-indigo-100" />
                         <p className="text-sm font-medium text-slate-900">GSTIN lookup assist</p>
                         <p className="mt-1 text-sm leading-6 text-slate-600">
-                          Search taxpayer details from WhiteBooks and prefill the client and GSTIN setup before you create records.
+                          Search taxpayer details from the connected filing channel and prefill the client and GSTIN setup before you create records.
                         </p>
                         <div className="mt-4 flex flex-col gap-3 sm:flex-row">
                           <Input
                             value={taxpayerLookupGstin}
                             onChange={(event) => setTaxpayerLookupGstin(event.target.value.toUpperCase())}
-                            placeholder="Enter GSTIN"
+                            placeholder="Enter GSTIN to prefill client details"
                             maxLength={15}
                             className="bg-white"
                           />
@@ -464,6 +532,38 @@ export default function OnboardingPage() {
                       </div>
                     }
                   >
+                    {showFreshWorkspaceBanner ? (
+                      <div className="rounded-2xl border border-emerald-200 bg-[linear-gradient(135deg,rgba(236,253,245,0.95),rgba(224,231,255,0.9))] px-4 py-4 shadow-[0_18px_40px_-30px_rgba(16,185,129,0.45)]">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex gap-3">
+                            <div className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-2xl bg-emerald-500 text-white">
+                              <Sparkles className="size-5" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-semibold text-slate-950">Workspace created successfully</p>
+                              <p className="mt-1 text-sm leading-6 text-slate-600">
+                                The core workspace is ready. Add your first client now so GSTIN setup, imports, returns, notices, and follow-ups can start from a real business context.
+                              </p>
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="shrink-0 text-slate-500 hover:text-slate-700"
+                            onClick={() => setShowFreshWorkspaceBanner(false)}
+                          >
+                            Dismiss
+                          </Button>
+                        </div>
+                      </div>
+                    ) : null}
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50/85 px-4 py-4">
+                      <p className="text-sm font-semibold text-slate-900">What this step is</p>
+                      <p className="mt-1 text-sm leading-6 text-slate-600">
+                        This is not personal CA onboarding. You are now setting up the first working client inside the workspace so the filing team has a real business context to operate on.
+                      </p>
+                    </div>
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
                         <Label htmlFor="legal_name">Legal name</Label>
@@ -486,7 +586,7 @@ export default function OnboardingPage() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="email">Email</Label>
-                      <Input id="email" {...clientForm.register("email")} />
+                      <Input id="email" {...clientForm.register("email")} placeholder="finance@client.example.com" />
                     </div>
                   </StepShell>
                 </form>
@@ -496,14 +596,24 @@ export default function OnboardingPage() {
                 <form onSubmit={submitGstinStep}>
                   <StepShell
                     title={steps[step]}
-                    description="Register the GST identity that monthly imports, reconciliation, approvals, and returns will use."
+                    description="Add the first GSTIN for this client. This can be completed now or finished later from the workspace registers."
                     footer={
-                      <Button type="submit" className="h-11 min-w-36">
-                        Create GSTIN <ChevronRight className="size-4" />
-                      </Button>
+                      <div className="flex w-full flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                        <Button type="button" variant="outline" className="h-11 min-w-36" onClick={() => router.push("/dashboard")}>
+                          Finish later
+                        </Button>
+                        <Button type="submit" className="h-11 min-w-36">
+                          Create GSTIN <ChevronRight className="size-4" />
+                        </Button>
+                      </div>
                     }
                     aside={
                       <div className="rounded-2xl bg-slate-50 px-4 py-4">
+                        <p className="text-sm font-medium text-slate-900">Workspace setup note</p>
+                        <p className="mt-1 text-sm leading-6 text-slate-600">
+                          You already created the CA workspace. This step only adds the client’s GST registration so return preparation and filing can be scoped correctly.
+                        </p>
+                        <div className="my-4 border-t border-slate-200" />
                         <p className="text-sm font-medium text-slate-900">Format guidance</p>
                         <p className="mt-1 text-sm leading-6 text-slate-600">
                           Use the registered 15-character GSTIN. Long selection labels and values will truncate gracefully to keep the layout stable.
@@ -514,11 +624,11 @@ export default function OnboardingPage() {
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
                         <Label htmlFor="gstin">GSTIN</Label>
-                        <Input id="gstin" {...gstinForm.register("gstin")} />
+                        <Input id="gstin" {...gstinForm.register("gstin")} placeholder="Enter the registered GSTIN" />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="state_code">State code</Label>
-                        <Input id="state_code" {...gstinForm.register("state_code")} />
+                        <Input id="state_code" {...gstinForm.register("state_code")} placeholder="Auto-filled from GSTIN when available" />
                       </div>
                     </div>
                     <div className="space-y-2">
@@ -531,20 +641,23 @@ export default function OnboardingPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="regular">Regular</SelectItem>
-                          <SelectItem value="composition">Composition</SelectItem>
+                          {GST_REGISTRATION_TYPE_OPTIONS.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="whitebooks_gst_username">WhiteBooks GST username (optional)</Label>
+                      <Label htmlFor="whitebooks_gst_username">Customer GST portal username (Recommended)</Label>
                       <Input
                         id="whitebooks_gst_username"
                         {...gstinForm.register("whitebooks_gst_username")}
-                        placeholder="Enter taxpayer GST username if available"
+                        placeholder="Enter the customer's GST portal username"
                       />
                       <p className="text-xs text-slate-500">
-                        Optional now. You can continue onboarding and update it later before provider OTP authentication.
+                        Recommended for smoother filing access. You can continue onboarding now and update this later if needed.
                       </p>
                     </div>
                   </StepShell>
@@ -555,17 +668,28 @@ export default function OnboardingPage() {
                 <form onSubmit={submitPeriodStep}>
                   <StepShell
                     title={steps[step]}
-                    description="Create the first monthly compliance period so the dashboard and workflow modules have a live operating window."
+                    description="Create the first working period for this client. You can do it now or continue to the dashboard and create periods later."
                     footer={
-                      <Button type="submit" className="h-11 min-w-36">
-                        Create period <ChevronRight className="size-4" />
-                      </Button>
+                      <div className="flex w-full flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                        <Button type="button" variant="outline" className="h-11 min-w-36" onClick={() => router.push("/dashboard")}>
+                          Finish later
+                        </Button>
+                        <Button type="submit" className="h-11 min-w-36">
+                          Create period <ChevronRight className="size-4" />
+                        </Button>
+                      </div>
                     }
                   >
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50/85 px-4 py-4">
+                      <p className="text-sm font-semibold text-slate-900">Why period setup matters</p>
+                      <p className="mt-1 text-sm leading-6 text-slate-600">
+                        Periods are what monthly filing work actually runs on. If you skip this now, you can still enter the dashboard and create periods later from the compliance-period register.
+                      </p>
+                    </div>
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
                         <Label htmlFor="period">Period</Label>
-                        <Input id="period" {...periodForm.register("period")} />
+                        <Input id="period" {...periodForm.register("period")} placeholder="YYYY-MM" />
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="due_date">Due date</Label>

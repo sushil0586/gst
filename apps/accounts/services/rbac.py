@@ -44,3 +44,21 @@ def has_any_permission(user, workspace, client, permission_codes):
     if not valid_codes:
         return False
     return any(has_permission(user, workspace, client, permission_code) for permission_code in valid_codes)
+
+
+def can_manage_organization_workspaces(user, organization):
+    if not user or not user.is_authenticated or organization is None:
+        return False
+    if getattr(user, "is_superuser", False):
+        return True
+
+    memberships = WorkspaceMembership.objects.filter(
+        user=user,
+        workspace__organization=organization,
+        is_active=True,
+    ).only("role")
+
+    for membership in memberships:
+        if "manage_settings" in ROLE_PERMISSION_MAP.get(membership.role, set()):
+            return True
+    return False

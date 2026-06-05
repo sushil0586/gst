@@ -13,6 +13,31 @@ from apps.reconciliation.models import ReconciliationItem, ReconciliationRun
 from apps.returns.models import ReturnPreparation
 
 
+def _build_period_exception_summary(*, transactions):
+    exception_rows = []
+    for transaction in transactions:
+        metadata = transaction.metadata if isinstance(transaction.metadata, dict) else {}
+        period_exception = metadata.get("period_exception")
+        if not isinstance(period_exception, dict) or period_exception.get("allowed") is not True:
+            continue
+        exception_rows.append(
+            {
+                "transaction_id": str(transaction.id),
+                "transaction_type": transaction.transaction_type,
+                "document_type": transaction.document_type,
+                "document_number": transaction.reference_number,
+                "document_date": transaction.transaction_date.isoformat() if transaction.transaction_date else "",
+                "reason": str(period_exception.get("reason") or ""),
+                "category": str(period_exception.get("category") or "general"),
+                "selected_period": str(period_exception.get("selected_period") or ""),
+            }
+        )
+    return {
+        "count": len(exception_rows),
+        "documents": exception_rows,
+    }
+
+
 def prepare_return(*, workspace_id, client_id, gstin_id, compliance_period_id, return_type, user):
     compliance_period = (
         CompliancePeriod.objects.select_related("gstin", "gstin__client", "gstin__client__workspace")
@@ -126,6 +151,7 @@ def prepare_gstr1(*, compliance_period):
             "total_tax_amount": str(total_tax),
             "document_count": transactions.count(),
         },
+        "period_exceptions": _build_period_exception_summary(transactions=transactions),
     }
 
 
@@ -194,6 +220,13 @@ def prepare_gstr3b(*, compliance_period):
             "missing_in_portal_count": latest_run.missing_in_portal_count if latest_run else 0,
             "duplicate_count": latest_run.duplicate_count if latest_run else 0,
         },
+        "period_exceptions": _build_period_exception_summary(
+            transactions=GSTTransaction.objects.filter(
+                is_active=True,
+                compliance_period=compliance_period,
+                transaction_type__in=["sales", "debit_note", "credit_note", "purchase", "gstr_2b"],
+            )
+        ),
     }
 
 

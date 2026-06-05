@@ -23,8 +23,6 @@ import { StatCard } from "@/components/common/stat-card";
 import { ComplianceStatusBadge } from "@/components/status/compliance-status-badge";
 import { WorkflowTimeline } from "@/components/status/workflow-timeline";
 import { Button } from "@/components/ui/button";
-import { clients as mockClients } from "@/data/clients";
-import { compliancePeriods as mockPeriods } from "@/data/compliancePeriods";
 import { useClientQuery } from "@/features/clients";
 import { useCompliancePeriodQuery, useCompliancePeriodWorkspaceSummaryQuery } from "@/features/compliance-periods";
 import { useWorkspaceContext } from "@/store/workspace-context";
@@ -35,6 +33,24 @@ function formatDate(value?: string | null) {
     return "Not scheduled";
   }
   return format(new Date(value), "dd MMM yyyy");
+}
+
+function buildScopedHref(
+  pathname: string,
+  scope: {
+    workspace?: string;
+    client?: string;
+    gstin?: string;
+    period?: string;
+  },
+) {
+  const params = new URLSearchParams();
+  if (scope.workspace) params.set("workspace", scope.workspace);
+  if (scope.client) params.set("client", scope.client);
+  if (scope.gstin) params.set("gstin", scope.gstin);
+  if (scope.period) params.set("period", scope.period);
+  const query = params.toString();
+  return query ? `${pathname}?${query}` : pathname;
 }
 
 function buildWorkflow(summary?: {
@@ -83,15 +99,13 @@ export default function ClientPeriodPage({
   params: Promise<{ clientId: string; periodId: string }>;
 }) {
   const { clientId, periodId } = use(params);
-  const { selectedClient, selectedPeriod } = useWorkspaceContext();
+  const { selectedWorkspaceId, selectedClient, selectedPeriod } = useWorkspaceContext();
   const clientQuery = useClientQuery(clientId);
   const periodQuery = useCompliancePeriodQuery(periodId);
   const workspaceSummaryQuery = useCompliancePeriodWorkspaceSummaryQuery(periodId);
-  const clientFallback = mockClients.find((entry) => entry.id === clientId);
-  const periodFallback = mockPeriods.find((entry) => entry.id === periodId && entry.clientId === clientId);
   const summary = workspaceSummaryQuery.data;
 
-  const title = `${clientQuery.data?.legal_name ?? selectedClient?.legal_name ?? clientFallback?.name ?? "Client"} • ${periodQuery.data?.period ?? selectedPeriod?.period ?? periodFallback?.label ?? "Period"}`;
+  const title = `${clientQuery.data?.legal_name ?? selectedClient?.legal_name ?? "Client"} • ${periodQuery.data?.period ?? selectedPeriod?.period ?? "Period"}`;
   const workflow = buildWorkflow(summary);
   const issueCount =
     (summary?.reconciliation_issue_counts.mismatches ?? 0) +
@@ -100,6 +114,12 @@ export default function ClientPeriodPage({
     (summary?.reconciliation_issue_counts.missing_in_portal ?? 0) +
     (summary?.reconciliation_issue_counts.duplicates ?? 0);
   const latestReturnStatus = String(summary?.return_preparation_statuses.gstr3b.status ?? summary?.return_preparation_statuses.gstr1.status ?? periodQuery.data?.status ?? "not_prepared");
+  const scopedNavigation = {
+    workspace: selectedWorkspaceId ?? undefined,
+    client: clientId,
+    gstin: periodQuery.data?.gstin ?? undefined,
+    period: periodId,
+  };
 
   return (
     <div className="space-y-6">
@@ -167,7 +187,7 @@ export default function ClientPeriodPage({
           <div className="grid gap-4 md:grid-cols-2">
             <div className="surface-muted px-4 py-4">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Period</p>
-              <p className="mt-2 text-sm font-semibold text-slate-950">{summary?.period_details?.period ?? periodQuery.data?.period ?? periodFallback?.label ?? "Not set"}</p>
+              <p className="mt-2 text-sm font-semibold text-slate-950">{summary?.period_details?.period ?? periodQuery.data?.period ?? "Not set"}</p>
             </div>
             <div className="surface-muted px-4 py-4">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Due Date</p>
@@ -190,16 +210,16 @@ export default function ClientPeriodPage({
               <Link href="/imports"><FileSearch2 className="size-4" />Go to Imports</Link>
             </Button>
             <Button asChild size="sm" variant="outline" className="justify-start rounded-xl">
-              <Link href="/reconciliation"><GitCompareArrows className="size-4" />Run Reconciliation</Link>
+              <Link href={buildScopedHref("/reconciliation", scopedNavigation)}><GitCompareArrows className="size-4" />Run Reconciliation</Link>
             </Button>
             <Button asChild size="sm" variant="outline" className="justify-start rounded-xl">
-              <Link href="/returns"><CheckCircle2 className="size-4" />Prepare Returns</Link>
+              <Link href={buildScopedHref("/returns", scopedNavigation)}><CheckCircle2 className="size-4" />Prepare Returns</Link>
             </Button>
             <Button asChild size="sm" variant="outline" className="justify-start rounded-xl">
-              <Link href="/approvals"><ActionLabel kind="view" label="View Approvals" icon={FileClock} /></Link>
+              <Link href={buildScopedHref("/approvals", scopedNavigation)}><ActionLabel kind="view" label="View Approvals" icon={FileClock} /></Link>
             </Button>
             <Button asChild size="sm" variant="outline" className="justify-start rounded-xl">
-              <Link href="/audit-trail"><ActionLabel kind="view" label="View Audit Trail" icon={ArrowRight} /></Link>
+              <Link href={buildScopedHref("/audit-trail", scopedNavigation)}><ActionLabel kind="view" label="View Audit Trail" icon={ArrowRight} /></Link>
             </Button>
           </div>
         </SectionCard>

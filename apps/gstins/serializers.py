@@ -3,6 +3,17 @@ from rest_framework import serializers
 from apps.gstins.models import GSTIN, GSTINTaxpayerProfile
 
 
+def workspace_has_gstin(*, workspace_id, gstin_value, exclude_gstin_id=None):
+    queryset = GSTIN.objects.filter(
+        client__workspace_id=workspace_id,
+        gstin=gstin_value,
+        is_active=True,
+    )
+    if exclude_gstin_id is not None:
+        queryset = queryset.exclude(pk=exclude_gstin_id)
+    return queryset.exists()
+
+
 class GSTINSerializer(serializers.ModelSerializer):
     client_name = serializers.CharField(source="client.legal_name", read_only=True)
     workspace_id = serializers.UUIDField(source="client.workspace_id", read_only=True)
@@ -23,6 +34,25 @@ class GSTINSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate_gstin(self, value):
+        return value.strip().upper()
+
+    def validate(self, attrs):
+        client = attrs.get("client") or getattr(self.instance, "client", None)
+        if client is None:
+            raise serializers.ValidationError({"client": "Client is required."})
+
+        gstin_value = attrs.get("gstin", getattr(self.instance, "gstin", "")).strip().upper()
+        if workspace_has_gstin(
+            workspace_id=client.workspace_id,
+            gstin_value=gstin_value,
+            exclude_gstin_id=getattr(self.instance, "id", None),
+        ):
+            raise serializers.ValidationError({"gstin": "This GSTIN already exists in the selected workspace."})
+
+        attrs["gstin"] = gstin_value
+        return attrs
 
 
 class GSTINTaxpayerProfileSerializer(serializers.ModelSerializer):

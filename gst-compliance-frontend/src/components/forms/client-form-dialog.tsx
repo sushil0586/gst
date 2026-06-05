@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select";
 import { useBootstrapClientMutation, useClientsQuery, useCreateClientMutation, useUpdateClientMutation } from "@/features/clients";
 import { useSearchTaxpayerMutation } from "@/features/gstins";
+import { GST_REGISTRATION_TYPE_OPTIONS, normalizeRegistrationType } from "@/lib/constants/gst-registration-types";
 import { getErrorMessage, getFieldErrors } from "@/lib/api/error-handler";
 import { clientFormSchema, type ClientFormValues } from "@/lib/validations/foundation";
 import { useWorkspaceContext } from "@/store/workspace-context";
@@ -37,7 +38,7 @@ function getInitialClientFormValues(
     pan: initialValues?.pan ?? "",
     email: initialValues?.email ?? "",
     gstin: "",
-    registration_type: "",
+    registration_type: "regular",
     state_code: "",
     whitebooks_gst_username: "",
   };
@@ -163,7 +164,7 @@ function ClientFormDialogContent({
       form.setValue("pan", result.pan || form.getValues("pan"), { shouldDirty: true });
       form.setValue("gstin", result.gstin, { shouldDirty: true });
       form.setValue("state_code", result.state_code || result.gstin.slice(0, 2), { shouldDirty: true });
-      form.setValue("registration_type", result.registration_type || "regular", { shouldDirty: true });
+      form.setValue("registration_type", normalizeRegistrationType(result.registration_type), { shouldDirty: true });
       if (!form.getValues("client_code").trim()) {
         const suggestedCode = buildUniqueClientCode(
           buildSuggestedClientCode(result.legal_name || result.trade_name || result.gstin, result.pan),
@@ -212,7 +213,7 @@ function ClientFormDialogContent({
           pan: values.pan,
           email: values.email ?? "",
           gstin: values.gstin.trim().toUpperCase(),
-          registration_type: values.registration_type?.trim() || "regular",
+          registration_type: normalizeRegistrationType(values.registration_type),
           state_code: values.state_code?.trim() || values.gstin.trim().slice(0, 2),
           whitebooks_gst_username: values.whitebooks_gst_username?.trim() || "",
           taxpayer_lookup_payload:
@@ -263,7 +264,7 @@ function ClientFormDialogContent({
       <AppModalContent size="md">
         <AppModalHeader
           title={isEditing ? "Edit client" : "Create client"}
-          description="Connect the UI to your live Django client foundation."
+          description="Create and manage clients in the live workspace foundation."
         />
         <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
           <AppModalBody className="space-y-4">
@@ -271,7 +272,7 @@ function ClientFormDialogContent({
             <div className="rounded-2xl border border-indigo-100 bg-indigo-50/70 px-4 py-4">
               <p className="text-sm font-medium text-slate-900">GSTIN lookup assist</p>
               <p className="mt-1 text-sm leading-6 text-slate-600">
-                Search taxpayer details from WhiteBooks and prefill the client record before creating it.
+                Search taxpayer details from the connected filing channel and prefill the client record before creating it.
               </p>
               <div className="mt-4 flex flex-col gap-3 sm:flex-row">
                 <Input
@@ -362,12 +363,15 @@ function ClientFormDialogContent({
                   ) : null}
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="whitebooks_gst_username">WhiteBooks GST username (optional)</Label>
+                  <Label htmlFor="whitebooks_gst_username">Customer GST portal username (Recommended)</Label>
                   <Input
                     id="whitebooks_gst_username"
                     {...form.register("whitebooks_gst_username")}
-                    placeholder="Can be added later too"
+                    placeholder="Enter the customer's GST portal username"
                   />
+                  <p className="text-xs text-slate-500">
+                    Recommended for smoother filing access and later filing steps.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="state_code">State code</Label>
@@ -377,8 +381,22 @@ function ClientFormDialogContent({
                   ) : null}
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="registration_type">Registration type</Label>
-                  <Input id="registration_type" {...form.register("registration_type")} placeholder="regular" />
+                  <Label>Registration type</Label>
+                  <Select
+                    value={form.watch("registration_type") || "regular"}
+                    onValueChange={(value) => form.setValue("registration_type", value, { shouldDirty: true, shouldValidate: true })}
+                  >
+                    <SelectTrigger className="h-10 w-full">
+                      <SelectValue placeholder="Registration type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {GST_REGISTRATION_TYPE_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </div>

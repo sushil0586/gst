@@ -1,62 +1,79 @@
 import Link from "next/link";
 
 import { ActionLabel } from "@/components/common/action-label";
-import { PlaceholderPage } from "@/components/common/placeholder-page";
-import { workspaces } from "@/data/workspace";
+import { PageHeader } from "@/components/common/page-header";
+import { SectionCard } from "@/components/common/section-card";
 import { Button } from "@/components/ui/button";
+
+const settingsSections = [
+  {
+    title: "Workspace management",
+    description: "Create office or branch workspaces under the same CA organization and keep teams scoped cleanly.",
+    href: "/settings/workspaces",
+    action: "Open workspaces",
+  },
+  {
+    title: "Team management",
+    description: "Onboard filers, senior CAs, reviewers, and workspace operators with live role controls.",
+    href: "/settings/team",
+    action: "Open team",
+  },
+  {
+    title: "Pilot readiness",
+    description: "Run the operational checklist before opening a new workspace to testers or controlled users.",
+    href: "/settings/pilot-readiness",
+    action: "Open checklist",
+  },
+  {
+    title: "User guide & UAT",
+    description: "Review the navigation map, recommended workflow, and QA coverage for the current product surface.",
+    href: "/settings/user-guide",
+    action: "Open guide",
+  },
+  {
+    title: "Change password",
+    description: "Update your own workspace password without leaving the product.",
+    href: "/settings/change-password",
+    action: "Open password",
+  },
+];
 
 export default function SettingsPage() {
   return (
     <div className="space-y-6">
-      <PlaceholderPage
+      <PageHeader
         title="Settings"
-        description="Manage workspace preferences, operational defaults, role foundations, and future backend integrations."
-        statusTitle="Pilot shell: settings overview"
-        statusDescription="This top-level settings page is still a preview layer. Use Team, Pilot Readiness, and User Guide for the live-supported operational paths in the current build."
-        tableTitle="Workspace settings"
-        tableDescription="Mock settings overview for the active compliance workspace."
-        columns={[
-          { key: "name", label: "Workspace" },
-          { key: "organizationName", label: "Organization" },
-          { key: "role", label: "Role" },
-        ]}
-        rows={workspaces}
-        emptyTitle="Settings foundation ready"
-        emptyDescription="This page is prepared for user roles, notification rules, and filing preferences."
+        description="Open workspace operations, onboarding controls, and release-readiness guidance from one place."
       />
-      <div className="surface-card flex items-center justify-between px-5 py-4">
-        <div>
-          <p className="text-sm font-semibold text-slate-900">Team management</p>
-          <p className="mt-1 text-sm text-slate-600">Onboard filers, senior CAs, reviewers, and workspace operators for real pilot testing.</p>
+
+      <SectionCard
+        title="Operational settings"
+        description="Use these areas to manage team access, confirm release readiness, and support controlled rollout."
+      >
+        <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+          {settingsSections.map((section) => (
+            <div key={section.href} className="rounded-2xl border border-slate-200 px-5 py-5">
+              <p className="text-sm font-semibold text-slate-900">{section.title}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">{section.description}</p>
+              <Button asChild size="sm" className="mt-4">
+                <Link href={section.href}>
+                  <ActionLabel kind="open" label={section.action} />
+                </Link>
+              </Button>
+            </div>
+          ))}
         </div>
-        <Button asChild size="sm">
-          <Link href="/settings/team">
-            <ActionLabel kind="open" label="Open team" />
-          </Link>
-        </Button>
-      </div>
-      <div className="surface-card flex items-center justify-between px-5 py-4">
-        <div>
-          <p className="text-sm font-semibold text-slate-900">Pilot readiness</p>
-          <p className="mt-1 text-sm text-slate-600">Follow the guided pilot checklist before inviting CA or business users.</p>
-        </div>
-        <Button asChild size="sm">
-          <Link href="/settings/pilot-readiness">
-            <ActionLabel kind="open" label="Open checklist" />
-          </Link>
-        </Button>
-      </div>
-      <div className="surface-card flex items-center justify-between px-5 py-4">
-        <div>
-          <p className="text-sm font-semibold text-slate-900">User guide & UAT</p>
-          <p className="mt-1 text-sm text-slate-600">Open the practical user guide, navigation map, and QA test pack for full end-to-end validation.</p>
-        </div>
-        <Button asChild size="sm" variant="outline">
-          <Link href="/settings/user-guide">
-            <ActionLabel kind="open" label="Open guide" />
-          </Link>
-        </Button>
-      </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Release note"
+        description="This landing page is intentionally lightweight. Live settings workflows currently sit in the focused modules above."
+      >
+        <p className="text-sm leading-6 text-slate-700">
+          As the production surface grows, this page can expand into notification defaults, workspace preferences, and filing-control
+          settings. For the first release, the linked modules above are the active operational paths.
+        </p>
+      </SectionCard>
     </div>
   );
 }

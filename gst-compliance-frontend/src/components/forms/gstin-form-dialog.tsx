@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useCreateGstinMutation, useUpdateGstinMutation } from "@/features/gstins";
+import { GST_REGISTRATION_TYPE_OPTIONS, normalizeRegistrationType } from "@/lib/constants/gst-registration-types";
 import { getErrorMessage } from "@/lib/api/error-handler";
 import { gstinFormSchema, type GstinFormValues } from "@/lib/validations/foundation";
 import type { ClientRecord, GSTINRecordApi } from "@/types/api";
@@ -33,7 +34,7 @@ export function GstinFormDialog({
     defaultValues: {
       client: initialValues?.client ?? clients[0]?.id ?? "",
       gstin: initialValues?.gstin ?? "",
-      registration_type: initialValues?.registration_type ?? "regular",
+      registration_type: normalizeRegistrationType(initialValues?.registration_type),
       state_code: initialValues?.state_code ?? "",
       whitebooks_gst_username: initialValues?.whitebooks_gst_username ?? "",
     },
@@ -45,7 +46,7 @@ export function GstinFormDialog({
     form.reset({
       client: initialValues?.client ?? clients[0]?.id ?? "",
       gstin: initialValues?.gstin ?? "",
-      registration_type: initialValues?.registration_type ?? "regular",
+      registration_type: normalizeRegistrationType(initialValues?.registration_type),
       state_code: initialValues?.state_code ?? "",
       whitebooks_gst_username: initialValues?.whitebooks_gst_username ?? "",
     });
@@ -58,7 +59,7 @@ export function GstinFormDialog({
   const onSubmit = form.handleSubmit(async (values) => {
     const payload = {
       ...values,
-      registration_type: values.registration_type ?? "regular",
+      registration_type: normalizeRegistrationType(values.registration_type),
       state_code: values.state_code ?? "",
       whitebooks_gst_username: values.whitebooks_gst_username ?? "",
     };
@@ -81,7 +82,7 @@ export function GstinFormDialog({
       <AppModalContent size="md">
         <AppModalHeader
           title={isEditing ? "Edit GSTIN" : "Create GSTIN"}
-          description="Use the live backend foundation for GSTIN setup."
+          description="Use the live foundation for GSTIN setup."
         />
         <form onSubmit={onSubmit} className="flex min-h-0 flex-1 flex-col">
           <AppModalBody className="space-y-4">
@@ -126,21 +127,23 @@ export function GstinFormDialog({
                 <SelectValue placeholder="Registration type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="regular">Regular</SelectItem>
-                <SelectItem value="composition">Composition</SelectItem>
-                <SelectItem value="sez">SEZ</SelectItem>
+                {GST_REGISTRATION_TYPE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="whitebooks_gst_username">WhiteBooks GST username (optional)</Label>
+            <Label htmlFor="whitebooks_gst_username">Customer GST portal username (Recommended)</Label>
             <Input
               id="whitebooks_gst_username"
               {...form.register("whitebooks_gst_username")}
-              placeholder="Enter taxpayer GST username if available"
+              placeholder="Enter the customer's GST portal username"
             />
             <p className="text-xs text-slate-500">
-              Optional now. You can create the GSTIN first and update this later before provider authentication.
+              Recommended for smoother filing access. You can still create the GSTIN now and update this later if needed.
             </p>
           </div>
           </AppModalBody>

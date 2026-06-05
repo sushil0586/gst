@@ -278,11 +278,26 @@ class ImportImpactSummarySerializer(serializers.Serializer):
 class ImportRowCorrectionSerializer(serializers.Serializer):
     row_number = serializers.IntegerField(min_value=2)
     raw_row = serializers.DictField(child=serializers.CharField(allow_blank=True), allow_empty=False)
+    exception_context = serializers.DictField(required=False)
 
     def validate_raw_row(self, value):
         if not isinstance(value, dict) or not value:
             raise serializers.ValidationError("Provide the corrected raw row values.")
         return {str(key): "" if row_value is None else str(row_value) for key, row_value in value.items()}
+
+    def validate_exception_context(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("Exception context must be an object.")
+        allow_period_override = bool(value.get("allow_period_override"))
+        reason = str(value.get("reason", "") or "").strip()
+        category = str(value.get("category", "") or "").strip()
+        if allow_period_override and not reason:
+            raise serializers.ValidationError({"reason": "Provide a reason for the period exception override."})
+        return {
+            "allow_period_override": allow_period_override,
+            "reason": reason,
+            "category": category,
+        }
 
 
 class ImportRowDiscardSerializer(serializers.Serializer):

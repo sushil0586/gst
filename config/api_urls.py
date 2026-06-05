@@ -4,8 +4,9 @@ from django.urls import path
 
 from apps.approvals.views import ApprovalRequestViewSet
 from apps.audit_logs.views import AuditLogViewSet
-from apps.clients.views import ClientViewSet
+from apps.clients.views import ClientContactViewSet, ClientViewSet
 from apps.compliance_periods.views import CompliancePeriodViewSet
+from apps.customer_operations.views import OperationalFollowUpViewSet, ReturnStatusRegisterViewSet
 from apps.filings.views import ProviderAuthSessionViewSet, ReturnFilingViewSet, WhiteBooksAuthSessionViewSet
 from apps.gst_transactions.views import (
     GSTTransactionViewSet,
@@ -38,6 +39,7 @@ router = DefaultRouter()
 router.register("organizations", OrganizationViewSet, basename="organization")
 router.register("workspaces", WorkspaceViewSet, basename="workspace")
 router.register("clients", ClientViewSet, basename="client")
+router.register("client-contacts", ClientContactViewSet, basename="client-contact")
 router.register("gstins", GSTINViewSet, basename="gstin")
 router.register("compliance-periods", CompliancePeriodViewSet, basename="compliance-period")
 router.register("import-templates", ImportTemplateViewSet, basename="import-template")
@@ -56,6 +58,8 @@ router.register("provider-auth-sessions", ProviderAuthSessionViewSet, basename="
 router.register("whitebooks-auth-sessions", WhiteBooksAuthSessionViewSet, basename="whitebooks-auth-session")
 router.register("approvals", ApprovalRequestViewSet, basename="approval-request")
 router.register("notices", NoticeViewSet, basename="notice")
+router.register("operational-follow-ups", OperationalFollowUpViewSet, basename="operational-follow-up")
+router.register("return-status-register", ReturnStatusRegisterViewSet, basename="return-status-register")
 router.register("audit-logs", AuditLogViewSet, basename="audit-log")
 
 urlpatterns = [

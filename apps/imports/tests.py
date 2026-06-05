@@ -15,6 +15,7 @@ from apps.gst_transactions.models import GSTTransaction
 from apps.gstins.models import GSTIN
 from apps.imports.models import ImportBatch, ImportRowError, ImportTemplate
 from apps.integrations.whitebooks.client import WhiteBooksClient
+from apps.integrations.whitebooks.exceptions import WhiteBooksTemporaryError
 from apps.organizations.models import Organization
 from apps.reconciliation.models import ReconciliationRun
 from apps.returns.models import ReturnPreparation
@@ -221,6 +222,81 @@ def test_invalid_row_creates_import_row_error(import_authenticated_client, impor
     assert batch.valid_rows == 0
     assert ImportRowError.objects.filter(import_batch=batch, field_name="document_date").exists()
     assert ImportRowError.objects.filter(import_batch=batch, severity=ImportRowError.Severity.WARNING).exists()
+
+
+@pytest.mark.django_db
+def test_upload_rejects_invoice_dates_outside_selected_compliance_period(import_authenticated_client, import_context):
+    file = build_csv_file(
+        "purchase-may-period-mismatch.csv",
+        "invoice_no,invoice_date,supplier_gstin,supplier_name,taxable_value,cgst,sgst,igst,cess,total_amount\n"
+        "INV-OUT-001,2026-05-14,29ABCDE1234F1Z5,Vendor One,1000,90,90,0,0,1180\n",
+    )
+    response = import_authenticated_client.post(
+        "/api/v1/imports/batches/",
+        upload_payload(import_context, file=file),
+        format="multipart",
+    )
+
+    assert response.status_code == 201
+    batch = ImportBatch.objects.get(pk=response.data["data"]["id"])
+    assert batch.invalid_rows == 1
+    assert batch.valid_rows == 0
+    assert GSTTransaction.objects.filter(import_batch=batch).count() == 0
+    assert ImportRowError.objects.filter(
+        import_batch=batch,
+        field_name="document_date",
+        error_code="period_mismatch",
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_row_correction_can_allow_period_exception_with_reason(import_authenticated_client, import_context):
+    file = build_csv_file(
+        "purchase-period-exception.csv",
+        "invoice_no,invoice_date,supplier_gstin,supplier_name,taxable_value,cgst,sgst,igst,cess,total_amount\n"
+        "INV-EXC-001,2026-05-14,29ABCDE1234F1Z5,Vendor Exception,1000,90,90,0,0,1180\n",
+    )
+    create_response = import_authenticated_client.post(
+        "/api/v1/imports/batches/",
+        upload_payload(import_context, file=file),
+        format="multipart",
+    )
+    batch = ImportBatch.objects.get(pk=create_response.data["data"]["id"])
+    assert GSTTransaction.objects.filter(import_batch=batch).count() == 0
+
+    correction_response = import_authenticated_client.post(
+        f"/api/v1/imports/batches/{batch.id}/row-corrections/",
+        {
+            "row_number": 2,
+            "raw_row": {
+                "invoice_no": "INV-EXC-001",
+                "invoice_date": "2026-05-14",
+                "supplier_gstin": "29ABCDE1234F1Z5",
+                "supplier_name": "Vendor Exception",
+                "taxable_value": "1000",
+                "cgst": "90",
+                "sgst": "90",
+                "igst": "0",
+                "cess": "0",
+                "total_amount": "1180",
+            },
+            "exception_context": {
+                "allow_period_override": True,
+                "reason": "Late reported supplier document accepted for operational follow-up.",
+                "category": "late_reported_invoice",
+            },
+        },
+        format="json",
+    )
+
+    assert correction_response.status_code == 200
+    batch.refresh_from_db()
+    assert batch.valid_rows == 1
+    assert batch.invalid_rows == 0
+    transaction = GSTTransaction.objects.get(import_batch=batch)
+    assert transaction.metadata["period_exception"]["allowed"] is True
+    assert transaction.metadata["period_exception"]["category"] == "late_reported_invoice"
+    assert "Late reported supplier document" in transaction.metadata["period_exception"]["reason"]
 
 
 @pytest.mark.django_db
@@ -780,6 +856,33 @@ def test_fetch_gstr2b_requires_verified_provider_auth_session(import_authenticat
 
     assert response.status_code == 400
     assert response.data["errors"]["gstin"] == "A verified provider auth session is required before GSTR-2B can be fetched automatically."
+
+
+@pytest.mark.django_db
+def test_whitebooks_client_reports_empty_json_response_cleanly(monkeypatch):
+    client = WhiteBooksClient()
+
+    class DummyResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b""
+
+    monkeypatch.setattr("apps.integrations.whitebooks.client.urlopen", lambda *args, **kwargs: DummyResponse())
+
+    with pytest.raises(WhiteBooksTemporaryError) as exc_info:
+        client._request_json(
+            "/gstr2b/gen2b",
+            method="GET",
+            query_params={"email": "aadishb3@gmail.com"},
+            headers={"accept": "*/*"},
+        )
+
+    assert "empty response" in str(exc_info.value).lower()
 
 
 @pytest.mark.django_db

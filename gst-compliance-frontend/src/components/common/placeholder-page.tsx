@@ -7,7 +7,7 @@ export function PlaceholderPage({
   title,
   description,
   statusTitle = "Pilot shell",
-  statusDescription = "This page is visible in navigation, but it is still a demonstration workflow and not fully wired to live backend operations.",
+  statusDescription = "This page is visible in navigation, but it is still a demonstration workflow and not fully connected to live operations.",
   tableTitle,
   tableDescription,
   columns,
@@ -39,7 +39,7 @@ export function PlaceholderPage({
         <SectionCard title={tableTitle} description={tableDescription}>
           <DataTableShell columns={columns} rows={rows} />
         </SectionCard>
-        <SectionCard title="Current State" description="This foundation page is ready for backend wiring.">
+        <SectionCard title="Current State" description="This foundation page is ready for live workflow connection.">
           <EmptyState title={emptyTitle} description={emptyDescription} />
         </SectionCard>
       </div>

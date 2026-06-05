@@ -100,6 +100,7 @@ def create_transaction(
     igst_amount="0.00",
     cess_amount="0.00",
     total_amount="1180.00",
+    metadata=None,
 ):
     return GSTTransaction.objects.create(
         workspace=context["workspace"],
@@ -119,6 +120,7 @@ def create_transaction(
         cess_amount=Decimal(cess_amount),
         tax_amount=Decimal(cgst_amount) + Decimal(sgst_amount) + Decimal(igst_amount) + Decimal(cess_amount),
         total_amount=Decimal(total_amount),
+        metadata=metadata or {},
         created_by=context["user"],
         updated_by=context["user"],
     )
@@ -191,21 +193,50 @@ def test_gstr1_summary(returns_authenticated_client, returns_context):
     create_transaction(context=returns_context, transaction_type="sales", reference_number="S-002", counterparty_gstin="")
     create_transaction(context=returns_context, transaction_type="credit_note", reference_number="CN-001", total_amount="590.00", taxable_value="500.00", cgst_amount="45.00", sgst_amount="45.00")
     create_transaction(context=returns_context, transaction_type="debit_note", reference_number="DN-001", total_amount="708.00", taxable_value="600.00", cgst_amount="54.00", sgst_amount="54.00")
+    create_transaction(
+        context=returns_context,
+        transaction_type="sales",
+        reference_number="S-EXC-001",
+        counterparty_gstin="29ABCDE1234F1Z5",
+        metadata={
+            "period_exception": {
+                "allowed": True,
+                "reason": "Late-reported invoice accepted after review.",
+                "category": "late_reported_invoice",
+                "selected_period": returns_context["compliance_period"].period,
+            }
+        },
+    )
 
     response = returns_authenticated_client.post("/api/v1/returns/prepare/", prepare_payload(returns_context, "gstr1"), format="json")
     assert response.status_code == 200
     prepared = ReturnPreparation.objects.get(pk=response.data["data"]["id"])
     outward = prepared.summary_snapshot["outward_supplies"]
-    assert outward["b2b_taxable_value"] == "1000.00"
+    assert outward["b2b_taxable_value"] == "2000.00"
     assert outward["b2c_taxable_value"] == "1000.00"
     assert outward["credit_note_tax_amount"] == "90.00"
     assert outward["debit_note_tax_amount"] == "108.00"
-    assert outward["document_count"] == 4
+    assert outward["document_count"] == 5
+    assert prepared.summary_snapshot["period_exceptions"]["count"] == 1
+    assert prepared.summary_snapshot["period_exceptions"]["documents"][0]["document_number"] == "S-EXC-001"
 
 
 @pytest.mark.django_db
 def test_gstr3b_summary(returns_authenticated_client, returns_context):
     create_transaction(context=returns_context, transaction_type="sales", reference_number="S-001", taxable_value="5000.00", cgst_amount="450.00", sgst_amount="450.00", total_amount="5900.00")
+    create_transaction(
+        context=returns_context,
+        transaction_type="purchase",
+        reference_number="P-EXC-001",
+        metadata={
+            "period_exception": {
+                "allowed": True,
+                "reason": "Supplier filed in later month.",
+                "category": "gstr_2b_timing_difference",
+                "selected_period": returns_context["compliance_period"].period,
+            }
+        },
+    )
     create_reconciliation_run_with_items(context=returns_context)
 
     response = returns_authenticated_client.post("/api/v1/returns/prepare/", prepare_payload(returns_context, "gstr3b"), format="json")
@@ -217,6 +248,8 @@ def test_gstr3b_summary(returns_authenticated_client, returns_context):
     assert itc_summary["deferred_blocked_itc"] == "180.00"
     assert itc_summary["unresolved_mismatch_count"] == 1
     assert itc_summary["net_tax_payable"] == "720.00"
+    assert prepared.summary_snapshot["period_exceptions"]["count"] == 1
+    assert prepared.summary_snapshot["period_exceptions"]["documents"][0]["document_number"] == "P-EXC-001"
 
 
 @pytest.mark.django_db

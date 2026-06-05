@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
-from apps.clients.models import Client
+from apps.clients.models import Client, ClientContact
+from apps.gstins.serializers import workspace_has_gstin
 from apps.gstins.serializers import GSTINSerializer, GSTINTaxpayerProfileSerializer
 
 
@@ -78,10 +79,13 @@ class ClientBootstrapSerializer(serializers.Serializer):
         return value
 
     def validate(self, attrs):
+        workspace_id = attrs.get("workspace")
         gstin = attrs.get("gstin", "")
         if gstin:
             attrs["state_code"] = attrs.get("state_code") or gstin[:2]
             attrs["registration_type"] = attrs.get("registration_type") or "regular"
+            if workspace_id and workspace_has_gstin(workspace_id=workspace_id, gstin_value=gstin):
+                raise serializers.ValidationError({"gstin": "This GSTIN already exists in the selected workspace."})
         else:
             attrs["registration_type"] = attrs.get("registration_type", "")
             attrs["state_code"] = attrs.get("state_code", "")
@@ -92,3 +96,53 @@ class ClientBootstrapResultSerializer(serializers.Serializer):
     client = ClientSerializer()
     gstin = GSTINSerializer(allow_null=True)
     taxpayer_profile = GSTINTaxpayerProfileSerializer(allow_null=True)
+
+
+class ClientContactSerializer(serializers.ModelSerializer):
+    client_name = serializers.CharField(source="client.legal_name", read_only=True)
+    workspace = serializers.UUIDField(source="client.workspace_id", read_only=True)
+
+    class Meta:
+        model = ClientContact
+        fields = [
+            "id",
+            "client",
+            "client_name",
+            "workspace",
+            "name",
+            "designation",
+            "mobile_number",
+            "alternate_mobile_number",
+            "email",
+            "is_primary",
+            "preferred_contact_mode",
+            "notes",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "created_at", "updated_at", "client_name", "workspace"]
+
+    def validate(self, attrs):
+        instance = self.instance
+        client = attrs.get("client") or getattr(instance, "client", None)
+        if client is None:
+            raise serializers.ValidationError({"client": "Client is required."})
+
+        mobile_number = (attrs.get("mobile_number") if "mobile_number" in attrs else getattr(instance, "mobile_number", "")).strip()
+        alternate_mobile = (
+            attrs.get("alternate_mobile_number")
+            if "alternate_mobile_number" in attrs
+            else getattr(instance, "alternate_mobile_number", "")
+        ).strip()
+        email = (attrs.get("email") if "email" in attrs else getattr(instance, "email", "")).strip()
+
+        if not any([mobile_number, alternate_mobile, email]):
+            raise serializers.ValidationError(
+                "At least one customer contact channel is required: mobile number, alternate mobile number, or email."
+            )
+
+        attrs["mobile_number"] = mobile_number
+        attrs["alternate_mobile_number"] = alternate_mobile
+        attrs["email"] = email
+        return attrs

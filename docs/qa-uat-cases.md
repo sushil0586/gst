@@ -19,6 +19,8 @@ These UAT cases cover the current product surface for:
 - close-manager operations
 - exports
 
+For the most practical production-style run using the existing import bundles and customer-management flows, use [live-uat-end-to-end-pack.md](/Users/ansh/Documents/Gst-Compliance/docs/live-uat-end-to-end-pack.md:1) alongside this broader case catalog.
+
 ## Environment Preconditions
 
 - Backend is running
