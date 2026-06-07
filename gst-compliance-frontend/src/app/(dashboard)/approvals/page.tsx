@@ -430,7 +430,7 @@ export default function ApprovalsPage() {
         compliance_period: preparedReturn.compliance_period,
         entity_type: "return_preparation",
         entity_id: preparedReturn.id,
-        requested_to: user?.id ?? undefined,
+        requested_to: user?.id ?? null,
         status: "pending",
         comments: buildApprovalRequestComments(preparedReturn),
       });

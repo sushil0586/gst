@@ -373,7 +373,7 @@ export default function Gstr9ReviewPage() {
                   <TableBody>
                     {linkedSourceReturns
                       .slice()
-                      .sort((left, right) => left.compliance_period_label.localeCompare(right.compliance_period_label))
+                      .sort((left, right) => (left.compliance_period_label ?? "").localeCompare(right.compliance_period_label ?? ""))
                       .map((item) => (
                         <TableRow key={item.id}>
                           <TableCell>{item.compliance_period_label}</TableCell>

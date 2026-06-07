@@ -336,7 +336,7 @@ export type ImportBatchRecord = {
   import_template_name?: string | null;
   compliance_period: string;
   compliance_period_label?: string;
-  import_type: "sales" | "purchase" | "credit_note" | "debit_note" | "gstr_2b";
+  import_type: "sales" | "purchase" | "credit_note" | "debit_note" | "advance_received" | "advance_adjusted" | "gstr_2b";
   source_type: "csv" | "excel" | "provider";
   file_name: string;
   source_metadata?: Record<string, unknown>;

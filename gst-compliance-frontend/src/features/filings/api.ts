@@ -40,7 +40,7 @@ type StartFilingPayload = {
   gstin: string;
   compliance_period: string;
   prepared_return: string;
-  return_type: "gstr1" | "gstr3b";
+  return_type: "gstr1" | "gstr3b" | "gstr9" | "gstr9c";
   provider: "whitebooks";
   approval_request?: string;
   confirmation_note?: string;
