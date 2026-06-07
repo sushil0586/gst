@@ -81,6 +81,7 @@ const importTypeOptions: Array<{ value: ImportBatchRecord["import_type"]; label:
   { value: "purchase", label: "Purchase" },
   { value: "credit_note", label: "Credit Note" },
   { value: "debit_note", label: "Debit Note" },
+  { value: "tds_deducted", label: "TDS Deducted" },
   { value: "advance_received", label: "Advance Received" },
   { value: "advance_adjusted", label: "Advance Adjusted" },
   { value: "gstr_2b", label: "GSTR-2B" },
@@ -243,6 +244,7 @@ function getImpactActionIcon(actionKey: string) {
 function inferImportTypeFromFileName(fileName: string): ImportBatchRecord["import_type"] | null {
   const normalized = fileName.toLowerCase();
   if (normalized.includes("gstr") && normalized.includes("2b")) return "gstr_2b";
+  if (normalized.includes("tds") || normalized.includes("gstr7")) return "tds_deducted";
   if (normalized.includes("advance") && (normalized.includes("adjust") || normalized.includes("adjusted") || normalized.includes("txpd"))) {
     return "advance_adjusted";
   }
@@ -1063,7 +1065,7 @@ export default function ImportsPage() {
                 </div>
                 <div className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3">
                   <span>Import categories</span>
-                  <span className="font-semibold text-slate-900">Sales, Purchase, Notes, Advances, 2B</span>
+                  <span className="font-semibold text-slate-900">Sales, Purchase, Notes, TDS, Advances, 2B</span>
                 </div>
                 <div className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3">
                   <span>Latest batch status</span>

@@ -720,6 +720,122 @@ def test_gstr3b_summary_surfaces_prior_period_deferred_items(returns_authenticat
 
 
 @pytest.mark.django_db
+def test_gstr7_summary(returns_authenticated_client, returns_context):
+    create_transaction(
+        context=returns_context,
+        transaction_type="tds_deducted",
+        reference_number="TDS-7001",
+        document_type="tds_entry",
+        counterparty_gstin="29ABCDE1234F1Z5",
+        counterparty_name="Deductee One",
+        taxable_value="100000.00",
+        cgst_amount="500.00",
+        sgst_amount="500.00",
+        igst_amount="0.00",
+        total_amount="100000.00",
+    )
+    create_transaction(
+        context=returns_context,
+        transaction_type="tds_deducted",
+        reference_number="TDS-7002",
+        document_type="tds_entry",
+        counterparty_gstin="29ABCDE1234F1Z5",
+        counterparty_name="Deductee One",
+        taxable_value="25000.00",
+        cgst_amount="125.00",
+        sgst_amount="125.00",
+        igst_amount="0.00",
+        total_amount="25000.00",
+    )
+    create_transaction(
+        context=returns_context,
+        transaction_type="tds_deducted",
+        reference_number="TDS-7003",
+        document_type="tds_entry",
+        counterparty_gstin="27ABCDE1234F1Z5",
+        counterparty_name="Deductee Two",
+        taxable_value="40000.00",
+        cgst_amount="0.00",
+        sgst_amount="0.00",
+        igst_amount="800.00",
+        total_amount="40000.00",
+    )
+
+    response = returns_authenticated_client.post("/api/v1/returns/prepare/", prepare_payload(returns_context, "gstr7"), format="json")
+
+    assert response.status_code == 200
+    prepared = ReturnPreparation.objects.get(pk=response.data["data"]["id"])
+    snapshot = prepared.summary_snapshot
+    summary = snapshot["tds_summary"]
+
+    assert snapshot["return_type"] == "gstr7"
+    assert snapshot["summary_version"] == "gstr7.monthly.v1"
+    assert summary["document_count"] == 3
+    assert summary["deductee_count"] == 2
+    assert summary["payment_amount"] == "165000.00"
+    assert summary["taxable_value"] == "165000.00"
+    assert summary["cgst_amount"] == "625.00"
+    assert summary["sgst_amount"] == "625.00"
+    assert summary["igst_amount"] == "800.00"
+    assert summary["tds_amount"] == "2050.00"
+    assert snapshot["deductees"]["row_count"] == 2
+    assert snapshot["deductees"]["rows"][0]["document_count"] == 1
+    assert snapshot["deductees"]["rows"][1]["document_count"] == 2
+
+
+@pytest.mark.django_db
+def test_return_readiness_surfaces_gstr7_tds_signals(returns_authenticated_client, returns_context):
+    create_transaction(
+        context=returns_context,
+        transaction_type="tds_deducted",
+        reference_number="TDS-7701",
+        document_type="tds_entry",
+        counterparty_gstin="29ABCDE1234F1Z5",
+        counterparty_name="Deductee One",
+        taxable_value="100000.00",
+        cgst_amount="500.00",
+        sgst_amount="500.00",
+        total_amount="100000.00",
+    )
+    create_transaction(
+        context=returns_context,
+        transaction_type="tds_deducted",
+        reference_number="TDS-7701",
+        document_type="tds_entry",
+        counterparty_gstin="",
+        counterparty_name="Deductee Missing GSTIN",
+        taxable_value="0.00",
+        cgst_amount="0.00",
+        sgst_amount="0.00",
+        total_amount="0.00",
+    )
+
+    response = returns_authenticated_client.get(
+        "/api/v1/returns/readiness/",
+        {
+            "workspace": str(returns_context["workspace"].id),
+            "client": str(returns_context["client"].id),
+            "gstin": str(returns_context["gstin"].id),
+            "compliance_period": str(returns_context["compliance_period"].id),
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    gstr7 = response.data["data"]["gstr7"]
+    issue_codes = {issue["code"] for issue in gstr7["issues"]}
+    assert gstr7["return_type"] == "gstr7"
+    assert gstr7["status"] == "blocked"
+    assert not gstr7["can_prepare"]
+    assert "missing_deductee_gstin" in issue_codes
+    assert "zero_tds_amount" in issue_codes
+    assert "zero_payment_amount" in issue_codes
+    assert "duplicate_tds_document_numbers" in issue_codes
+    assert gstr7["metrics"]["document_count"] == 2
+    assert gstr7["metrics"]["deductee_count"] == 1
+
+
+@pytest.mark.django_db
 def test_gstr9_summary_aggregates_monthly_gstr1_and_gstr3b(returns_authenticated_client, returns_context):
     may_period = CompliancePeriod.objects.create(
         gstin=returns_context["gstin"],

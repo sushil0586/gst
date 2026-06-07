@@ -120,6 +120,41 @@ class WhiteBooksProvider(FilingProvider):
             and bool(readiness.get("save_supported", True))
             and bool(operations.get("save") or not payload)
         )
+        live_gstr7_save_enabled = (
+            not self.client.sandbox_mode
+            and return_type == "gstr7"
+            and settings.WHITEBOOKS_ENABLE_GSTR7_SAVE_LIVE
+            and bool(readiness.get("save_supported", True))
+            and bool(operations.get("save") or not payload)
+        )
+        live_gstr9_save_enabled = (
+            not self.client.sandbox_mode
+            and return_type == "gstr9"
+            and settings.WHITEBOOKS_ENABLE_GSTR9_SAVE_LIVE
+            and bool(readiness.get("save_supported", False))
+            and bool(operations.get("save") or not payload)
+        )
+        live_gstr9_file_enabled = (
+            live_gstr9_save_enabled
+            and return_type == "gstr9"
+            and settings.WHITEBOOKS_ENABLE_GSTR9_FILE_LIVE
+            and bool(readiness.get("file_supported", False))
+            and bool(operations.get("file") or not payload)
+        )
+        live_gstr9c_save_enabled = (
+            not self.client.sandbox_mode
+            and return_type == "gstr9c"
+            and settings.WHITEBOOKS_ENABLE_GSTR9C_SAVE_LIVE
+            and bool(readiness.get("save_supported", False))
+            and bool(operations.get("save") or not payload)
+        )
+        live_gstr9c_file_enabled = (
+            live_gstr9c_save_enabled
+            and return_type == "gstr9c"
+            and settings.WHITEBOOKS_ENABLE_GSTR9C_FILE_LIVE
+            and bool(readiness.get("file_supported", False))
+            and bool(operations.get("file") or not payload)
+        )
         live_gstr3b_save_enabled = (
             not self.client.sandbox_mode
             and return_type == "gstr3b"
@@ -144,6 +179,13 @@ class WhiteBooksProvider(FilingProvider):
             and settings.WHITEBOOKS_ENABLE_GSTR1_FILE_LIVE
             and bool(operations.get("file") or not payload)
         )
+        live_gstr7_file_enabled = (
+            live_gstr7_save_enabled
+            and return_type == "gstr7"
+            and settings.WHITEBOOKS_ENABLE_GSTR7_FILE_LIVE
+            and bool(readiness.get("file_supported", False))
+            and bool(operations.get("file") or not payload)
+        )
         live_gstr3b_file_enabled = (
             live_gstr3b_offset_enabled
             and return_type == "gstr3b"
@@ -151,8 +193,14 @@ class WhiteBooksProvider(FilingProvider):
             and bool(readiness.get("file_supported", False))
             and bool(operations.get("file") or not payload)
         )
-        live_save_enabled = live_gstr1_save_enabled or live_gstr3b_save_enabled
-        save_supported = bool(readiness.get("save_supported", return_type in {"gstr1", "gstr3b"}))
+        live_save_enabled = (
+            live_gstr1_save_enabled
+            or live_gstr7_save_enabled
+            or live_gstr9_save_enabled
+            or live_gstr9c_save_enabled
+            or live_gstr3b_save_enabled
+        )
+        save_supported = bool(readiness.get("save_supported", return_type in {"gstr1", "gstr7", "gstr3b"}))
         proceed_supported = (
             return_type == "gstr1"
             and settings.WHITEBOOKS_ENABLE_GSTR1_PROCEED_LIVE
@@ -161,6 +209,12 @@ class WhiteBooksProvider(FilingProvider):
         file_supported = (
             bool(readiness.get("file_supported", return_type == "gstr1")) and live_file_enabled
             if return_type == "gstr1"
+            else bool(readiness.get("file_supported", False)) and live_gstr7_file_enabled
+            if return_type == "gstr7"
+            else bool(readiness.get("file_supported", False)) and live_gstr9_file_enabled
+            if return_type == "gstr9"
+            else bool(readiness.get("file_supported", False)) and live_gstr9c_file_enabled
+            if return_type == "gstr9c"
             else bool(readiness.get("file_supported", False)) and live_gstr3b_file_enabled
         )
         offset_supported = bool(readiness.get("offset_supported", False)) and live_gstr3b_offset_enabled
@@ -207,6 +261,8 @@ class WhiteBooksProvider(FilingProvider):
 
     def requested_stages_for(self, planned_stage: str, filing=None) -> list[str]:
         if planned_stage == "file_requested":
+            if getattr(filing, "return_type", "") in {"gstr7", "gstr9", "gstr9c"}:
+                return ["draft_saved", "file_requested"]
             if getattr(filing, "return_type", "") == "gstr3b":
                 return ["draft_saved", "offset_applied", "file_requested"]
             return ["draft_saved", "proceeded_to_file", "file_requested"]
@@ -323,6 +379,30 @@ class WhiteBooksProvider(FilingProvider):
                 txn=auth_session.txn,
                 payload=save_payload,
             )
+        elif filing.return_type == "gstr7":
+            live_response = self.client.save_gstr7_return(
+                email=auth_session.email,
+                gstin=payload.get("gstin", ""),
+                ret_period=payload.get("whitebooks_ret_period", ""),
+                txn=auth_session.txn,
+                payload=save_payload,
+            )
+        elif filing.return_type == "gstr9":
+            live_response = self.client.save_gstr9_return(
+                email=auth_session.email,
+                gstin=payload.get("gstin", ""),
+                ret_period=payload.get("whitebooks_ret_period", ""),
+                txn=auth_session.txn,
+                payload=save_payload,
+            )
+        elif filing.return_type == "gstr9c":
+            live_response = self.client.save_gstr9c_return(
+                email=auth_session.email,
+                gstin=payload.get("gstin", ""),
+                ret_period=payload.get("whitebooks_ret_period", ""),
+                txn=auth_session.txn,
+                payload=save_payload,
+            )
         elif filing.return_type == "gstr3b":
             live_response = self.client.save_gstr3b_return(
                 email=auth_session.email,
@@ -336,6 +416,363 @@ class WhiteBooksProvider(FilingProvider):
                 f"Live WhiteBooks transport is not available for return type {self._get_return_type_display(filing.return_type)}."
             )
         sanitized_response = self.client.sanitize_response_payload(live_response)
+        if filing.return_type == "gstr9c" and capabilities.supported_operations.get("file"):
+            file_payload = operations.get("file")
+            if not file_payload:
+                raise WhiteBooksSubmissionError("WhiteBooks final filing payload is missing for this filing.")
+            try:
+                file_response = self.client.file_gstr9c_return(
+                    email=auth_session.email,
+                    gstin=payload.get("gstin", ""),
+                    ret_period=payload.get("whitebooks_ret_period", ""),
+                    txn=auth_session.txn,
+                    payload=file_payload,
+                )
+            except WhiteBooksTemporaryError as exc:
+                raise WhiteBooksStepError(
+                    str(exc),
+                    provider_stage="file_requested",
+                    partial_response={
+                        "mode": "live_gstr9c_save_and_file",
+                        "provider_stage": "draft_saved",
+                        "message": "WhiteBooks GSTR-9C draft save succeeded, but the final certification file request hit a temporary transport issue. Resync before retrying.",
+                        "auth_session_id": str(auth_session.id),
+                        "save_response": sanitized_response,
+                        "operations_requested": ["save", "file"],
+                        "operations_completed": ["draft_saved"],
+                        "operations_failed": ["file"],
+                        "operation_outcomes": {
+                            "save": {"status": "completed", "retryable": False},
+                            "file": {
+                                "status": "uncertain",
+                                "retryable": False,
+                                "code": "whitebooks_gstr9c_file_transport_uncertain",
+                                "message": str(exc),
+                            },
+                        },
+                        "failed_operation": "file",
+                        "next_action": "resync_before_retry",
+                    },
+                    completed_stages=["draft_saved"],
+                    provider_reference_id=auth_session.txn,
+                    retryable=False,
+                    error_code="whitebooks_gstr9c_file_transport_uncertain",
+                ) from exc
+            except WhiteBooksSubmissionError as exc:
+                raise WhiteBooksStepError(
+                    str(exc),
+                    provider_stage="file_requested",
+                    partial_response={
+                        "mode": "live_gstr9c_save_and_file",
+                        "provider_stage": "draft_saved",
+                        "message": "WhiteBooks GSTR-9C draft save succeeded, but the final certification file request was rejected.",
+                        "auth_session_id": str(auth_session.id),
+                        "save_response": sanitized_response,
+                        "operations_requested": ["save", "file"],
+                        "operations_completed": ["draft_saved"],
+                        "operations_failed": ["file"],
+                        "operation_outcomes": {
+                            "save": {"status": "completed", "retryable": False},
+                            "file": {
+                                "status": "failed",
+                                "retryable": False,
+                                "code": "whitebooks_gstr9c_file_rejected",
+                                "message": str(exc),
+                            },
+                        },
+                        "failed_operation": "file",
+                        "next_action": "review_provider_error",
+                    },
+                    completed_stages=["draft_saved"],
+                    provider_reference_id=auth_session.txn,
+                    retryable=False,
+                    error_code="whitebooks_gstr9c_file_rejected",
+                ) from exc
+
+            sanitized_file_response = self.client.sanitize_response_payload(file_response)
+            provider_reference_id = str(file_response.get("ref_id") or file_response.get("reference_id") or auth_session.txn)
+            provider_acknowledgement_id = str(file_response.get("ack_id") or file_response.get("acknowledgement_id") or "")
+            return WhiteBooksSubmissionResult(
+                provider_reference_id=provider_reference_id,
+                provider_acknowledgement_id=provider_acknowledgement_id,
+                submission_state="submitted",
+                provider_stage="file_requested",
+                raw_response={
+                    "mode": "live_gstr9c_save_and_file",
+                    "provider_stage": "file_requested",
+                    "message": "WhiteBooks GSTR-9C draft save and final filing request completed. Await ARN/status confirmation before treating this as filed.",
+                    "auth_session_id": str(auth_session.id),
+                    "save_response": sanitized_response,
+                    "file_response": sanitized_file_response,
+                    "operations_requested": ["save", "file"],
+                    "operations_completed": ["draft_saved", "file_requested"],
+                    "operations_failed": [],
+                    "operation_outcomes": {
+                        "save": {"status": "completed", "retryable": False},
+                        "file": {"status": "submitted", "retryable": False},
+                    },
+                    "next_action": "resync_for_arn_or_status",
+                },
+            )
+        if filing.return_type == "gstr9" and capabilities.supported_operations.get("file"):
+            file_payload = operations.get("file")
+            if not file_payload:
+                raise WhiteBooksSubmissionError("WhiteBooks final filing payload is missing for this filing.")
+            try:
+                file_response = self.client.file_gstr9_return(
+                    email=auth_session.email,
+                    gstin=payload.get("gstin", ""),
+                    ret_period=payload.get("whitebooks_ret_period", ""),
+                    txn=auth_session.txn,
+                    payload=file_payload,
+                )
+            except WhiteBooksTemporaryError as exc:
+                raise WhiteBooksStepError(
+                    str(exc),
+                    provider_stage="file_requested",
+                    partial_response={
+                        "mode": "live_gstr9_save_and_file",
+                        "provider_stage": "draft_saved",
+                        "message": "WhiteBooks GSTR-9 draft save succeeded, but the final annual file request hit a temporary transport issue. Resync before retrying.",
+                        "auth_session_id": str(auth_session.id),
+                        "save_response": sanitized_response,
+                        "operations_requested": ["save", "file"],
+                        "operations_completed": ["draft_saved"],
+                        "operations_failed": ["file"],
+                        "operation_outcomes": {
+                            "save": {"status": "completed", "retryable": False},
+                            "file": {
+                                "status": "uncertain",
+                                "retryable": False,
+                                "code": "whitebooks_gstr9_file_transport_uncertain",
+                                "message": str(exc),
+                            },
+                        },
+                        "failed_operation": "file",
+                        "next_action": "resync_before_retry",
+                    },
+                    completed_stages=["draft_saved"],
+                    provider_reference_id=auth_session.txn,
+                    retryable=False,
+                    error_code="whitebooks_gstr9_file_transport_uncertain",
+                ) from exc
+            except WhiteBooksSubmissionError as exc:
+                raise WhiteBooksStepError(
+                    str(exc),
+                    provider_stage="file_requested",
+                    partial_response={
+                        "mode": "live_gstr9_save_and_file",
+                        "provider_stage": "draft_saved",
+                        "message": "WhiteBooks GSTR-9 draft save succeeded, but the final annual file request was rejected.",
+                        "auth_session_id": str(auth_session.id),
+                        "save_response": sanitized_response,
+                        "operations_requested": ["save", "file"],
+                        "operations_completed": ["draft_saved"],
+                        "operations_failed": ["file"],
+                        "operation_outcomes": {
+                            "save": {"status": "completed", "retryable": False},
+                            "file": {
+                                "status": "failed",
+                                "retryable": False,
+                                "code": "whitebooks_gstr9_file_rejected",
+                                "message": str(exc),
+                            },
+                        },
+                        "failed_operation": "file",
+                        "next_action": "review_provider_error",
+                    },
+                    completed_stages=["draft_saved"],
+                    provider_reference_id=auth_session.txn,
+                    retryable=False,
+                    error_code="whitebooks_gstr9_file_rejected",
+                ) from exc
+
+            sanitized_file_response = self.client.sanitize_response_payload(file_response)
+            provider_reference_id = str(file_response.get("ref_id") or file_response.get("reference_id") or auth_session.txn)
+            provider_acknowledgement_id = str(file_response.get("ack_id") or file_response.get("acknowledgement_id") or "")
+            return WhiteBooksSubmissionResult(
+                provider_reference_id=provider_reference_id,
+                provider_acknowledgement_id=provider_acknowledgement_id,
+                submission_state="submitted",
+                provider_stage="file_requested",
+                raw_response={
+                    "mode": "live_gstr9_save_and_file",
+                    "provider_stage": "file_requested",
+                    "message": "WhiteBooks GSTR-9 draft save and final filing request completed. Await ARN/status confirmation before treating this as filed.",
+                    "auth_session_id": str(auth_session.id),
+                    "save_response": sanitized_response,
+                    "file_response": sanitized_file_response,
+                    "operations_requested": ["save", "file"],
+                    "operations_completed": ["draft_saved", "file_requested"],
+                    "operations_failed": [],
+                    "operation_outcomes": {
+                        "save": {"status": "completed", "retryable": False},
+                        "file": {"status": "submitted", "retryable": False},
+                    },
+                    "next_action": "resync_for_arn_or_status",
+                },
+            )
+        if filing.return_type == "gstr7" and capabilities.supported_operations.get("file"):
+            file_payload = operations.get("file")
+            if not file_payload:
+                raise WhiteBooksSubmissionError("WhiteBooks final filing payload is missing for this filing.")
+            try:
+                file_response = self.client.file_gstr7_return(
+                    email=auth_session.email,
+                    gstin=payload.get("gstin", ""),
+                    ret_period=payload.get("whitebooks_ret_period", ""),
+                    txn=auth_session.txn,
+                    payload=file_payload,
+                )
+            except WhiteBooksTemporaryError as exc:
+                raise WhiteBooksStepError(
+                    str(exc),
+                    provider_stage="file_requested",
+                    partial_response={
+                        "mode": "live_gstr7_save_and_file",
+                        "provider_stage": "draft_saved",
+                        "message": "WhiteBooks GSTR-7 draft save succeeded, but the final file request hit a temporary transport issue. Resync before retrying.",
+                        "auth_session_id": str(auth_session.id),
+                        "save_response": sanitized_response,
+                        "operations_requested": ["save", "file"],
+                        "operations_completed": ["draft_saved"],
+                        "operations_failed": ["file"],
+                        "operation_outcomes": {
+                            "save": {"status": "completed", "retryable": False},
+                            "file": {
+                                "status": "uncertain",
+                                "retryable": False,
+                                "code": "whitebooks_gstr7_file_transport_uncertain",
+                                "message": str(exc),
+                            },
+                        },
+                        "failed_operation": "file",
+                        "next_action": "resync_before_retry",
+                    },
+                    completed_stages=["draft_saved"],
+                    provider_reference_id=auth_session.txn,
+                    retryable=False,
+                    error_code="whitebooks_gstr7_file_transport_uncertain",
+                ) from exc
+            except WhiteBooksSubmissionError as exc:
+                raise WhiteBooksStepError(
+                    str(exc),
+                    provider_stage="file_requested",
+                    partial_response={
+                        "mode": "live_gstr7_save_and_file",
+                        "provider_stage": "draft_saved",
+                        "message": "WhiteBooks GSTR-7 draft save succeeded, but the final file request was rejected.",
+                        "auth_session_id": str(auth_session.id),
+                        "save_response": sanitized_response,
+                        "operations_requested": ["save", "file"],
+                        "operations_completed": ["draft_saved"],
+                        "operations_failed": ["file"],
+                        "operation_outcomes": {
+                            "save": {"status": "completed", "retryable": False},
+                            "file": {
+                                "status": "failed",
+                                "retryable": False,
+                                "code": "whitebooks_gstr7_file_rejected",
+                                "message": str(exc),
+                            },
+                        },
+                        "failed_operation": "file",
+                        "next_action": "review_provider_error",
+                    },
+                    completed_stages=["draft_saved"],
+                    provider_reference_id=auth_session.txn,
+                    retryable=False,
+                    error_code="whitebooks_gstr7_file_rejected",
+                ) from exc
+
+            sanitized_file_response = self.client.sanitize_response_payload(file_response)
+            provider_reference_id = str(file_response.get("ref_id") or file_response.get("reference_id") or auth_session.txn)
+            provider_acknowledgement_id = str(file_response.get("ack_id") or file_response.get("acknowledgement_id") or "")
+            return WhiteBooksSubmissionResult(
+                provider_reference_id=provider_reference_id,
+                provider_acknowledgement_id=provider_acknowledgement_id,
+                submission_state="submitted",
+                provider_stage="file_requested",
+                raw_response={
+                    "mode": "live_gstr7_save_and_file",
+                    "provider_stage": "file_requested",
+                    "message": "WhiteBooks GSTR-7 draft save and final filing request completed. Await ARN/status confirmation before treating this as filed.",
+                    "auth_session_id": str(auth_session.id),
+                    "save_response": sanitized_response,
+                    "file_response": sanitized_file_response,
+                    "operations_requested": ["save", "file"],
+                    "operations_completed": ["draft_saved", "file_requested"],
+                    "operations_failed": [],
+                    "operation_outcomes": {
+                        "save": {"status": "completed", "retryable": False},
+                        "file": {"status": "submitted", "retryable": False},
+                    },
+                    "next_action": "resync_for_arn_or_status",
+                },
+            )
+        if filing.return_type == "gstr7":
+            return WhiteBooksSubmissionResult(
+                provider_reference_id=auth_session.txn,
+                provider_acknowledgement_id="",
+                submission_state="submitted",
+                provider_stage="draft_saved",
+                raw_response={
+                    "mode": "live_gstr7_save",
+                    "provider_stage": "draft_saved",
+                    "message": "WhiteBooks GSTR-7 draft save completed. Final filing is still blocked until an explicit provider-ready file payload is attached.",
+                    "auth_session_id": str(auth_session.id),
+                    "save_response": sanitized_response,
+                    "operations_requested": ["save"],
+                    "operations_completed": ["draft_saved"],
+                    "operations_failed": [],
+                    "operation_outcomes": {
+                        "save": {"status": "completed", "retryable": False},
+                    },
+                    "next_action": "await_gstr7_final_filing_contract_validation",
+                },
+            )
+        if filing.return_type == "gstr9":
+            return WhiteBooksSubmissionResult(
+                provider_reference_id=auth_session.txn,
+                provider_acknowledgement_id="",
+                submission_state="submitted",
+                provider_stage="draft_saved",
+                raw_response={
+                    "mode": "live_gstr9_save",
+                    "provider_stage": "draft_saved",
+                    "message": "WhiteBooks GSTR-9 draft save completed from the explicit provider-ready annual payload. Final annual filing is still kept out of automation in this slice.",
+                    "auth_session_id": str(auth_session.id),
+                    "save_response": sanitized_response,
+                    "operations_requested": ["save"],
+                    "operations_completed": ["draft_saved"],
+                    "operations_failed": [],
+                    "operation_outcomes": {
+                        "save": {"status": "completed", "retryable": False},
+                    },
+                    "next_action": "await_gstr9_final_filing_contract_validation",
+                },
+            )
+        if filing.return_type == "gstr9c":
+            return WhiteBooksSubmissionResult(
+                provider_reference_id=auth_session.txn,
+                provider_acknowledgement_id="",
+                submission_state="submitted",
+                provider_stage="draft_saved",
+                raw_response={
+                    "mode": "live_gstr9c_save",
+                    "provider_stage": "draft_saved",
+                    "message": "WhiteBooks GSTR-9C draft save completed from the explicit provider-ready certification payload. Final certification submission remains outside automation in this slice.",
+                    "auth_session_id": str(auth_session.id),
+                    "save_response": sanitized_response,
+                    "operations_requested": ["save"],
+                    "operations_completed": ["draft_saved"],
+                    "operations_failed": [],
+                    "operation_outcomes": {
+                        "save": {"status": "completed", "retryable": False},
+                    },
+                    "next_action": "await_gstr9c_final_filing_contract_validation",
+                },
+            )
         if filing.return_type == "gstr3b":
             if capabilities.supported_operations.get("offset"):
                 offset_payload = operations.get("offset")
@@ -782,7 +1219,7 @@ class WhiteBooksProvider(FilingProvider):
         if auth_session is None or not filing.provider_reference_id:
             return None
         return_type = str(filing.return_type or "").upper()
-        rettype = return_type if return_type in {"GSTR1", "GSTR3B"} else None
+        rettype = return_type if return_type in {"GSTR1", "GSTR7", "GSTR3B"} else None
 
         status_response = self.client.get_return_status(
             email=auth_session.email,
@@ -945,6 +1382,12 @@ class WhiteBooksProvider(FilingProvider):
         normalized = str(return_type or "").lower()
         if normalized == "gstr1":
             return "GSTR-1"
+        if normalized == "gstr7":
+            return "GSTR-7"
+        if normalized == "gstr9":
+            return "GSTR-9"
+        if normalized == "gstr9c":
+            return "GSTR-9C"
         if normalized == "gstr3b":
             return "GSTR-3B"
         return normalized or "unknown return"

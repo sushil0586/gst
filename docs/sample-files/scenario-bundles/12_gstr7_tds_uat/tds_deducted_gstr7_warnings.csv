@@ -1,0 +1,4 @@
+document_number,document_date,deductee_gstin,deductee_name,deduction_base_amount,payment_amount,cgst_amount,sgst_amount,igst_amount,document_type
+TDS-W-8001,2026-07-10,29ABCDE1234F1Z5,Deductee One,10000.00,10000.00,50.00,50.00,0.00,tds_entry
+TDS-W-8001,2026-07-10,29ABCDE1234F1Z5,Deductee One,5000.00,0.00,0.00,0.00,0.00,tds_entry
+TDS-W-8003,2026-07-18,27ABCDE1234F1Z5,Deductee Two,20000.00,20000.00,0.00,0.00,400.00,tds_entry

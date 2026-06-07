@@ -168,6 +168,26 @@ Important note:
 - this bundle is intended to run on top of the same period already used for `10_gstr1_extended_sections_uat`
 - it currently exists as a source folder
 
+### `12_gstr7_tds_uat/`
+
+Use for:
+
+- GSTR-7 MVP UAT
+- TDS deducted import
+- deductee-wise monthly grouping
+- GSTR-7 review page and workbook export checks
+- readiness warning visibility for duplicate references and zero-value rows
+
+Includes:
+
+- clean TDS deducted register
+- warning-focused TDS deducted register
+
+Important note:
+
+- this bundle is intentionally limited to the current GSTR-7 MVP
+- it currently exists as a source folder
+
 ## Regenerating Bundles
 
 If you add or change scenario files, rebuild the generated `.xlsx` copies and zip bundles:

@@ -23,6 +23,50 @@ from apps.returns.models import ReturnPreparation
 
 User = get_user_model()
 
+
+def _has_explicit_gstr9_live_save_payload(prepared_return) -> bool:
+    summary_snapshot = prepared_return.summary_snapshot if isinstance(prepared_return.summary_snapshot, dict) else {}
+    direct = summary_snapshot.get("whitebooks_gstr9_save_payload")
+    if isinstance(direct, dict) and direct:
+        return True
+    nested = summary_snapshot.get("whitebooks")
+    if isinstance(nested, dict):
+        nested_payload = nested.get("gstr9_save_payload") or nested.get("save_payload")
+        if isinstance(nested_payload, dict) and nested_payload:
+            return True
+    legacy = summary_snapshot.get("gstr9_save_payload")
+    return isinstance(legacy, dict) and bool(legacy)
+
+
+def _has_explicit_gstr9c_live_save_payload(prepared_return) -> bool:
+    summary_snapshot = prepared_return.summary_snapshot if isinstance(prepared_return.summary_snapshot, dict) else {}
+    direct = summary_snapshot.get("whitebooks_gstr9c_save_payload")
+    if isinstance(direct, dict) and direct:
+        return True
+    nested = summary_snapshot.get("whitebooks")
+    if isinstance(nested, dict):
+        nested_payload = nested.get("gstr9c_save_payload") or nested.get("save_payload")
+        if isinstance(nested_payload, dict) and nested_payload:
+            return True
+    legacy = summary_snapshot.get("gstr9c_save_payload")
+    return isinstance(legacy, dict) and bool(legacy)
+
+
+def _is_manual_annual_filing(*, prepared_return, provider: str) -> bool:
+    if prepared_return.return_type == ReturnPreparation.ReturnType.GSTR9:
+        return not (
+            provider == ReturnFiling.Provider.WHITEBOOKS
+            and settings.WHITEBOOKS_ENABLE_GSTR9_SAVE_LIVE
+            and _has_explicit_gstr9_live_save_payload(prepared_return)
+        )
+    if prepared_return.return_type == ReturnPreparation.ReturnType.GSTR9C:
+        return not (
+            provider == ReturnFiling.Provider.WHITEBOOKS
+            and settings.WHITEBOOKS_ENABLE_GSTR9C_SAVE_LIVE
+            and _has_explicit_gstr9c_live_save_payload(prepared_return)
+        )
+    return False
+
 def create_return_filing(*, validated_data, user):
     existing = validated_data.get("existing_filing")
     if existing is not None:
@@ -64,10 +108,7 @@ def create_return_filing(*, validated_data, user):
     approval_request = validated_data.get("approval_request_instance")
     confirmation_note = validated_data.get("confirmation_note", "")
 
-    if prepared_return.return_type in {
-        ReturnPreparation.ReturnType.GSTR9,
-        ReturnPreparation.ReturnType.GSTR9C,
-    }:
+    if _is_manual_annual_filing(prepared_return=prepared_return, provider=validated_data["provider"]):
         return _create_manual_return_filing(
             validated_data=validated_data,
             user=user,
@@ -180,8 +221,7 @@ def _create_manual_return_filing(*, validated_data, user, prepared_return, appro
                 "validated_for_filing": True,
                 "manual_filing_only": True,
                 "manual_filing_reason": (
-                    "Annual filing is currently tracked as an operational manual filing flow "
-                    "for GSTR-9 and GSTR-9C."
+                    "This annual filing is currently tracked as an operational manual filing flow."
                 ),
             },
             approved_by=prepared_return.approved_by,

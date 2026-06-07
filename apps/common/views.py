@@ -14,6 +14,7 @@ from apps.common.services.exports import (
     export_filing_evidence_pack,
     export_gstr1_workbook,
     export_gstr3b_workbook,
+    export_gstr7_workbook,
     export_gstr9_workbook,
     export_import_errors,
     export_reconciliation,
@@ -291,6 +292,15 @@ class ReturnSummaryExportView(SensitiveExportAPIView):
                 compliance_period = prepared_return.compliance_period
             if compliance_period is not None:
                 return export_gstr9_workbook(compliance_period=compliance_period, prepared_return=prepared_return)
+        if export_mode == "full_gstr7":
+            compliance_period = None
+            if period_id:
+                compliance_period = CompliancePeriod.objects.select_related("gstin", "gstin__client", "gstin__client__workspace").filter(pk=period_id).first()
+            prepared_return = queryset.filter(return_type=ReturnPreparation.ReturnType.GSTR7).first()
+            if compliance_period is None and prepared_return is not None:
+                compliance_period = prepared_return.compliance_period
+            if compliance_period is not None:
+                return export_gstr7_workbook(compliance_period=compliance_period, prepared_return=prepared_return)
         return export_return_summary(queryset)
 
 

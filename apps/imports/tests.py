@@ -1,4 +1,5 @@
 import io
+from decimal import Decimal
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -949,6 +950,31 @@ def test_advance_adjusted_filename_hint_must_match_selected_type(import_authenti
 
     assert response.status_code == 400
     assert "looks like advance adjusted data" in response.data["errors"]["import_type"][0].lower()
+
+
+@pytest.mark.django_db
+def test_tds_deducted_import_captures_deductee_rows(import_authenticated_client, import_context):
+    file = build_csv_file(
+        "gstr7-tds-deducted-apr.csv",
+        "document_number,document_date,deductee_gstin,deductee_name,taxable_amount,payment_amount,igst_amount,cgst_amount,sgst_amount\n"
+        "TDS-7001,2026-04-26,29ABCDE1234F1Z5,Deductee One,100000,100000,0,500,500\n",
+    )
+    response = import_authenticated_client.post(
+        "/api/v1/imports/batches/",
+        upload_payload(import_context, import_type="tds_deducted", file=file),
+        format="multipart",
+    )
+
+    assert response.status_code == 201
+    batch = ImportBatch.objects.get(pk=response.data["data"]["id"])
+    transaction = GSTTransaction.objects.get(import_batch=batch)
+    assert transaction.transaction_type == "tds_deducted"
+    assert transaction.document_type == "tds_entry"
+    assert transaction.counterparty_gstin == "29ABCDE1234F1Z5"
+    assert transaction.counterparty_name == "Deductee One"
+    assert transaction.taxable_value == Decimal("100000.00")
+    assert transaction.total_amount == Decimal("100000.00")
+    assert transaction.tax_amount == Decimal("1000.00")
 
 
 @pytest.mark.django_db

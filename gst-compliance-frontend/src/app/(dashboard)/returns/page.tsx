@@ -449,6 +449,17 @@ function chooseGstr3bReviewTab(preparedReturn?: ReturnPreparationRecord | null) 
   return "overview";
 }
 
+function chooseGstr7ReviewTab(preparedReturn?: ReturnPreparationRecord | null) {
+  const summary = (preparedReturn?.summary_snapshot as Record<string, unknown> | undefined) ?? {};
+  const tdsSummary = (summary.tds_summary as Record<string, unknown> | undefined) ?? {};
+  const deducteeRows = ((summary.deductees as Record<string, unknown> | undefined)?.rows as unknown[] | undefined) ?? [];
+  const periodExceptionCount = getPeriodExceptionCountFromSummary(summary);
+
+  if (preparedReturn?.is_blocked_by_stale_reconciliation || periodExceptionCount > 0) return "warnings";
+  if (Number(tdsSummary.deductee_count ?? 0) === 0 || deducteeRows.length === 0) return "source-imports";
+  return "overview";
+}
+
 function chooseGstr9ReviewTab(preparedReturn?: ReturnPreparationRecord | null) {
   const summary = (preparedReturn?.summary_snapshot as Record<string, unknown> | undefined) ?? {};
   const sourceMonths = (summary.source_months as Record<string, unknown> | undefined) ?? {};
@@ -478,6 +489,35 @@ function chooseGstr9cReviewTab(preparedReturn?: ReturnPreparationRecord | null) 
   }
   if (Number(warningsSummary.warning_count ?? 0) > 0) return "exceptions";
   return "overview";
+}
+
+function hasExplicitAnnualLiveSavePayload(preparedReturn?: ReturnPreparationRecord | null) {
+  const summary = (preparedReturn?.summary_snapshot as Record<string, unknown> | undefined) ?? {};
+  if (preparedReturn?.return_type === "gstr9") {
+    if (summary.whitebooks_gstr9_save_payload && typeof summary.whitebooks_gstr9_save_payload === "object") return true;
+    const nested = summary.whitebooks;
+    if (nested && typeof nested === "object") {
+      const nestedMap = nested as Record<string, unknown>;
+      return Boolean(
+        (nestedMap.gstr9_save_payload && typeof nestedMap.gstr9_save_payload === "object") ||
+          (nestedMap.save_payload && typeof nestedMap.save_payload === "object"),
+      );
+    }
+    return Boolean(summary.gstr9_save_payload && typeof summary.gstr9_save_payload === "object");
+  }
+  if (preparedReturn?.return_type === "gstr9c") {
+    if (summary.whitebooks_gstr9c_save_payload && typeof summary.whitebooks_gstr9c_save_payload === "object") return true;
+    const nested = summary.whitebooks;
+    if (nested && typeof nested === "object") {
+      const nestedMap = nested as Record<string, unknown>;
+      return Boolean(
+        (nestedMap.gstr9c_save_payload && typeof nestedMap.gstr9c_save_payload === "object") ||
+          (nestedMap.save_payload && typeof nestedMap.save_payload === "object"),
+      );
+    }
+    return Boolean(summary.gstr9c_save_payload && typeof summary.gstr9c_save_payload === "object");
+  }
+  return false;
 }
 
 function getFirstBlockingMessage(messages: Array<string | null | false | undefined>) {
@@ -713,6 +753,7 @@ export default function ReturnsPage() {
   const filingEventsQuery = useFilingEventsQuery(activeFiling?.id);
   const gstr1Return = returnsQuery.data?.items.find((item) => item.return_type === "gstr1");
   const gstr3bReturn = returnsQuery.data?.items.find((item) => item.return_type === "gstr3b");
+  const gstr7Return = returnsQuery.data?.items.find((item) => item.return_type === "gstr7");
   const gstr9Return = returnsQuery.data?.items.find((item) => item.return_type === "gstr9");
   const gstr9cReturn = returnsQuery.data?.items.find((item) => item.return_type === "gstr9c");
   const latestRun = reconciliationRunsQuery.data?.items[0];
@@ -784,21 +825,25 @@ export default function ReturnsPage() {
     activeFiling?.status === "arn_received";
 
   const isPeriodLocked = Boolean(selectedPeriod?.is_locked);
-  const isManualAnnualFiling = activeReturn?.return_type === "gstr9" || activeReturn?.return_type === "gstr9c";
+  const isManualAnnualFiling =
+    activeFiling?.readiness_snapshot?.manual_filing_only === true ||
+    ((activeReturn?.return_type === "gstr9" || activeReturn?.return_type === "gstr9c") && !hasExplicitAnnualLiveSavePayload(activeReturn));
   const canPrepare = Boolean(selectedWorkspaceId && selectedClientId && selectedGstinId && selectedPeriodId && !isPeriodLocked);
   const exportReturnType =
     activeReturn?.return_type ??
-    (gstr1Return ? "gstr1" : gstr3bReturn ? "gstr3b" : gstr9Return ? "gstr9" : gstr9cReturn ? "gstr9c" : null);
+    (gstr1Return ? "gstr1" : gstr3bReturn ? "gstr3b" : gstr7Return ? "gstr7" : gstr9Return ? "gstr9" : gstr9cReturn ? "gstr9c" : null);
   const activeReadiness =
     exportReturnType === "gstr1"
       ? readiness?.gstr1
       : exportReturnType === "gstr3b"
         ? readiness?.gstr3b
-        : exportReturnType === "gstr9"
-          ? readiness?.gstr9
-          : exportReturnType === "gstr9c"
-            ? readiness?.gstr9c
-          : null;
+        : exportReturnType === "gstr7"
+          ? readiness?.gstr7
+          : exportReturnType === "gstr9"
+            ? readiness?.gstr9
+            : exportReturnType === "gstr9c"
+              ? readiness?.gstr9c
+            : null;
   const isReturnFlowBlockedByStaleSource = Boolean(activeReturn?.is_blocked_by_stale_reconciliation || isReconciliationStale);
   const canRequestOtp = !isManualAnnualFiling && Boolean(selectedWorkspaceId && selectedClientId) && !requestWhiteBooksOTPMutation.isPending;
   const canVerifyOtp =
@@ -853,7 +898,7 @@ export default function ReturnsPage() {
             description: "Source data changed after reconciliation, so the return draft must be refreshed first.",
             tone: "danger" as const,
           }
-        : isManualAnnualFiling && !activeFiling
+      : isManualAnnualFiling && !activeFiling
           ? {
               title: "Open the annual filing record",
               description: "Create the operational filing record first, then complete the annual filing manually and capture the ARN here.",
@@ -984,7 +1029,7 @@ export default function ReturnsPage() {
     getPrimaryFieldError(error, "approval_request") ||
     getErrorMessage(error);
 
-  const handlePrepare = async (returnType: "gstr1" | "gstr3b" | "gstr9" | "gstr9c") => {
+  const handlePrepare = async (returnType: "gstr1" | "gstr3b" | "gstr7" | "gstr9" | "gstr9c") => {
     if (!selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId) {
       toast.error("Select workspace, client, GSTIN, and compliance period before preparing a return.");
       return;
@@ -998,9 +1043,11 @@ export default function ReturnsPage() {
         ? readiness?.gstr1
         : returnType === "gstr3b"
           ? readiness?.gstr3b
-          : returnType === "gstr9"
-            ? readiness?.gstr9
-            : readiness?.gstr9c;
+          : returnType === "gstr7"
+            ? readiness?.gstr7
+            : returnType === "gstr9"
+              ? readiness?.gstr9
+              : readiness?.gstr9c;
     if (targetReadiness?.status === "blocked") {
       toast.error(targetReadiness.issues[0]?.detail ?? `Resolve ${returnType.toUpperCase()} blockers before preparation.`);
       return;
@@ -1276,17 +1323,31 @@ export default function ReturnsPage() {
   );
   const returnPeriodExceptionCount = getPeriodExceptionCountFromSummary(summary);
 
-  const handleExport = async (returnType: "gstr1" | "gstr3b" | "gstr9") => {
+  const handleExport = async (returnType: "gstr1" | "gstr3b" | "gstr7" | "gstr9") => {
     if (!selectedWorkspaceId || !selectedClientId || !selectedPeriodId) {
       toast.error("Select workspace, client, and period before exporting return summaries.");
       return;
     }
-    const targetReturn = returnType === "gstr1" ? gstr1Return : returnType === "gstr3b" ? gstr3bReturn : gstr9Return;
+    const targetReturn =
+      returnType === "gstr1"
+        ? gstr1Return
+        : returnType === "gstr3b"
+          ? gstr3bReturn
+          : returnType === "gstr7"
+            ? gstr7Return
+            : gstr9Return;
     if (!targetReturn) {
       toast.error(`Prepare ${returnType.toUpperCase()} before exporting its workbook.`);
       return;
     }
-    const targetReadiness = returnType === "gstr1" ? readiness?.gstr1 : returnType === "gstr3b" ? readiness?.gstr3b : readiness?.gstr9;
+    const targetReadiness =
+      returnType === "gstr1"
+        ? readiness?.gstr1
+        : returnType === "gstr3b"
+          ? readiness?.gstr3b
+          : returnType === "gstr7"
+            ? readiness?.gstr7
+            : readiness?.gstr9;
     if (targetReadiness?.status === "blocked") {
       toast.warning(targetReadiness.issues[0]?.detail ?? "Exporting a prepared return that still has readiness blockers.");
     } else if (targetReadiness?.status === "ready_with_warnings") {
@@ -1312,6 +1373,10 @@ export default function ReturnsPage() {
         exportParams.export_mode = "full_gstr3b";
         filename = `gstr3b-${selectedPeriod?.period ?? "export"}.xlsx`;
         successMessage = "Full GSTR-3B workbook downloaded.";
+      } else if (returnType === "gstr7") {
+        exportParams.export_mode = "full_gstr7";
+        filename = `gstr7-${selectedPeriod?.period ?? "export"}.xlsx`;
+        successMessage = "GSTR-7 workbook downloaded.";
       } else {
         exportParams.export_mode = "full_gstr9";
         filename = `gstr9-${selectedPeriod?.period ?? "export"}.xlsx`;
@@ -1351,6 +1416,20 @@ export default function ReturnsPage() {
     params.set("tab", chooseGstr3bReviewTab(gstr3bReturn));
     return `/returns/gstr3b-review?${params.toString()}`;
   }, [gstr3bReturn, selectedWorkspaceId, selectedClientId, selectedGstinId, selectedPeriodId]);
+  const gstr7ReviewHref = useMemo(() => {
+    if (!gstr7Return || !selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId) {
+      return null;
+    }
+    const params = new URLSearchParams({
+      workspace: selectedWorkspaceId,
+      client: selectedClientId,
+      gstin: selectedGstinId,
+      period: selectedPeriodId,
+      returnId: gstr7Return.id,
+    });
+    params.set("tab", chooseGstr7ReviewTab(gstr7Return));
+    return `/returns/gstr7-review?${params.toString()}`;
+  }, [gstr7Return, selectedWorkspaceId, selectedClientId, selectedGstinId, selectedPeriodId]);
   const gstr9ReviewHref = useMemo(() => {
     if (!gstr9Return || !selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId) {
       return null;
@@ -1384,7 +1463,7 @@ export default function ReturnsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Returns"
-        description="Prepare draft GSTR-1, GSTR-3B, GSTR-9, and GSTR-9C summaries from imported transactions and reconciliation outcomes before approval and manual filing."
+        description="Prepare draft GSTR-1, GSTR-3B, GSTR-7, GSTR-9, and GSTR-9C summaries from imported transactions and reconciliation outcomes before approval and manual filing."
         actions={[
           ...(gstr1ReviewHref
             ? [{
@@ -1398,6 +1477,13 @@ export default function ReturnsPage() {
                 label: "Open GSTR-3B Review",
                 href: gstr3bReviewHref,
                 disabled: !gstr3bReturn,
+              }]
+            : []),
+          ...(gstr7ReviewHref
+            ? [{
+                label: "Open GSTR-7 Review",
+                href: gstr7ReviewHref,
+                disabled: !gstr7Return,
               }]
             : []),
           ...(gstr9ReviewHref
@@ -1425,6 +1511,13 @@ export default function ReturnsPage() {
             ? [{
                 label: "Export GSTR-3B XLSX",
                 onClick: () => handleExport("gstr3b"),
+                disabled: !selectedWorkspaceId || !selectedClientId || !selectedPeriodId,
+              }]
+            : []),
+          ...(gstr7Return
+            ? [{
+                label: "Export GSTR-7 XLSX",
+                onClick: () => handleExport("gstr7"),
                 disabled: !selectedWorkspaceId || !selectedClientId || !selectedPeriodId,
               }]
             : []),
@@ -1550,6 +1643,9 @@ export default function ReturnsPage() {
             <Button size="sm" onClick={() => handlePrepare("gstr3b")} disabled={!canPrepare || prepareReturnMutation.isPending}>
               {prepareReturnMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Prepare GSTR-3B"}
             </Button>
+            <Button size="sm" variant="outline" onClick={() => handlePrepare("gstr7")} disabled={!canPrepare || prepareReturnMutation.isPending}>
+              {prepareReturnMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Prepare GSTR-7"}
+            </Button>
             <Button size="sm" variant="outline" onClick={() => handlePrepare("gstr9")} disabled={!canPrepare || prepareReturnMutation.isPending}>
               {prepareReturnMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Prepare GSTR-9"}
             </Button>
@@ -1632,7 +1728,7 @@ export default function ReturnsPage() {
         variant="soft"
       >
         {!selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId ? (
-          <EmptyState title="Readiness checks need a full context" description="Select workspace, client, GSTIN, and period to evaluate GSTR-1, GSTR-3B, GSTR-9, and GSTR-9C readiness." />
+          <EmptyState title="Readiness checks need a full context" description="Select workspace, client, GSTIN, and period to evaluate GSTR-1, GSTR-3B, GSTR-7, GSTR-9, and GSTR-9C readiness." />
         ) : readinessQuery.isLoading ? (
           <LoadingState message="Evaluating filing readiness..." />
         ) : readinessQuery.isError ? (
@@ -1640,7 +1736,7 @@ export default function ReturnsPage() {
         ) : readiness ? (
           <div className="space-y-4">
             <div className="grid gap-4 xl:grid-cols-3">
-              {[readiness.gstr1, readiness.gstr3b, readiness.gstr9, readiness.gstr9c].map((item) => (
+              {[readiness.gstr1, readiness.gstr3b, readiness.gstr7, readiness.gstr9, readiness.gstr9c].map((item) => (
                 <div key={item.return_type} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>

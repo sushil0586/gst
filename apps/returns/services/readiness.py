@@ -52,6 +52,11 @@ def get_return_readiness(*, workspace_id, client_id, gstin_id, compliance_period
         latest_run=latest_run,
         run_items=run_items,
     )
+    gstr7_readiness = _evaluate_gstr7_readiness(
+        compliance_period=compliance_period,
+        transactions=transactions,
+        preparation=return_preparations.get(ReturnPreparation.ReturnType.GSTR7),
+    )
     gstr9_readiness = _evaluate_gstr9_readiness(
         compliance_period=compliance_period,
         preparation=return_preparations.get(ReturnPreparation.ReturnType.GSTR9),
@@ -75,9 +80,10 @@ def get_return_readiness(*, workspace_id, client_id, gstin_id, compliance_period
         },
         "gstr1": gstr1_readiness,
         "gstr3b": gstr3b_readiness,
+        "gstr7": gstr7_readiness,
         "gstr9": gstr9_readiness,
         "gstr9c": gstr9c_readiness,
-        "overall_status": _resolve_overall_status([gstr1_readiness["status"], gstr3b_readiness["status"], gstr9_readiness["status"], gstr9c_readiness["status"]]),
+        "overall_status": _resolve_overall_status([gstr1_readiness["status"], gstr3b_readiness["status"], gstr7_readiness["status"], gstr9_readiness["status"], gstr9c_readiness["status"]]),
     }
 
 
@@ -654,6 +660,122 @@ def _evaluate_gstr3b_readiness(*, compliance_period, transactions, preparation, 
             "vendor_followup_count": vendor_followup_count,
             "pending_review_count": pending_review_count,
             "period_exception_count": period_exception_count,
+        },
+    )
+
+
+def _evaluate_gstr7_readiness(*, compliance_period, transactions, preparation):
+    relevant_transactions = transactions.filter(transaction_type="tds_deducted").order_by("id")
+    issues = []
+
+    if compliance_period.is_locked:
+        issues.append(
+            _issue(
+                code="period_locked",
+                severity="error",
+                title="Compliance period is locked",
+                detail="This period is locked. Unlock it before preparing or revising GSTR-7 data.",
+            )
+        )
+
+    if not relevant_transactions.exists():
+        issues.append(
+            _issue(
+                code="missing_tds_transactions",
+                severity="error",
+                title="TDS deduction rows are required",
+                detail="No TDS deducted transactions are available for the selected compliance period.",
+                action_label="Review imports",
+                action_target="/imports",
+            )
+        )
+
+    missing_deductee_gstin_transactions = _collect_transaction_ids(
+        transaction for transaction in relevant_transactions if not str(transaction.counterparty_gstin or "").strip()
+    )
+    zero_tds_transactions = _collect_transaction_ids(
+        transaction for transaction in relevant_transactions if _to_decimal(transaction.tax_amount) <= Decimal("0.00")
+    )
+    zero_payment_transactions = _collect_transaction_ids(
+        transaction for transaction in relevant_transactions if _to_decimal(transaction.total_amount) <= Decimal("0.00")
+    )
+
+    duplicate_references = Counter(
+        str(transaction.reference_number or "").strip()
+        for transaction in relevant_transactions
+        if str(transaction.reference_number or "").strip()
+    )
+    duplicate_reference_values = sorted(reference for reference, count in duplicate_references.items() if count > 1)
+
+    if missing_deductee_gstin_transactions:
+        issues.append(
+            _issue(
+                code="missing_deductee_gstin",
+                severity="error",
+                title="Some deductee GSTIN values are missing",
+                detail="Every GSTR-7 row should carry the deductee GSTIN before the return is prepared.",
+                action_label="Review imports",
+                action_target="/imports",
+                transaction_ids=missing_deductee_gstin_transactions,
+            )
+        )
+
+    if zero_tds_transactions:
+        issues.append(
+            _issue(
+                code="zero_tds_amount",
+                severity="warning",
+                title="Some rows have zero TDS amount",
+                detail="Rows with zero deducted tax should be reviewed before relying on the GSTR-7 draft.",
+                action_label="Review imports",
+                action_target="/imports",
+                transaction_ids=zero_tds_transactions,
+            )
+        )
+
+    if zero_payment_transactions:
+        issues.append(
+            _issue(
+                code="zero_payment_amount",
+                severity="warning",
+                title="Some rows have zero payment amount",
+                detail="Rows with zero payment amount should be checked for source-file completeness.",
+                action_label="Review imports",
+                action_target="/imports",
+                transaction_ids=zero_payment_transactions,
+            )
+        )
+
+    if duplicate_reference_values:
+        issues.append(
+            _issue(
+                code="duplicate_tds_document_numbers",
+                severity="warning",
+                title="Duplicate TDS document numbers detected",
+                detail=f"{len(duplicate_reference_values)} duplicated document number(s) were found in TDS source rows for this period.",
+                action_label="Review imports",
+                action_target="/imports",
+            )
+        )
+
+    total_tds_amount = sum((_to_decimal(transaction.tax_amount) for transaction in relevant_transactions), Decimal("0.00"))
+    distinct_deductees = len(
+        {
+            str(transaction.counterparty_gstin or "").strip().upper()
+            for transaction in relevant_transactions
+            if str(transaction.counterparty_gstin or "").strip()
+        }
+    )
+
+    return _build_readiness_payload(
+        return_type=ReturnPreparation.ReturnType.GSTR7,
+        preparation=preparation,
+        issues=issues,
+        metrics={
+            "document_count": relevant_transactions.count(),
+            "deductee_count": distinct_deductees,
+            "total_tds_amount": f"{total_tds_amount:.2f}",
+            "duplicate_document_count": len(duplicate_reference_values),
         },
     )
 

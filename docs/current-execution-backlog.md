@@ -23,12 +23,18 @@ Related documents:
 - [scale-readiness-plan.md](/Users/ansh/Documents/Gst-Compliance/docs/scale-readiness-plan.md:1)
 - [reconciliation-correction-and-itc-audit-implementation-plan.md](/Users/ansh/Documents/Gst-Compliance/docs/reconciliation-correction-and-itc-audit-implementation-plan.md:1)
 - [phase-2-gstr9-gstr9c-gstr2x-plan.md](/Users/ansh/Documents/Gst-Compliance/docs/phase-2-gstr9-gstr9c-gstr2x-plan.md:1)
+- [gstr7-gstr2x-implementation-plan.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr7-gstr2x-implementation-plan.md:1)
 - [gstr9-implementation-backlog.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr9-implementation-backlog.md:1)
 - [gstr9-qa-high-level-checklist.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr9-qa-high-level-checklist.md:1)
 - [gstr9-qa-detailed-scenarios.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr9-qa-detailed-scenarios.md:1)
 - [gstr9-gstr9c-status.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr9-gstr9c-status.md:1)
 - [gstr9c-qa-high-level-checklist.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr9c-qa-high-level-checklist.md:1)
 - [gstr9c-qa-detailed-scenarios.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr9c-qa-detailed-scenarios.md:1)
+- [gstr7-qa-high-level-checklist.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr7-qa-high-level-checklist.md:1)
+- [gstr7-qa-detailed-scenarios.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr7-qa-detailed-scenarios.md:1)
+- [gstr7-gstr9-gstr9c-whitebooks-integration-readiness.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr7-gstr9-gstr9c-whitebooks-integration-readiness.md:1)
+- [gstr7-gstr9-gstr9c-whitebooks-payload-attachment-contract.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr7-gstr9-gstr9c-whitebooks-payload-attachment-contract.md:1)
+- [portal-data-download-opportunities.md](/Users/ansh/Documents/Gst-Compliance/docs/portal-data-download-opportunities.md:1)
 
 ## Delivery assumptions
 

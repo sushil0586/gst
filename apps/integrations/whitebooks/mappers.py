@@ -49,6 +49,24 @@ def map_return_filing_to_whitebooks_payload(filing: ReturnFiling) -> dict:
             gstin_value=gstin_value,
             period_code=period_code,
         )
+    elif filing.return_type == ReturnPreparation.ReturnType.GSTR7:
+        payload["whitebooks"]["operations"] = _build_gstr7_operations(
+            prepared_return=prepared_return,
+            gstin_value=gstin_value,
+            period_code=period_code,
+        )
+    elif filing.return_type == ReturnPreparation.ReturnType.GSTR9:
+        payload["whitebooks"]["operations"] = _build_gstr9_operations(
+            prepared_return=prepared_return,
+            gstin_value=gstin_value,
+            period_code=period_code,
+        )
+    elif filing.return_type == ReturnPreparation.ReturnType.GSTR9C:
+        payload["whitebooks"]["operations"] = _build_gstr9c_operations(
+            prepared_return=prepared_return,
+            gstin_value=gstin_value,
+            period_code=period_code,
+        )
     elif filing.return_type == ReturnPreparation.ReturnType.GSTR3B:
         payload["whitebooks"]["operations"] = _build_gstr3b_operations(
             filing=filing,
@@ -63,6 +81,84 @@ def map_return_filing_to_whitebooks_payload(filing: ReturnFiling) -> dict:
 
     payload["whitebooks"]["readiness"] = payload["whitebooks"]["operations"].pop("readiness")
     return payload
+
+
+def _build_gstr7_operations(*, prepared_return, gstin_value, period_code):
+    save_payload = _build_gstr7_retsave_payload(
+        prepared_return=prepared_return,
+        gstin_value=gstin_value,
+        period_code=period_code,
+    )
+    file_payload = _extract_gstr7_file_payload(prepared_return.summary_snapshot if isinstance(prepared_return.summary_snapshot, dict) else {})
+    blockers = []
+    if not file_payload:
+        blockers.append(
+            "GSTR-7 final WhiteBooks filing needs validated tax_pay and offset mapping from provider/UAT evidence, so final filing stays blocked until an explicit provider-ready file payload is attached.",
+        )
+    return {
+        "save": save_payload,
+        "file": file_payload,
+        "status": {"rettype": "GSTR7"},
+        "track": {"type": "GSTR7"},
+        "readiness": {
+            "save_supported": True,
+            "file_supported": bool(file_payload),
+            "offset_supported": False,
+            "blockers": blockers,
+        },
+    }
+
+
+def _build_gstr9_operations(*, prepared_return, gstin_value, period_code):
+    save_payload = _extract_gstr9_save_payload(prepared_return.summary_snapshot if isinstance(prepared_return.summary_snapshot, dict) else {})
+    file_payload = _extract_gstr9_file_payload(prepared_return.summary_snapshot if isinstance(prepared_return.summary_snapshot, dict) else {})
+    blockers = []
+    if not save_payload:
+        blockers.append(
+            "GSTR-9 live WhiteBooks draft save needs an explicit provider-ready annual payload because the current annual snapshot does not yet carry full table-wise WhiteBooks save sections.",
+        )
+    if not file_payload:
+        blockers.append(
+            "GSTR-9 final WhiteBooks filing needs an explicit provider-ready annual retfile payload because the current annual snapshot does not yet carry validated tax_pay, offset, and full annual table sections.",
+        )
+    return {
+        "save": save_payload,
+        "file": file_payload,
+        "status": {"rettype": "GSTR9"},
+        "track": {"type": "GSTR9"},
+        "readiness": {
+            "save_supported": bool(save_payload),
+            "file_supported": bool(file_payload),
+            "offset_supported": False,
+            "blockers": blockers,
+        },
+    }
+
+
+def _build_gstr9c_operations(*, prepared_return, gstin_value, period_code):
+    save_payload = _extract_gstr9c_save_payload(prepared_return.summary_snapshot if isinstance(prepared_return.summary_snapshot, dict) else {})
+    file_payload = _extract_gstr9c_file_payload(prepared_return.summary_snapshot if isinstance(prepared_return.summary_snapshot, dict) else {})
+    blockers = []
+    if not save_payload:
+        blockers.append(
+            "GSTR-9C live WhiteBooks draft save needs an explicit provider-ready certification payload because the current annual comparison snapshot does not yet carry the full WhiteBooks audited_data structure.",
+        )
+    if not file_payload:
+        blockers.append(
+            "GSTR-9C final WhiteBooks filing needs an explicit provider-ready certification retfile payload because the current comparison snapshot does not yet carry validated final audited_data filing structure.",
+        )
+    return {
+        "save": save_payload,
+        "file": file_payload,
+        "status": {"rettype": "GSTR9C"},
+        "track": {"type": "GSTR9C"},
+        "readiness": {
+            "save_supported": bool(save_payload),
+            "file_supported": bool(file_payload),
+            "offset_supported": False,
+            "blockers": blockers,
+        },
+    }
 
 
 def _build_gstr1_operations(*, filing, prepared_return, transactions, gstin_value, period_code):
@@ -145,6 +241,141 @@ def _build_gstr3b_operations(*, filing, prepared_return, transactions, gstin_val
             "blockers": blockers,
         },
     }
+
+
+def _build_gstr7_retsave_payload(*, prepared_return, gstin_value, period_code):
+    snapshot = prepared_return.summary_snapshot if isinstance(prepared_return.summary_snapshot, dict) else {}
+    deductees = snapshot.get("deductees", {}) if isinstance(snapshot.get("deductees"), dict) else {}
+    rows = deductees.get("rows", []) if isinstance(deductees.get("rows"), list) else []
+
+    current_rows = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        deductee_gstin = str(row.get("deductee_gstin") or "").strip().upper()
+        if not deductee_gstin:
+            continue
+        current_rows.append(
+            {
+                "gstin_ded": deductee_gstin,
+                "amt_ded": _decimal_to_float(_to_decimal(row.get("payment_amount", "0.00"))),
+                "iamt": _decimal_to_float(_to_decimal(row.get("igst_amount", "0.00"))),
+                "camt": _decimal_to_float(_to_decimal(row.get("cgst_amount", "0.00"))),
+                "samt": _decimal_to_float(_to_decimal(row.get("sgst_amount", "0.00"))),
+            }
+        )
+
+    return {
+        "gstin": gstin_value,
+        "fp": period_code,
+        "tds": current_rows,
+        "tdsa": [],
+    }
+
+
+def _extract_gstr7_file_payload(summary_snapshot: dict) -> dict | None:
+    if not isinstance(summary_snapshot, dict) or not summary_snapshot:
+        return None
+
+    direct = summary_snapshot.get("whitebooks_gstr7_file_payload")
+    if isinstance(direct, dict) and direct:
+        return direct
+
+    nested_whitebooks = summary_snapshot.get("whitebooks")
+    if isinstance(nested_whitebooks, dict):
+        nested_file = nested_whitebooks.get("gstr7_file_payload") or nested_whitebooks.get("file_payload")
+        if isinstance(nested_file, dict) and nested_file:
+            return nested_file
+
+    legacy = summary_snapshot.get("gstr7_file_payload")
+    if isinstance(legacy, dict) and legacy:
+        return legacy
+
+    return None
+
+
+def _extract_gstr9_save_payload(summary_snapshot: dict) -> dict | None:
+    if not isinstance(summary_snapshot, dict) or not summary_snapshot:
+        return None
+
+    direct = summary_snapshot.get("whitebooks_gstr9_save_payload")
+    if isinstance(direct, dict) and direct:
+        return direct
+
+    nested_whitebooks = summary_snapshot.get("whitebooks")
+    if isinstance(nested_whitebooks, dict):
+        nested_save = nested_whitebooks.get("gstr9_save_payload") or nested_whitebooks.get("save_payload")
+        if isinstance(nested_save, dict) and nested_save:
+            return nested_save
+
+    legacy = summary_snapshot.get("gstr9_save_payload")
+    if isinstance(legacy, dict) and legacy:
+        return legacy
+
+    return None
+
+
+def _extract_gstr9_file_payload(summary_snapshot: dict) -> dict | None:
+    if not isinstance(summary_snapshot, dict) or not summary_snapshot:
+        return None
+
+    direct = summary_snapshot.get("whitebooks_gstr9_file_payload")
+    if isinstance(direct, dict) and direct:
+        return direct
+
+    nested_whitebooks = summary_snapshot.get("whitebooks")
+    if isinstance(nested_whitebooks, dict):
+        nested_file = nested_whitebooks.get("gstr9_file_payload") or nested_whitebooks.get("file_payload")
+        if isinstance(nested_file, dict) and nested_file:
+            return nested_file
+
+    legacy = summary_snapshot.get("gstr9_file_payload")
+    if isinstance(legacy, dict) and legacy:
+        return legacy
+
+    return None
+
+
+def _extract_gstr9c_save_payload(summary_snapshot: dict) -> dict | None:
+    if not isinstance(summary_snapshot, dict) or not summary_snapshot:
+        return None
+
+    direct = summary_snapshot.get("whitebooks_gstr9c_save_payload")
+    if isinstance(direct, dict) and direct:
+        return direct
+
+    nested_whitebooks = summary_snapshot.get("whitebooks")
+    if isinstance(nested_whitebooks, dict):
+        nested_save = nested_whitebooks.get("gstr9c_save_payload") or nested_whitebooks.get("save_payload")
+        if isinstance(nested_save, dict) and nested_save:
+            return nested_save
+
+    legacy = summary_snapshot.get("gstr9c_save_payload")
+    if isinstance(legacy, dict) and legacy:
+        return legacy
+
+    return None
+
+
+def _extract_gstr9c_file_payload(summary_snapshot: dict) -> dict | None:
+    if not isinstance(summary_snapshot, dict) or not summary_snapshot:
+        return None
+
+    direct = summary_snapshot.get("whitebooks_gstr9c_file_payload")
+    if isinstance(direct, dict) and direct:
+        return direct
+
+    nested_whitebooks = summary_snapshot.get("whitebooks")
+    if isinstance(nested_whitebooks, dict):
+        nested_file = nested_whitebooks.get("gstr9c_file_payload") or nested_whitebooks.get("file_payload")
+        if isinstance(nested_file, dict) and nested_file:
+            return nested_file
+
+    legacy = summary_snapshot.get("gstr9c_file_payload")
+    if isinstance(legacy, dict) and legacy:
+        return legacy
+
+    return None
 
 
 def _get_latest_ready_offset_profile(filing: ReturnFiling) -> ReturnFilingOffset | None:

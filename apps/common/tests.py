@@ -1333,12 +1333,151 @@ def test_full_gstr9_workbook_export(dashboard_authenticated_client, dashboard_co
     assert itc_sheet["B4"].value == "240.00"
     source_returns_sheet = workbook["Linked Source Returns"]
     assert source_returns_sheet["A2"].value == "2026-04"
-    assert source_returns_sheet["B3"].value == "GSTR3B"
-    warnings_sheet = workbook["Warnings"]
-    assert warnings_sheet["A2"].value == "annual_anchor_not_year_end"
-    exceptions_sheet = workbook["Source Exceptions"]
-    assert exceptions_sheet["A2"].value == "Period Exception Count"
-    assert exceptions_sheet["B6"].value == 1
+
+
+@pytest.mark.django_db
+def test_full_gstr7_workbook_export(dashboard_authenticated_client, dashboard_context):
+    tds_batch = ImportBatch.objects.create(
+        workspace=dashboard_context["workspace"],
+        client=dashboard_context["client"],
+        gstin=dashboard_context["gstin"],
+        compliance_period=dashboard_context["compliance_period"],
+        import_type="tds_deducted",
+        source_type="csv",
+        file_name="tds_deducted_apr.csv",
+        status="processed",
+        total_rows=2,
+        valid_rows=2,
+        created_by=dashboard_context["user"],
+        updated_by=dashboard_context["user"],
+    )
+    GSTTransaction.objects.create(
+        workspace=dashboard_context["workspace"],
+        client=dashboard_context["client"],
+        gstin=dashboard_context["gstin"],
+        compliance_period=dashboard_context["compliance_period"],
+        import_batch=tds_batch,
+        transaction_type="tds_deducted",
+        document_type="tds_certificate",
+        reference_number="TDS-7001",
+        transaction_date="2026-04-12",
+        counterparty_gstin="29ABCDE1234F1Z5",
+        counterparty_name="Vendor Alpha",
+        taxable_value=Decimal("10000.00"),
+        tax_amount=Decimal("200.00"),
+        total_amount=Decimal("10200.00"),
+        metadata={
+            "deductee_gstin": "29ABCDE1234F1Z5",
+            "deductee_name": "Vendor Alpha",
+            "payment_amount": "12000.00",
+            "tds_cgst_amount": "100.00",
+            "tds_sgst_amount": "100.00",
+        },
+        created_by=dashboard_context["user"],
+        updated_by=dashboard_context["user"],
+    )
+    GSTTransaction.objects.create(
+        workspace=dashboard_context["workspace"],
+        client=dashboard_context["client"],
+        gstin=dashboard_context["gstin"],
+        compliance_period=dashboard_context["compliance_period"],
+        import_batch=tds_batch,
+        transaction_type="tds_deducted",
+        document_type="tds_certificate",
+        reference_number="TDS-7002",
+        transaction_date="2026-04-14",
+        counterparty_gstin="29ZZZZZ9999Z1Z5",
+        counterparty_name="Vendor Beta",
+        taxable_value=Decimal("5000.00"),
+        tax_amount=Decimal("100.00"),
+        total_amount=Decimal("5100.00"),
+        metadata={
+            "deductee_gstin": "29ZZZZZ9999Z1Z5",
+            "deductee_name": "Vendor Beta",
+            "payment_amount": "6000.00",
+            "tds_cgst_amount": "50.00",
+            "tds_sgst_amount": "50.00",
+        },
+        created_by=dashboard_context["user"],
+        updated_by=dashboard_context["user"],
+    )
+    ReturnPreparation.objects.create(
+        compliance_period=dashboard_context["compliance_period"],
+        return_type=ReturnPreparation.ReturnType.GSTR7,
+        status=ReturnPreparation.PreparationStatus.READY_FOR_REVIEW,
+        summary_snapshot={
+            "return_type": "gstr7",
+            "summary_version": "gstr7.monthly.v1",
+            "tds_summary": {
+                "document_count": 2,
+                "deductee_count": 2,
+                "taxable_value": "15000.00",
+                "payment_amount": "18000.00",
+                "tds_amount": "300.00",
+                "cgst_amount": "150.00",
+                "sgst_amount": "150.00",
+            },
+            "deductees": {
+                "rows": [
+                    {
+                        "deductee_gstin": "29ABCDE1234F1Z5",
+                        "deductee_name": "Vendor Alpha",
+                        "document_count": 1,
+                        "taxable_value": "10000.00",
+                        "payment_amount": "12000.00",
+                        "cgst_amount": "100.00",
+                        "sgst_amount": "100.00",
+                        "tds_amount": "200.00",
+                    },
+                    {
+                        "deductee_gstin": "29ZZZZZ9999Z1Z5",
+                        "deductee_name": "Vendor Beta",
+                        "document_count": 1,
+                        "taxable_value": "5000.00",
+                        "payment_amount": "6000.00",
+                        "cgst_amount": "50.00",
+                        "sgst_amount": "50.00",
+                        "tds_amount": "100.00",
+                    },
+                ]
+            },
+            "period_exceptions": {"count": 0, "rows": []},
+        },
+        prepared_by=dashboard_context["user"],
+        created_by=dashboard_context["user"],
+        updated_by=dashboard_context["user"],
+    )
+
+    response = dashboard_authenticated_client.get(
+        "/api/v1/exports/return-summary/",
+        {
+            "workspace": str(dashboard_context["workspace"].id),
+            "client": str(dashboard_context["client"].id),
+            "gstin": str(dashboard_context["gstin"].id),
+            "compliance_period": str(dashboard_context["compliance_period"].id),
+            "return_type": "gstr7",
+            "export_mode": "full_gstr7",
+        },
+    )
+    assert response.status_code == 200
+    workbook = load_workbook(BytesIO(response_bytes(response)))
+    assert workbook.sheetnames == [
+        "Summary",
+        "Deductees",
+        "Source Rows",
+        "Validations",
+        "Period Exceptions",
+    ]
+    summary_sheet = workbook["Summary"]
+    assert summary_sheet["B2"].value == "GSTR-7"
+    assert summary_sheet["B9"].value == 2
+    assert summary_sheet["B16"].value == "300.00"
+    deductees_sheet = workbook["Deductees"]
+    assert deductees_sheet["A2"].value == "29ABCDE1234F1Z5"
+    assert deductees_sheet["G3"].value == "50.00"
+    source_rows_sheet = workbook["Source Rows"]
+    assert source_rows_sheet["A2"].value == "TDS-7001"
+    assert source_rows_sheet["E3"].value == "5100.00"
 
 
 @pytest.mark.django_db

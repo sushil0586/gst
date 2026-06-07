@@ -844,6 +844,136 @@ def export_gstr9_workbook(*, compliance_period, prepared_return: ReturnPreparati
     return workbook_response(workbook=workbook, filename=f"gstr9_{compliance_period.period}.xlsx")
 
 
+def export_gstr7_workbook(*, compliance_period, prepared_return: ReturnPreparation | None = None) -> HttpResponse:
+    workbook = Workbook()
+    default_sheet = workbook.active
+    workbook.remove(default_sheet)
+
+    summary_snapshot = prepared_return.summary_snapshot if prepared_return else {}
+    summary_snapshot = summary_snapshot if isinstance(summary_snapshot, dict) else {}
+    client = compliance_period.gstin.client
+    gstin = compliance_period.gstin
+    transactions = list(
+        GSTTransaction.objects.filter(
+            is_active=True,
+            compliance_period=compliance_period,
+            transaction_type="tds_deducted",
+        )
+        .select_related("gstin", "client")
+        .order_by("transaction_date", "reference_number")
+    )
+
+    tds_summary = summary_snapshot.get("tds_summary", {}) if isinstance(summary_snapshot.get("tds_summary"), dict) else {}
+    deductees = summary_snapshot.get("deductees", {}) if isinstance(summary_snapshot.get("deductees"), dict) else {}
+    period_exceptions = summary_snapshot.get("period_exceptions", {}) if isinstance(summary_snapshot.get("period_exceptions"), dict) else {}
+
+    append_sheet(
+        worksheet=workbook.create_sheet("Summary"),
+        title="Summary",
+        headers=["Field", "Value"],
+        rows=[
+            ["Return Type", "GSTR-7"],
+            ["Workspace", client.workspace.name],
+            ["Client", client.legal_name],
+            ["GSTIN", gstin.gstin],
+            ["Period", compliance_period.period],
+            ["Preparation Status", prepared_return.status if prepared_return else "not_prepared"],
+            ["Prepared By", display_user(prepared_return.prepared_by) if prepared_return else "System"],
+            ["Deductee Count", tds_summary.get("deductee_count", 0)],
+            ["Document Count", tds_summary.get("document_count", 0)],
+            ["Payment Amount", tds_summary.get("payment_amount", "0.00")],
+            ["Taxable Value", tds_summary.get("taxable_value", "0.00")],
+            ["IGST Deducted", tds_summary.get("igst_amount", "0.00")],
+            ["CGST Deducted", tds_summary.get("cgst_amount", "0.00")],
+            ["SGST Deducted", tds_summary.get("sgst_amount", "0.00")],
+            ["Total TDS Deducted", tds_summary.get("tds_amount", "0.00")],
+        ],
+    )
+
+    append_data_or_info_sheet(
+        worksheet=workbook.create_sheet("Deductees"),
+        title="Deductees",
+        headers=[
+            "Deductee GSTIN",
+            "Deductee Name",
+            "Document Count",
+            "Payment Amount",
+            "Taxable Value",
+            "IGST Deducted",
+            "CGST Deducted",
+            "SGST Deducted",
+            "Total TDS Deducted",
+        ],
+        rows=[
+            [
+                row.get("deductee_gstin", ""),
+                row.get("deductee_name", ""),
+                row.get("document_count", 0),
+                row.get("payment_amount", "0.00"),
+                row.get("taxable_value", "0.00"),
+                row.get("igst_amount", "0.00"),
+                row.get("cgst_amount", "0.00"),
+                row.get("sgst_amount", "0.00"),
+                row.get("tds_amount", "0.00"),
+            ]
+            for row in deductees.get("rows", [])
+            if isinstance(row, dict)
+        ],
+        empty_message="No deductee rows were captured for this return.",
+    )
+
+    append_data_or_info_sheet(
+        worksheet=workbook.create_sheet("Source Rows"),
+        title="Source Rows",
+        headers=[
+            "Document Number",
+            "Document Date",
+            "Deductee GSTIN",
+            "Deductee Name",
+            "Payment Amount",
+            "Taxable Value",
+            "IGST Deducted",
+            "CGST Deducted",
+            "SGST Deducted",
+            "Total TDS Deducted",
+        ],
+        rows=[
+            [
+                transaction.reference_number,
+                transaction.transaction_date.isoformat() if transaction.transaction_date else "",
+                transaction.counterparty_gstin,
+                transaction.counterparty_name,
+                format_decimal(transaction.total_amount),
+                format_decimal(transaction.taxable_value),
+                format_decimal(transaction.igst_amount),
+                format_decimal(transaction.cgst_amount),
+                format_decimal(transaction.sgst_amount),
+                format_decimal(transaction.tax_amount),
+            ]
+            for transaction in transactions
+        ],
+        empty_message="No TDS deducted source rows are available for the selected period.",
+    )
+
+    append_data_or_info_sheet(
+        worksheet=workbook.create_sheet("Validations"),
+        title="Validations",
+        headers=["Code", "Severity", "Message", "Row", "Document Number", "Field"],
+        rows=build_gstr7_validation_rows(transactions),
+        empty_message="No workbook-level validation signals were generated for this return.",
+    )
+
+    append_data_or_info_sheet(
+        worksheet=workbook.create_sheet("Period Exceptions"),
+        title="Period Exceptions",
+        headers=["Document Number", "Document Date", "Transaction Type", "Category", "Reason", "Selected Period"],
+        rows=build_period_exception_rows(period_exceptions),
+        empty_message="No out-of-period exceptions were captured for this return.",
+    )
+
+    return workbook_response(workbook=workbook, filename=f"gstr7_{compliance_period.period}.xlsx")
+
+
 def append_sheet(*, worksheet, title: str, headers: list[str], rows: list[list[object]]) -> None:
     worksheet.title = title
     worksheet.append(headers)
@@ -1740,6 +1870,28 @@ def build_gstr1_validation_rows(transactions: list[GSTTransaction]) -> list[list
             rows.append(["AMENDMENT_REFERENCE_MISSING", "error", "Amendment row is missing original document number or original period.", index, transaction.reference_number, "original_document_number"])
         if inferred_supply_category(transaction) in {"nil_rated", "exempt", "non_gst"} and transaction.tax_amount not in (None, Decimal("0.00")):
             rows.append(["SUPPLY_CATEGORY_CONFLICT", "warning", "Supply category indicates non-taxable treatment but tax amounts are present.", index, transaction.reference_number, "supply_category"])
+    return rows
+
+
+def build_gstr7_validation_rows(transactions: list[GSTTransaction]) -> list[list[object]]:
+    rows = []
+    duplicate_refs = {}
+    for transaction in transactions:
+        reference = str(transaction.reference_number or "").strip()
+        if not reference:
+            continue
+        duplicate_refs[reference] = duplicate_refs.get(reference, 0) + 1
+
+    for index, transaction in enumerate(transactions, start=1):
+        if not str(transaction.counterparty_gstin or "").strip():
+            rows.append(["DEDUCTEE_GSTIN_MISSING", "error", "Deductee GSTIN is required for GSTR-7 preparation.", index, transaction.reference_number, "counterparty_gstin"])
+        if decimal_or_zero(transaction.tax_amount) <= Decimal("0.00"):
+            rows.append(["ZERO_TDS_AMOUNT", "warning", "TDS amount is zero and should be reviewed before relying on this draft.", index, transaction.reference_number, "tax_amount"])
+        if decimal_or_zero(transaction.total_amount) <= Decimal("0.00"):
+            rows.append(["ZERO_PAYMENT_AMOUNT", "warning", "Payment amount is zero and should be reviewed for source completeness.", index, transaction.reference_number, "total_amount"])
+        reference = str(transaction.reference_number or "").strip()
+        if reference and duplicate_refs.get(reference, 0) > 1:
+            rows.append(["DUPLICATE_TDS_DOCUMENT", "warning", "This TDS document number appears more than once in the selected period.", index, transaction.reference_number, "reference_number"])
     return rows
 
 

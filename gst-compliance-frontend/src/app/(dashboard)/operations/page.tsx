@@ -28,7 +28,7 @@ import { useWorkspaceContext } from "@/store/workspace-context";
 import type { ReturnFilingOperationsRecord, ReturnPreparationRecord } from "@/types/api";
 
 const statusOptions = ["all", "submitted", "needs_retry", "failed", "queued_for_filing"] as const;
-const returnTypeOptions = ["all", "gstr1", "gstr3b"] as const;
+const returnTypeOptions = ["all", "gstr1", "gstr3b", "gstr7", "gstr9", "gstr9c"] as const;
 const scopeOptions = ["workspace_open", "include_resolved"] as const;
 
 function formatDateTime(value?: string | null) {
@@ -183,6 +183,39 @@ function buildGstr3bReviewHref(options: {
   return `/returns/gstr3b-review?${params.toString()}`;
 }
 
+function buildGstr7ReviewHref(options: {
+  workspaceId?: string | null;
+  clientId?: string | null;
+  gstinId?: string | null;
+  periodId?: string | null;
+  returnId?: string | null;
+  returnType?: string | null;
+  tab?: string | null;
+}) {
+  if (
+    options.returnType !== "gstr7" ||
+    !options.workspaceId ||
+    !options.clientId ||
+    !options.gstinId ||
+    !options.periodId ||
+    !options.returnId
+  ) {
+    return null;
+  }
+
+  const params = new URLSearchParams({
+    workspace: options.workspaceId,
+    client: options.clientId,
+    gstin: options.gstinId,
+    period: options.periodId,
+    returnId: options.returnId,
+  });
+  if (options.tab) {
+    params.set("tab", options.tab);
+  }
+  return `/returns/gstr7-review?${params.toString()}`;
+}
+
 function buildGstr9ReviewHref(options: {
   workspaceId?: string | null;
   clientId?: string | null;
@@ -250,6 +283,17 @@ function chooseGstr3bReviewTab(preparedReturn?: ReturnPreparationRecord | null) 
   return "overview";
 }
 
+function chooseGstr7ReviewTab(preparedReturn?: ReturnPreparationRecord | null) {
+  const summary = (preparedReturn?.summary_snapshot as Record<string, unknown> | undefined) ?? {};
+  const deductees = ((summary.deductees as Record<string, unknown> | undefined)?.rows as unknown[] | undefined) ?? [];
+  const tdsSummary = (summary.tds_summary as Record<string, unknown> | undefined) ?? {};
+
+  if (getPeriodExceptionCountFromSummary(summary) > 0) return "warnings";
+  if (Number(tdsSummary.payment_amount ?? 0) <= 0 || Number(tdsSummary.tds_amount ?? 0) <= 0) return "tax-summary";
+  if (deductees.length > 0) return "deductees";
+  return "overview";
+}
+
 function chooseGstr9ReviewTab(preparedReturn?: ReturnPreparationRecord | null) {
   const summary = (preparedReturn?.summary_snapshot as Record<string, unknown> | undefined) ?? {};
   const sourceMonths = (summary.source_months as Record<string, unknown> | undefined) ?? {};
@@ -314,6 +358,15 @@ export default function OperationsPage() {
         returnId: previewReturnQuery.data?.id,
         returnType: previewReturnQuery.data?.return_type,
         tab: chooseGstr3bReviewTab(previewReturnQuery.data),
+      }) ||
+      buildGstr7ReviewHref({
+        workspaceId: selectedWorkspaceId,
+        clientId: selectedClientId,
+        gstinId: selectedGstinId,
+        periodId: selectedPeriodId,
+        returnId: previewReturnQuery.data?.id,
+        returnType: previewReturnQuery.data?.return_type,
+        tab: chooseGstr7ReviewTab(previewReturnQuery.data),
       }) ||
       buildGstr9ReviewHref({
         workspaceId: selectedWorkspaceId,
@@ -545,6 +598,14 @@ export default function OperationsPage() {
                     returnType: filing.return_type,
                     tab: "overview",
                   }) || buildGstr3bReviewHref({
+                    workspaceId: selectedWorkspaceId,
+                    clientId: selectedClientId,
+                    gstinId: selectedGstinId,
+                    periodId: selectedPeriodId,
+                    returnId: filing.prepared_return,
+                    returnType: filing.return_type,
+                    tab: "overview",
+                  }) || buildGstr7ReviewHref({
                     workspaceId: selectedWorkspaceId,
                     clientId: selectedClientId,
                     gstinId: selectedGstinId,

@@ -216,6 +216,39 @@ function buildGstr3bReviewHref(options: {
   return `/returns/gstr3b-review?${params.toString()}`;
 }
 
+function buildGstr7ReviewHref(options: {
+  workspaceId?: string | null;
+  clientId?: string | null;
+  gstinId?: string | null;
+  periodId?: string | null;
+  returnId?: string | null;
+  returnType?: string | null;
+  tab?: string | null;
+}) {
+  if (
+    options.returnType !== "gstr7" ||
+    !options.workspaceId ||
+    !options.clientId ||
+    !options.gstinId ||
+    !options.periodId ||
+    !options.returnId
+  ) {
+    return null;
+  }
+
+  const params = new URLSearchParams({
+    workspace: options.workspaceId,
+    client: options.clientId,
+    gstin: options.gstinId,
+    period: options.periodId,
+    returnId: options.returnId,
+  });
+  if (options.tab) {
+    params.set("tab", options.tab);
+  }
+  return `/returns/gstr7-review?${params.toString()}`;
+}
+
 function buildGstr9ReviewHref(options: {
   workspaceId?: string | null;
   clientId?: string | null;
@@ -280,6 +313,18 @@ function chooseGstr3bReviewTab(preparedReturn?: ReturnPreparationRecord | null) 
   ) {
     return "itc";
   }
+  return "overview";
+}
+
+function chooseGstr7ReviewTab(preparedReturn?: ReturnPreparationRecord | null) {
+  const summary = asRecord(preparedReturn?.summary_snapshot);
+  const deducteeRows = asArray(asRecord(summary?.deductees)?.rows);
+  const paymentAmount = Number(asRecord(summary?.tds_summary)?.payment_amount ?? 0);
+  const tdsAmount = Number(asRecord(summary?.tds_summary)?.tds_amount ?? 0);
+
+  if (getPeriodExceptionCountFromSummary(summary) > 0) return "warnings";
+  if (paymentAmount <= 0 || tdsAmount <= 0) return "tax-summary";
+  if (deducteeRows.length > 0) return "deductees";
   return "overview";
 }
 
@@ -402,6 +447,15 @@ export default function ApprovalsPage() {
         returnId: previewReturn?.id,
         returnType: previewReturn?.return_type,
         tab: chooseGstr3bReviewTab(previewReturn),
+      }) ||
+      buildGstr7ReviewHref({
+        workspaceId: selectedWorkspaceId,
+        clientId: selectedClientId,
+        gstinId: selectedGstinId,
+        periodId: selectedPeriodId,
+        returnId: previewReturn?.id,
+        returnType: previewReturn?.return_type,
+        tab: chooseGstr7ReviewTab(previewReturn),
       }) ||
       buildGstr9ReviewHref({
         workspaceId: selectedWorkspaceId,
@@ -580,6 +634,14 @@ export default function ApprovalsPage() {
                     returnId: preparedReturn.id,
                     returnType: preparedReturn.return_type,
                     tab: chooseGstr3bReviewTab(preparedReturn),
+                  }) || buildGstr7ReviewHref({
+                    workspaceId: selectedWorkspaceId,
+                    clientId: selectedClientId,
+                    gstinId: selectedGstinId,
+                    periodId: selectedPeriodId,
+                    returnId: preparedReturn.id,
+                    returnType: preparedReturn.return_type,
+                    tab: chooseGstr7ReviewTab(preparedReturn),
                   }) || buildGstr9ReviewHref({
                     workspaceId: selectedWorkspaceId,
                     clientId: selectedClientId,
@@ -659,6 +721,14 @@ export default function ApprovalsPage() {
                     returnId: preparedReturn?.id,
                     returnType: preparedReturn?.return_type,
                     tab: chooseGstr3bReviewTab(preparedReturn),
+                  }) || buildGstr7ReviewHref({
+                    workspaceId: selectedWorkspaceId,
+                    clientId: selectedClientId,
+                    gstinId: selectedGstinId,
+                    periodId: selectedPeriodId,
+                    returnId: preparedReturn?.id,
+                    returnType: preparedReturn?.return_type,
+                    tab: chooseGstr7ReviewTab(preparedReturn),
                   }) || buildGstr9ReviewHref({
                     workspaceId: selectedWorkspaceId,
                     clientId: selectedClientId,

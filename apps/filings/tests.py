@@ -54,6 +54,12 @@ def filings_whitebooks_defaults(settings):
     settings.WHITEBOOKS_ENABLE_GSTR1_SAVE_LIVE = False
     settings.WHITEBOOKS_ENABLE_GSTR1_PROCEED_LIVE = False
     settings.WHITEBOOKS_ENABLE_GSTR1_FILE_LIVE = False
+    settings.WHITEBOOKS_ENABLE_GSTR7_SAVE_LIVE = False
+    settings.WHITEBOOKS_ENABLE_GSTR7_FILE_LIVE = False
+    settings.WHITEBOOKS_ENABLE_GSTR9_SAVE_LIVE = False
+    settings.WHITEBOOKS_ENABLE_GSTR9_FILE_LIVE = False
+    settings.WHITEBOOKS_ENABLE_GSTR9C_SAVE_LIVE = False
+    settings.WHITEBOOKS_ENABLE_GSTR9C_FILE_LIVE = False
     settings.WHITEBOOKS_ENABLE_GSTR3B_SAVE_LIVE = False
     settings.WHITEBOOKS_ENABLE_GSTR3B_OFFSET_LIVE = False
     settings.WHITEBOOKS_ENABLE_GSTR3B_FILE_LIVE = False
@@ -256,6 +262,70 @@ def test_start_filing_api_opens_manual_gstr9_record_without_provider_auth(filing
 
 
 @pytest.mark.django_db
+def test_start_filing_api_requires_provider_auth_for_gstr9_when_live_save_enabled(settings, filings_authenticated_client, filings_context):
+    settings.WHITEBOOKS_ENABLE_GSTR9_SAVE_LIVE = True
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR9
+    filings_context["prepared_return"].status = ReturnPreparation.PreparationStatus.APPROVED
+    filings_context["prepared_return"].summary_snapshot = {
+        "summary_version": "gstr9.annual.v1",
+        "whitebooks_gstr9_save_payload": {
+            "gstin": filings_context["gstin"].gstin,
+            "fp": "032026",
+            "table4": {},
+        },
+    }
+    filings_context["prepared_return"].save(update_fields=["return_type", "status", "summary_snapshot", "updated_at"])
+    filings_context["compliance_period"].return_type = "GSTR-9"
+    filings_context["compliance_period"].save(update_fields=["return_type", "updated_at"])
+
+    response = filings_authenticated_client.post(
+        "/api/v1/filings/start/",
+        {
+            "workspace": str(filings_context["workspace"].id),
+            "client": str(filings_context["client"].id),
+            "gstin": str(filings_context["gstin"].id),
+            "compliance_period": str(filings_context["compliance_period"].id),
+            "prepared_return": str(filings_context["prepared_return"].id),
+            "return_type": ReturnPreparation.ReturnType.GSTR9,
+            "provider": ReturnFiling.Provider.WHITEBOOKS,
+            "approval_request": str(filings_context["approval_request"].id),
+            "confirmation_note": "Started annual live filing from returns workspace.",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "Request OTP and verify a live filing session" in str(response.data["errors"]["provider_auth"][0])
+
+
+@pytest.mark.django_db
+def test_start_filing_api_requires_provider_auth_for_gstr7(filings_authenticated_client, filings_context):
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR7
+    filings_context["prepared_return"].status = ReturnPreparation.PreparationStatus.APPROVED
+    filings_context["prepared_return"].save(update_fields=["return_type", "status", "updated_at"])
+    filings_context["compliance_period"].return_type = "GSTR-7"
+    filings_context["compliance_period"].save(update_fields=["return_type", "updated_at"])
+
+    response = filings_authenticated_client.post(
+        "/api/v1/filings/start/",
+        {
+            "workspace": str(filings_context["workspace"].id),
+            "client": str(filings_context["client"].id),
+            "gstin": str(filings_context["gstin"].id),
+            "compliance_period": str(filings_context["compliance_period"].id),
+            "prepared_return": str(filings_context["prepared_return"].id),
+            "return_type": ReturnPreparation.ReturnType.GSTR7,
+            "provider": ReturnFiling.Provider.WHITEBOOKS,
+            "approval_request": str(filings_context["approval_request"].id),
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "Request OTP and verify a live filing session" in str(response.data["errors"]["provider_auth"][0])
+
+
+@pytest.mark.django_db
 def test_start_filing_api_opens_manual_gstr9c_record_without_provider_auth(filings_authenticated_client, filings_context):
     filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR9C
     filings_context["prepared_return"].status = ReturnPreparation.PreparationStatus.APPROVED
@@ -287,6 +357,49 @@ def test_start_filing_api_opens_manual_gstr9c_record_without_provider_auth(filin
     assert filing.readiness_snapshot["manual_filing_only"] is True
     assert ReturnFilingEvent.objects.filter(return_filing=filing, event_type="filing.manual_tracking_opened").exists()
     assert AuditLog.objects.filter(action="return_filing.manual_tracking_opened", entity_id=filing.id).exists()
+
+
+@pytest.mark.django_db
+def test_start_filing_api_requires_provider_auth_for_gstr9c_when_live_save_enabled(settings, filings_authenticated_client, filings_context):
+    settings.WHITEBOOKS_ENABLE_GSTR9C_SAVE_LIVE = True
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR9C
+    filings_context["prepared_return"].status = ReturnPreparation.PreparationStatus.APPROVED
+    filings_context["prepared_return"].summary_snapshot = {
+        "summary_version": "gstr9c.compare.v1",
+        "whitebooks_gstr9c_save_payload": {
+            "gstr9cdata": {
+                "audited_data": {
+                    "gstin": filings_context["gstin"].gstin,
+                    "fp": "032026",
+                    "act_name": "Companies Act",
+                    "isauditor": "Y",
+                    "table5": {},
+                }
+            }
+        },
+    }
+    filings_context["prepared_return"].save(update_fields=["return_type", "status", "summary_snapshot", "updated_at"])
+    filings_context["compliance_period"].return_type = "GSTR-9C"
+    filings_context["compliance_period"].save(update_fields=["return_type", "updated_at"])
+
+    response = filings_authenticated_client.post(
+        "/api/v1/filings/start/",
+        {
+            "workspace": str(filings_context["workspace"].id),
+            "client": str(filings_context["client"].id),
+            "gstin": str(filings_context["gstin"].id),
+            "compliance_period": str(filings_context["compliance_period"].id),
+            "prepared_return": str(filings_context["prepared_return"].id),
+            "return_type": ReturnPreparation.ReturnType.GSTR9C,
+            "provider": ReturnFiling.Provider.WHITEBOOKS,
+            "approval_request": str(filings_context["approval_request"].id),
+            "confirmation_note": "Started annual 9C live filing from returns workspace.",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "Request OTP and verify a live filing session" in str(response.data["errors"]["provider_auth"][0])
 
 
 @pytest.mark.django_db
@@ -1701,6 +1814,278 @@ def test_whitebooks_mapper_builds_gstr3b_retsave_payload_with_explicit_blockers(
 
 
 @pytest.mark.django_db
+def test_whitebooks_mapper_builds_gstr7_retsave_payload_from_summary_snapshot(filings_context):
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR7
+    filings_context["prepared_return"].summary_snapshot = {
+        "return_type": "gstr7",
+        "summary_version": "gstr7.monthly.v1",
+        "tds_summary": {
+            "document_count": 3,
+            "deductee_count": 2,
+            "payment_amount": "165000.00",
+            "taxable_value": "165000.00",
+            "igst_amount": "800.00",
+            "cgst_amount": "625.00",
+            "sgst_amount": "625.00",
+            "tds_amount": "2050.00",
+        },
+        "deductees": {
+            "row_count": 2,
+            "rows": [
+                {
+                    "deductee_gstin": "27ABCDE1234F1Z5",
+                    "deductee_name": "Deductee Two",
+                    "document_count": 1,
+                    "payment_amount": "40000.00",
+                    "taxable_value": "40000.00",
+                    "igst_amount": "800.00",
+                    "cgst_amount": "0.00",
+                    "sgst_amount": "0.00",
+                    "tds_amount": "800.00",
+                    "transaction_ids": ["1"],
+                },
+                {
+                    "deductee_gstin": "29ABCDE1234F1Z5",
+                    "deductee_name": "Deductee One",
+                    "document_count": 2,
+                    "payment_amount": "125000.00",
+                    "taxable_value": "125000.00",
+                    "igst_amount": "0.00",
+                    "cgst_amount": "625.00",
+                    "sgst_amount": "625.00",
+                    "tds_amount": "1250.00",
+                    "transaction_ids": ["2", "3"],
+                },
+            ],
+        },
+    }
+    filings_context["prepared_return"].save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+
+    filing = ReturnFiling(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR7,
+    )
+
+    payload = map_return_filing_to_whitebooks_payload(filing)
+
+    assert payload["whitebooks"]["readiness"]["save_supported"] is True
+    assert payload["whitebooks"]["readiness"]["file_supported"] is False
+    assert "validated tax_pay and offset mapping" in payload["whitebooks"]["readiness"]["blockers"][0]
+    assert payload["whitebooks"]["operations"]["save"]["gstin"] == "29ABCDE1234P1Z5"
+    assert payload["whitebooks"]["operations"]["save"]["fp"] == "042026"
+    assert payload["whitebooks"]["operations"]["save"]["tdsa"] == []
+    assert payload["whitebooks"]["operations"]["save"]["tds"][0]["gstin_ded"] == "27ABCDE1234F1Z5"
+    assert payload["whitebooks"]["operations"]["save"]["tds"][0]["amt_ded"] == 40000.0
+    assert payload["whitebooks"]["operations"]["save"]["tds"][1]["gstin_ded"] == "29ABCDE1234F1Z5"
+    assert payload["whitebooks"]["operations"]["status"]["rettype"] == "GSTR7"
+    assert payload["whitebooks"]["operations"]["track"]["type"] == "GSTR7"
+
+
+@pytest.mark.django_db
+def test_whitebooks_mapper_uses_explicit_gstr9_save_payload_when_present(filings_context):
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR9
+    filings_context["prepared_return"].summary_snapshot = {
+        "return_type": "gstr9",
+        "summary_version": "gstr9.annual.v1",
+        "whitebooks_gstr9_save_payload": {
+            "gstin": filings_context["gstin"].gstin,
+            "fp": "032026",
+            "table4": {
+                "b2c": {"txval": 1000, "iamt": 0, "camt": 90, "samt": 90, "csamt": 0},
+            },
+            "table5": {
+                "zero_rtd": {"txval": 200},
+            },
+        },
+    }
+    filings_context["prepared_return"].save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+
+    filing = ReturnFiling(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR9,
+    )
+
+    payload = map_return_filing_to_whitebooks_payload(filing)
+
+    assert payload["whitebooks"]["readiness"]["save_supported"] is True
+    assert payload["whitebooks"]["readiness"]["file_supported"] is False
+    assert payload["whitebooks"]["operations"]["save"]["fp"] == "032026"
+    assert payload["whitebooks"]["operations"]["save"]["table4"]["b2c"]["txval"] == 1000
+    assert payload["whitebooks"]["operations"]["status"]["rettype"] == "GSTR9"
+    assert payload["whitebooks"]["operations"]["track"]["type"] == "GSTR9"
+
+
+@pytest.mark.django_db
+def test_whitebooks_mapper_uses_explicit_gstr9_file_payload_when_present(filings_context):
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR9
+    filings_context["prepared_return"].summary_snapshot = {
+        "return_type": "gstr9",
+        "summary_version": "gstr9.annual.v1",
+        "whitebooks_gstr9_save_payload": {
+            "gstin": filings_context["gstin"].gstin,
+            "fp": "032026",
+            "table4": {},
+        },
+        "whitebooks_gstr9_file_payload": {
+            "gstin": filings_context["gstin"].gstin,
+            "fp": "032026",
+            "isnil": "N",
+            "table4": {},
+            "tax_pay": [],
+            "offset": [],
+        },
+    }
+    filings_context["prepared_return"].save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+
+    filing = ReturnFiling(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR9,
+    )
+
+    payload = map_return_filing_to_whitebooks_payload(filing)
+
+    assert payload["whitebooks"]["readiness"]["file_supported"] is True
+    assert payload["whitebooks"]["operations"]["file"]["fp"] == "032026"
+    assert payload["whitebooks"]["operations"]["file"]["tax_pay"] == []
+
+
+@pytest.mark.django_db
+def test_whitebooks_mapper_uses_explicit_gstr9c_save_payload_when_present(filings_context):
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR9C
+    filings_context["prepared_return"].summary_snapshot = {
+        "return_type": "gstr9c",
+        "summary_version": "gstr9c.compare.v1",
+        "whitebooks_gstr9c_save_payload": {
+            "gstr9cdata": {
+                "audited_data": {
+                    "gstin": filings_context["gstin"].gstin,
+                    "fp": "032026",
+                    "act_name": "Companies Act",
+                    "isauditor": "Y",
+                    "table5": {},
+                }
+            }
+        },
+    }
+    filings_context["prepared_return"].save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+
+    filing = ReturnFiling(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR9C,
+    )
+
+    payload = map_return_filing_to_whitebooks_payload(filing)
+
+    assert payload["whitebooks"]["readiness"]["save_supported"] is True
+    assert payload["whitebooks"]["readiness"]["file_supported"] is False
+    assert payload["whitebooks"]["operations"]["save"]["gstr9cdata"]["audited_data"]["fp"] == "032026"
+    assert payload["whitebooks"]["operations"]["status"]["rettype"] == "GSTR9C"
+    assert payload["whitebooks"]["operations"]["track"]["type"] == "GSTR9C"
+
+
+@pytest.mark.django_db
+def test_whitebooks_mapper_uses_explicit_gstr9c_file_payload_when_present(filings_context):
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR9C
+    filings_context["prepared_return"].summary_snapshot = {
+        "return_type": "gstr9c",
+        "summary_version": "gstr9c.compare.v1",
+        "whitebooks_gstr9c_save_payload": {
+            "gstr9cdata": {
+                "audited_data": {
+                    "gstin": filings_context["gstin"].gstin,
+                    "fp": "032026",
+                    "act_name": "Companies Act",
+                    "isauditor": "Y",
+                    "table5": {},
+                }
+            }
+        },
+        "whitebooks_gstr9c_file_payload": {
+            "gstr9cdata": {
+                "audited_data": {
+                    "gstin": filings_context["gstin"].gstin,
+                    "fp": "032026",
+                    "act_name": "Companies Act",
+                    "isauditor": "Y",
+                    "table5": {},
+                }
+            }
+        },
+    }
+    filings_context["prepared_return"].save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+
+    filing = ReturnFiling(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR9C,
+    )
+
+    payload = map_return_filing_to_whitebooks_payload(filing)
+
+    assert payload["whitebooks"]["readiness"]["file_supported"] is True
+    assert payload["whitebooks"]["operations"]["file"]["gstr9cdata"]["audited_data"]["fp"] == "032026"
+
+
+@pytest.mark.django_db
+def test_whitebooks_mapper_uses_explicit_gstr7_file_payload_when_present(filings_context):
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR7
+    filings_context["prepared_return"].summary_snapshot = {
+        "return_type": "gstr7",
+        "summary_version": "gstr7.monthly.v1",
+        "deductees": {"rows": []},
+        "whitebooks_gstr7_file_payload": {
+            "gstin": "29ABCDE1234P1Z5",
+            "fp": "042026",
+            "tds": {"ttl_igst": 0.0, "ttl_cgst": 625.0, "ttl_sgst": 625.0, "ttl_amtDed": 125000.0, "no_rec": 2},
+            "tdsa": {"ttl_igst": 0.0, "ttl_cgst": 0.0, "ttl_sgst": 0.0, "ttl_amtDed": 0.0, "no_rec": 0},
+            "tax_pay": [],
+            "offset": [],
+        },
+    }
+    filings_context["prepared_return"].save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+
+    filing = ReturnFiling(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR7,
+    )
+
+    payload = map_return_filing_to_whitebooks_payload(filing)
+
+    assert payload["whitebooks"]["readiness"]["file_supported"] is True
+    assert payload["whitebooks"]["operations"]["file"]["fp"] == "042026"
+    assert payload["whitebooks"]["operations"]["file"]["tax_pay"] == []
+
+
+@pytest.mark.django_db
 def test_whitebooks_mapper_uses_ready_gstr3b_offset_profile_when_present(filings_context):
     filing = ReturnFiling.objects.create(
         workspace=filings_context["workspace"],
@@ -2126,6 +2511,291 @@ def test_whitebooks_provider_capabilities_enable_live_gstr3b_save_when_flagged(s
     assert capabilities.supported_operations["file"] is False
     assert capabilities.supported_operations["offset"] is False
     assert provider.planned_submission_stage(filing) == "draft_saved"
+
+
+def test_whitebooks_provider_capabilities_enable_live_gstr7_save_when_flagged(settings, filings_context):
+    settings.WHITEBOOKS_SANDBOX_MODE = False
+    settings.WHITEBOOKS_ENABLE_GSTR7_SAVE_LIVE = True
+
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR7,
+        status=ReturnFiling.FilingStatus.APPROVED,
+        approved_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    filing.prepared_return.return_type = ReturnPreparation.ReturnType.GSTR7
+    filing.prepared_return.summary_snapshot = {
+        "deductees": {
+            "rows": [
+                {
+                    "deductee_gstin": "29ABCDE1234F1Z5",
+                    "payment_amount": "1000.00",
+                    "igst_amount": "0.00",
+                    "cgst_amount": "10.00",
+                    "sgst_amount": "10.00",
+                }
+            ]
+        }
+    }
+    filing.prepared_return.save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+
+    payload = map_return_filing_to_whitebooks_payload(filing)
+    provider = WhiteBooksProvider()
+    capabilities = provider.get_capabilities(filing=filing, payload=payload)
+
+    assert capabilities.sandbox_mode is False
+    assert capabilities.auth_session_required is True
+    assert capabilities.live_submission_enabled is True
+    assert capabilities.supported_operations["save"] is True
+    assert capabilities.supported_operations["file"] is False
+    assert capabilities.supported_operations["offset"] is False
+    assert provider.planned_submission_stage(filing) == "draft_saved"
+
+
+def test_whitebooks_provider_capabilities_enable_live_gstr9_save_when_flagged(settings, filings_context):
+    settings.WHITEBOOKS_SANDBOX_MODE = False
+    settings.WHITEBOOKS_ENABLE_GSTR9_SAVE_LIVE = True
+
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR9,
+        status=ReturnFiling.FilingStatus.APPROVED,
+        approved_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    filing.prepared_return.return_type = ReturnPreparation.ReturnType.GSTR9
+    filing.prepared_return.summary_snapshot = {
+        "summary_version": "gstr9.annual.v1",
+        "whitebooks_gstr9_save_payload": {
+            "gstin": filings_context["gstin"].gstin,
+            "fp": "032026",
+            "table4": {},
+        },
+    }
+    filing.prepared_return.save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+
+    payload = map_return_filing_to_whitebooks_payload(filing)
+    provider = WhiteBooksProvider()
+    capabilities = provider.get_capabilities(filing=filing, payload=payload)
+
+    assert capabilities.sandbox_mode is False
+    assert capabilities.auth_session_required is True
+    assert capabilities.live_submission_enabled is True
+    assert capabilities.supported_operations["save"] is True
+    assert capabilities.supported_operations["file"] is False
+    assert capabilities.supported_operations["offset"] is False
+    assert provider.planned_submission_stage(filing) == "draft_saved"
+
+
+def test_whitebooks_provider_capabilities_enable_live_gstr9_file_when_flagged(settings, filings_context):
+    settings.WHITEBOOKS_SANDBOX_MODE = False
+    settings.WHITEBOOKS_ENABLE_GSTR9_SAVE_LIVE = True
+    settings.WHITEBOOKS_ENABLE_GSTR9_FILE_LIVE = True
+
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR9,
+        status=ReturnFiling.FilingStatus.APPROVED,
+        approved_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    filing.prepared_return.return_type = ReturnPreparation.ReturnType.GSTR9
+    filing.prepared_return.summary_snapshot = {
+        "summary_version": "gstr9.annual.v1",
+        "whitebooks_gstr9_save_payload": {
+            "gstin": filings_context["gstin"].gstin,
+            "fp": "032026",
+            "table4": {},
+        },
+        "whitebooks_gstr9_file_payload": {
+            "gstin": filings_context["gstin"].gstin,
+            "fp": "032026",
+            "isnil": "N",
+            "table4": {},
+            "tax_pay": [],
+            "offset": [],
+        },
+    }
+    filing.prepared_return.save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+
+    payload = map_return_filing_to_whitebooks_payload(filing)
+    provider = WhiteBooksProvider()
+    capabilities = provider.get_capabilities(filing=filing, payload=payload)
+
+    assert capabilities.live_submission_enabled is True
+    assert capabilities.supported_operations["save"] is True
+    assert capabilities.supported_operations["file"] is True
+    assert provider.planned_submission_stage(filing) == "file_requested"
+
+
+def test_whitebooks_provider_capabilities_enable_live_gstr9c_save_when_flagged(settings, filings_context):
+    settings.WHITEBOOKS_SANDBOX_MODE = False
+    settings.WHITEBOOKS_ENABLE_GSTR9C_SAVE_LIVE = True
+
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR9C,
+        status=ReturnFiling.FilingStatus.APPROVED,
+        approved_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    filing.prepared_return.return_type = ReturnPreparation.ReturnType.GSTR9C
+    filing.prepared_return.summary_snapshot = {
+        "summary_version": "gstr9c.compare.v1",
+        "whitebooks_gstr9c_save_payload": {
+            "gstr9cdata": {
+                "audited_data": {
+                    "gstin": filings_context["gstin"].gstin,
+                    "fp": "032026",
+                    "act_name": "Companies Act",
+                    "isauditor": "Y",
+                    "table5": {},
+                }
+            }
+        },
+    }
+    filing.prepared_return.save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+
+    payload = map_return_filing_to_whitebooks_payload(filing)
+    provider = WhiteBooksProvider()
+    capabilities = provider.get_capabilities(filing=filing, payload=payload)
+
+    assert capabilities.sandbox_mode is False
+    assert capabilities.auth_session_required is True
+    assert capabilities.live_submission_enabled is True
+    assert capabilities.supported_operations["save"] is True
+    assert capabilities.supported_operations["file"] is False
+    assert capabilities.supported_operations["offset"] is False
+    assert provider.planned_submission_stage(filing) == "draft_saved"
+
+
+def test_whitebooks_provider_capabilities_enable_live_gstr9c_file_when_flagged(settings, filings_context):
+    settings.WHITEBOOKS_SANDBOX_MODE = False
+    settings.WHITEBOOKS_ENABLE_GSTR9C_SAVE_LIVE = True
+    settings.WHITEBOOKS_ENABLE_GSTR9C_FILE_LIVE = True
+
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR9C,
+        status=ReturnFiling.FilingStatus.APPROVED,
+        approved_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    filing.prepared_return.return_type = ReturnPreparation.ReturnType.GSTR9C
+    filing.prepared_return.summary_snapshot = {
+        "summary_version": "gstr9c.compare.v1",
+        "whitebooks_gstr9c_save_payload": {
+            "gstr9cdata": {
+                "audited_data": {
+                    "gstin": filings_context["gstin"].gstin,
+                    "fp": "032026",
+                    "act_name": "Companies Act",
+                    "isauditor": "Y",
+                    "table5": {},
+                }
+            }
+        },
+        "whitebooks_gstr9c_file_payload": {
+            "gstr9cdata": {
+                "audited_data": {
+                    "gstin": filings_context["gstin"].gstin,
+                    "fp": "032026",
+                    "act_name": "Companies Act",
+                    "isauditor": "Y",
+                    "table5": {},
+                }
+            }
+        },
+    }
+    filing.prepared_return.save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+
+    payload = map_return_filing_to_whitebooks_payload(filing)
+    provider = WhiteBooksProvider()
+    capabilities = provider.get_capabilities(filing=filing, payload=payload)
+
+    assert capabilities.live_submission_enabled is True
+    assert capabilities.supported_operations["save"] is True
+    assert capabilities.supported_operations["file"] is True
+    assert provider.planned_submission_stage(filing) == "file_requested"
+
+
+def test_whitebooks_provider_capabilities_enable_live_gstr7_file_when_flagged(settings, filings_context):
+    settings.WHITEBOOKS_SANDBOX_MODE = False
+    settings.WHITEBOOKS_ENABLE_GSTR7_SAVE_LIVE = True
+    settings.WHITEBOOKS_ENABLE_GSTR7_FILE_LIVE = True
+
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR7,
+        status=ReturnFiling.FilingStatus.APPROVED,
+        approved_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    filing.prepared_return.return_type = ReturnPreparation.ReturnType.GSTR7
+    filing.prepared_return.summary_snapshot = {
+        "deductees": {"rows": []},
+        "whitebooks_gstr7_file_payload": {
+            "gstin": "29ABCDE1234P1Z5",
+            "fp": "042026",
+            "tds": {"ttl_igst": 0.0, "ttl_cgst": 625.0, "ttl_sgst": 625.0, "ttl_amtDed": 125000.0, "no_rec": 2},
+            "tdsa": {"ttl_igst": 0.0, "ttl_cgst": 0.0, "ttl_sgst": 0.0, "ttl_amtDed": 0.0, "no_rec": 0},
+            "tax_pay": [],
+            "offset": [],
+        },
+    }
+    filing.prepared_return.save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+
+    payload = map_return_filing_to_whitebooks_payload(filing)
+    provider = WhiteBooksProvider()
+    capabilities = provider.get_capabilities(filing=filing, payload=payload)
+
+    assert capabilities.live_submission_enabled is True
+    assert capabilities.supported_operations["save"] is True
+    assert capabilities.supported_operations["file"] is True
+    assert provider.planned_submission_stage(filing) == "file_requested"
 
 
 def test_whitebooks_provider_capabilities_enable_live_gstr3b_offset_when_flagged(settings, filings_context):
@@ -3957,6 +4627,560 @@ def test_live_gstr3b_save_records_provider_stage_and_events(monkeypatch, setting
     assert AuditLog.objects.filter(action="return_filing.draft_save_requested", entity_id=filing.id).exists()
     assert AuditLog.objects.filter(action="return_filing.draft_saved", entity_id=filing.id).exists()
     assert captured["save"]["txn"] == "txn-live-3b-001"
+
+
+@pytest.mark.django_db
+def test_live_gstr7_save_records_provider_stage_and_events(monkeypatch, settings, filings_context):
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+
+    settings.WHITEBOOKS_SANDBOX_MODE = False
+    settings.WHITEBOOKS_ENABLE_GSTR7_SAVE_LIVE = True
+    settings.WHITEBOOKS_BASE_URL = "https://apisandbox.whitebooks.in"
+    settings.WHITEBOOKS_API_KEY = "client-id"
+    settings.WHITEBOOKS_API_SECRET = "client-secret"
+    settings.WHITEBOOKS_GST_USERNAME = "GSTUSER"
+    settings.WHITEBOOKS_STATE_CODE = "29"
+    settings.WHITEBOOKS_IP_ADDRESS = "192.168.1.6"
+
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR7
+    filings_context["prepared_return"].summary_snapshot = {
+        "return_type": "gstr7",
+        "summary_version": "gstr7.monthly.v1",
+        "tds_summary": {
+            "document_count": 1,
+            "deductee_count": 1,
+            "payment_amount": "100000.00",
+            "taxable_value": "100000.00",
+            "igst_amount": "0.00",
+            "cgst_amount": "500.00",
+            "sgst_amount": "500.00",
+            "tds_amount": "1000.00",
+        },
+        "deductees": {
+            "row_count": 1,
+            "rows": [
+                {
+                    "deductee_gstin": "29ABCDE1234F1Z5",
+                    "deductee_name": "Deductee One",
+                    "document_count": 1,
+                    "payment_amount": "100000.00",
+                    "taxable_value": "100000.00",
+                    "igst_amount": "0.00",
+                    "cgst_amount": "500.00",
+                    "sgst_amount": "500.00",
+                    "tds_amount": "1000.00",
+                    "transaction_ids": ["1"],
+                }
+            ],
+        },
+    }
+    filings_context["prepared_return"].save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+    filings_context["compliance_period"].return_type = "GSTR-7"
+    filings_context["compliance_period"].save(update_fields=["return_type", "updated_at"])
+
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR7,
+        status=ReturnFiling.FilingStatus.QUEUED_FOR_FILING,
+        approved_by=filings_context["user"],
+        filed_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    attempt = ReturnFilingAttempt.objects.create(
+        return_filing=filing,
+        attempt_number=1,
+        status=ReturnFilingAttempt.AttemptStatus.QUEUED,
+        triggered_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    create_ready_whitebooks_auth_session(filings_context, txn="txn-live-g7-001")
+
+    captured = {}
+
+    def fake_save_gstr7_return(self, *, email, gstin, ret_period, txn, payload):
+        captured["save"] = {
+            "email": email,
+            "gstin": gstin,
+            "ret_period": ret_period,
+            "txn": txn,
+            "payload": payload,
+        }
+        return {"status_cd": "1", "status_desc": "Saved", "header": {"txn": txn}}
+
+    monkeypatch.setattr(WhiteBooksClient, "save_gstr7_return", fake_save_gstr7_return)
+
+    result = process_return_filing(filing_id=filing.id, actor_id=filings_context["user"].id)
+
+    filing.refresh_from_db()
+    attempt.refresh_from_db()
+    assert result["status"] == ReturnFiling.FilingStatus.SUBMITTED
+    assert filing.status == ReturnFiling.FilingStatus.SUBMITTED
+    assert filing.provider_reference_id == "txn-live-g7-001"
+    assert attempt.status == ReturnFilingAttempt.AttemptStatus.SUBMITTED_TO_PROVIDER
+    assert attempt.request_summary["provider_stage"] == "draft_saved"
+    assert attempt.response_summary["provider_stage"] == "draft_saved"
+    assert attempt.response_summary["operations_requested"] == ["save"]
+    assert attempt.response_summary["operations_completed"] == ["draft_saved"]
+    assert attempt.response_summary["operations_failed"] == []
+    assert attempt.response_summary["next_action"] == "await_gstr7_final_filing_contract_validation"
+    assert ReturnFilingEvent.objects.filter(return_filing=filing, event_type="filing.draft_save_requested").exists()
+    assert ReturnFilingEvent.objects.filter(return_filing=filing, event_type="filing.draft_saved").exists()
+    assert AuditLog.objects.filter(action="return_filing.draft_saved", entity_id=filing.id).exists()
+    assert captured["save"]["txn"] == "txn-live-g7-001"
+
+
+@pytest.mark.django_db
+def test_live_gstr9_save_records_provider_stage_and_events(monkeypatch, settings, filings_context):
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+
+    settings.WHITEBOOKS_SANDBOX_MODE = False
+    settings.WHITEBOOKS_ENABLE_GSTR9_SAVE_LIVE = True
+    settings.WHITEBOOKS_BASE_URL = "https://apisandbox.whitebooks.in"
+    settings.WHITEBOOKS_API_KEY = "client-id"
+    settings.WHITEBOOKS_API_SECRET = "client-secret"
+    settings.WHITEBOOKS_GST_USERNAME = "GSTUSER"
+    settings.WHITEBOOKS_STATE_CODE = "29"
+    settings.WHITEBOOKS_IP_ADDRESS = "192.168.1.6"
+
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR9
+    filings_context["prepared_return"].summary_snapshot = {
+        "return_type": "gstr9",
+        "summary_version": "gstr9.annual.v1",
+        "whitebooks_gstr9_save_payload": {
+            "gstin": filings_context["gstin"].gstin,
+            "fp": "032026",
+            "table4": {},
+        },
+    }
+    filings_context["prepared_return"].save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+    filings_context["compliance_period"].return_type = "GSTR-9"
+    filings_context["compliance_period"].save(update_fields=["return_type", "updated_at"])
+
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR9,
+        status=ReturnFiling.FilingStatus.QUEUED_FOR_FILING,
+        approved_by=filings_context["user"],
+        filed_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    attempt = ReturnFilingAttempt.objects.create(
+        return_filing=filing,
+        attempt_number=1,
+        status=ReturnFilingAttempt.AttemptStatus.QUEUED,
+        triggered_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    create_ready_whitebooks_auth_session(filings_context, txn="txn-live-g9-001")
+
+    captured = {}
+
+    def fake_save_gstr9_return(self, *, email, gstin, ret_period, txn, payload):
+        captured["save"] = {
+            "email": email,
+            "gstin": gstin,
+            "ret_period": ret_period,
+            "txn": txn,
+            "payload": payload,
+        }
+        return {"status_cd": "1", "status_desc": "Saved", "header": {"txn": txn}}
+
+    monkeypatch.setattr(WhiteBooksClient, "save_gstr9_return", fake_save_gstr9_return)
+
+    result = process_return_filing(filing_id=filing.id, actor_id=filings_context["user"].id)
+
+    filing.refresh_from_db()
+    attempt.refresh_from_db()
+    assert result["status"] == ReturnFiling.FilingStatus.SUBMITTED
+    assert filing.status == ReturnFiling.FilingStatus.SUBMITTED
+    assert filing.provider_reference_id == "txn-live-g9-001"
+    assert attempt.status == ReturnFilingAttempt.AttemptStatus.SUBMITTED_TO_PROVIDER
+    assert attempt.request_summary["provider_stage"] == "draft_saved"
+    assert attempt.response_summary["provider_stage"] == "draft_saved"
+    assert attempt.response_summary["operations_requested"] == ["save"]
+    assert attempt.response_summary["operations_completed"] == ["draft_saved"]
+    assert attempt.response_summary["operations_failed"] == []
+    assert attempt.response_summary["next_action"] == "await_gstr9_final_filing_contract_validation"
+    assert ReturnFilingEvent.objects.filter(return_filing=filing, event_type="filing.draft_save_requested").exists()
+    assert ReturnFilingEvent.objects.filter(return_filing=filing, event_type="filing.draft_saved").exists()
+    assert AuditLog.objects.filter(action="return_filing.draft_saved", entity_id=filing.id).exists()
+    assert captured["save"]["txn"] == "txn-live-g9-001"
+
+
+@pytest.mark.django_db
+def test_live_gstr9_file_request_moves_attempt_to_awaiting_status(monkeypatch, settings, filings_context):
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+
+    settings.WHITEBOOKS_SANDBOX_MODE = False
+    settings.WHITEBOOKS_ENABLE_GSTR9_SAVE_LIVE = True
+    settings.WHITEBOOKS_ENABLE_GSTR9_FILE_LIVE = True
+    settings.WHITEBOOKS_BASE_URL = "https://apisandbox.whitebooks.in"
+    settings.WHITEBOOKS_API_KEY = "client-id"
+    settings.WHITEBOOKS_API_SECRET = "client-secret"
+    settings.WHITEBOOKS_GST_USERNAME = "GSTUSER"
+    settings.WHITEBOOKS_STATE_CODE = "29"
+    settings.WHITEBOOKS_IP_ADDRESS = "192.168.1.6"
+
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR9
+    filings_context["prepared_return"].summary_snapshot = {
+        "return_type": "gstr9",
+        "summary_version": "gstr9.annual.v1",
+        "whitebooks_gstr9_save_payload": {
+            "gstin": filings_context["gstin"].gstin,
+            "fp": "032026",
+            "table4": {},
+        },
+        "whitebooks_gstr9_file_payload": {
+            "gstin": filings_context["gstin"].gstin,
+            "fp": "032026",
+            "isnil": "N",
+            "table4": {},
+            "tax_pay": [],
+            "offset": [],
+        },
+    }
+    filings_context["prepared_return"].save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+    filings_context["compliance_period"].return_type = "GSTR-9"
+    filings_context["compliance_period"].save(update_fields=["return_type", "updated_at"])
+
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR9,
+        status=ReturnFiling.FilingStatus.QUEUED_FOR_FILING,
+        approved_by=filings_context["user"],
+        filed_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    attempt = ReturnFilingAttempt.objects.create(
+        return_filing=filing,
+        attempt_number=1,
+        status=ReturnFilingAttempt.AttemptStatus.QUEUED,
+        triggered_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    create_ready_whitebooks_auth_session(filings_context, txn="txn-live-g9-file-001")
+
+    monkeypatch.setattr(WhiteBooksClient, "save_gstr9_return", lambda self, **kwargs: {"status_cd": "1", "header": {"txn": kwargs["txn"]}})
+    monkeypatch.setattr(WhiteBooksClient, "file_gstr9_return", lambda self, **kwargs: {"status_cd": "1", "status_desc": "File request accepted", "ref_id": "wb-g9-file-001"})
+
+    process_return_filing(filing_id=filing.id, actor_id=filings_context["user"].id)
+
+    filing.refresh_from_db()
+    attempt.refresh_from_db()
+
+    assert filing.status == ReturnFiling.FilingStatus.SUBMITTED
+    assert filing.provider_reference_id == "wb-g9-file-001"
+    assert attempt.status == ReturnFilingAttempt.AttemptStatus.AWAITING_STATUS
+    assert attempt.response_summary["provider_stage"] == "file_requested"
+    assert attempt.response_summary["operations_completed"] == ["draft_saved", "file_requested"]
+    assert attempt.response_summary["next_action"] == "resync_for_arn_or_status"
+    assert ReturnFilingEvent.objects.filter(return_filing=filing, event_type="filing.file_requested").exists()
+    assert ReturnFilingEvent.objects.filter(return_filing=filing, event_type="filing.file_submitted").exists()
+
+
+@pytest.mark.django_db
+def test_live_gstr9c_save_records_provider_stage_and_events(monkeypatch, settings, filings_context):
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+
+    settings.WHITEBOOKS_SANDBOX_MODE = False
+    settings.WHITEBOOKS_ENABLE_GSTR9C_SAVE_LIVE = True
+    settings.WHITEBOOKS_BASE_URL = "https://apisandbox.whitebooks.in"
+    settings.WHITEBOOKS_API_KEY = "client-id"
+    settings.WHITEBOOKS_API_SECRET = "client-secret"
+    settings.WHITEBOOKS_GST_USERNAME = "GSTUSER"
+    settings.WHITEBOOKS_STATE_CODE = "29"
+    settings.WHITEBOOKS_IP_ADDRESS = "192.168.1.6"
+
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR9C
+    filings_context["prepared_return"].summary_snapshot = {
+        "return_type": "gstr9c",
+        "summary_version": "gstr9c.compare.v1",
+        "whitebooks_gstr9c_save_payload": {
+            "gstr9cdata": {
+                "audited_data": {
+                    "gstin": filings_context["gstin"].gstin,
+                    "fp": "032026",
+                    "act_name": "Companies Act",
+                    "isauditor": "Y",
+                    "table5": {},
+                }
+            }
+        },
+    }
+    filings_context["prepared_return"].save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+    filings_context["compliance_period"].return_type = "GSTR-9C"
+    filings_context["compliance_period"].save(update_fields=["return_type", "updated_at"])
+
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR9C,
+        status=ReturnFiling.FilingStatus.QUEUED_FOR_FILING,
+        approved_by=filings_context["user"],
+        filed_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    attempt = ReturnFilingAttempt.objects.create(
+        return_filing=filing,
+        attempt_number=1,
+        status=ReturnFilingAttempt.AttemptStatus.QUEUED,
+        triggered_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    create_ready_whitebooks_auth_session(filings_context, txn="txn-live-g9c-001")
+
+    captured = {}
+
+    def fake_save_gstr9c_return(self, *, email, gstin, ret_period, txn, payload):
+        captured["save"] = {
+            "email": email,
+            "gstin": gstin,
+            "ret_period": ret_period,
+            "txn": txn,
+            "payload": payload,
+        }
+        return {"status_cd": "1", "status_desc": "Saved", "header": {"txn": txn}}
+
+    monkeypatch.setattr(WhiteBooksClient, "save_gstr9c_return", fake_save_gstr9c_return)
+
+    result = process_return_filing(filing_id=filing.id, actor_id=filings_context["user"].id)
+
+    filing.refresh_from_db()
+    attempt.refresh_from_db()
+    assert result["status"] == ReturnFiling.FilingStatus.SUBMITTED
+    assert filing.status == ReturnFiling.FilingStatus.SUBMITTED
+    assert filing.provider_reference_id == "txn-live-g9c-001"
+    assert attempt.status == ReturnFilingAttempt.AttemptStatus.SUBMITTED_TO_PROVIDER
+    assert attempt.request_summary["provider_stage"] == "draft_saved"
+    assert attempt.response_summary["provider_stage"] == "draft_saved"
+    assert attempt.response_summary["operations_requested"] == ["save"]
+    assert attempt.response_summary["operations_completed"] == ["draft_saved"]
+    assert attempt.response_summary["operations_failed"] == []
+    assert attempt.response_summary["next_action"] == "await_gstr9c_final_filing_contract_validation"
+    assert ReturnFilingEvent.objects.filter(return_filing=filing, event_type="filing.draft_save_requested").exists()
+    assert ReturnFilingEvent.objects.filter(return_filing=filing, event_type="filing.draft_saved").exists()
+    assert AuditLog.objects.filter(action="return_filing.draft_saved", entity_id=filing.id).exists()
+    assert captured["save"]["txn"] == "txn-live-g9c-001"
+
+
+@pytest.mark.django_db
+def test_live_gstr9c_file_request_moves_attempt_to_awaiting_status(monkeypatch, settings, filings_context):
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+
+    settings.WHITEBOOKS_SANDBOX_MODE = False
+    settings.WHITEBOOKS_ENABLE_GSTR9C_SAVE_LIVE = True
+    settings.WHITEBOOKS_ENABLE_GSTR9C_FILE_LIVE = True
+    settings.WHITEBOOKS_BASE_URL = "https://apisandbox.whitebooks.in"
+    settings.WHITEBOOKS_API_KEY = "client-id"
+    settings.WHITEBOOKS_API_SECRET = "client-secret"
+    settings.WHITEBOOKS_GST_USERNAME = "GSTUSER"
+    settings.WHITEBOOKS_STATE_CODE = "29"
+    settings.WHITEBOOKS_IP_ADDRESS = "192.168.1.6"
+
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR9C
+    filings_context["prepared_return"].summary_snapshot = {
+        "return_type": "gstr9c",
+        "summary_version": "gstr9c.compare.v1",
+        "whitebooks_gstr9c_save_payload": {
+            "gstr9cdata": {
+                "audited_data": {
+                    "gstin": filings_context["gstin"].gstin,
+                    "fp": "032026",
+                    "act_name": "Companies Act",
+                    "isauditor": "Y",
+                    "table5": {},
+                }
+            }
+        },
+        "whitebooks_gstr9c_file_payload": {
+            "gstr9cdata": {
+                "audited_data": {
+                    "gstin": filings_context["gstin"].gstin,
+                    "fp": "032026",
+                    "act_name": "Companies Act",
+                    "isauditor": "Y",
+                    "table5": {},
+                }
+            }
+        },
+    }
+    filings_context["prepared_return"].save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+    filings_context["compliance_period"].return_type = "GSTR-9C"
+    filings_context["compliance_period"].save(update_fields=["return_type", "updated_at"])
+
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR9C,
+        status=ReturnFiling.FilingStatus.QUEUED_FOR_FILING,
+        approved_by=filings_context["user"],
+        filed_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    attempt = ReturnFilingAttempt.objects.create(
+        return_filing=filing,
+        attempt_number=1,
+        status=ReturnFilingAttempt.AttemptStatus.QUEUED,
+        triggered_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    create_ready_whitebooks_auth_session(filings_context, txn="txn-live-g9c-file-001")
+
+    monkeypatch.setattr(WhiteBooksClient, "save_gstr9c_return", lambda self, **kwargs: {"status_cd": "1", "header": {"txn": kwargs["txn"]}})
+    monkeypatch.setattr(WhiteBooksClient, "file_gstr9c_return", lambda self, **kwargs: {"status_cd": "1", "status_desc": "File request accepted", "ref_id": "wb-g9c-file-001"})
+
+    process_return_filing(filing_id=filing.id, actor_id=filings_context["user"].id)
+
+    filing.refresh_from_db()
+    attempt.refresh_from_db()
+
+    assert filing.status == ReturnFiling.FilingStatus.SUBMITTED
+    assert filing.provider_reference_id == "wb-g9c-file-001"
+    assert attempt.status == ReturnFilingAttempt.AttemptStatus.AWAITING_STATUS
+    assert attempt.response_summary["provider_stage"] == "file_requested"
+    assert attempt.response_summary["operations_completed"] == ["draft_saved", "file_requested"]
+    assert attempt.response_summary["next_action"] == "resync_for_arn_or_status"
+    assert ReturnFilingEvent.objects.filter(return_filing=filing, event_type="filing.file_requested").exists()
+    assert ReturnFilingEvent.objects.filter(return_filing=filing, event_type="filing.file_submitted").exists()
+
+
+@pytest.mark.django_db
+def test_live_gstr7_file_request_moves_attempt_to_awaiting_status(monkeypatch, settings, filings_context):
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+
+    settings.WHITEBOOKS_SANDBOX_MODE = False
+    settings.WHITEBOOKS_ENABLE_GSTR7_SAVE_LIVE = True
+    settings.WHITEBOOKS_ENABLE_GSTR7_FILE_LIVE = True
+    settings.WHITEBOOKS_BASE_URL = "https://apisandbox.whitebooks.in"
+    settings.WHITEBOOKS_API_KEY = "client-id"
+    settings.WHITEBOOKS_API_SECRET = "client-secret"
+    settings.WHITEBOOKS_GST_USERNAME = "GSTUSER"
+    settings.WHITEBOOKS_STATE_CODE = "29"
+    settings.WHITEBOOKS_IP_ADDRESS = "192.168.1.6"
+
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR7
+    filings_context["prepared_return"].summary_snapshot = {
+        "return_type": "gstr7",
+        "summary_version": "gstr7.monthly.v1",
+        "tds_summary": {
+            "document_count": 1,
+            "deductee_count": 1,
+            "payment_amount": "100000.00",
+            "taxable_value": "100000.00",
+            "igst_amount": "0.00",
+            "cgst_amount": "500.00",
+            "sgst_amount": "500.00",
+            "tds_amount": "1000.00",
+        },
+        "deductees": {
+            "row_count": 1,
+            "rows": [
+                {
+                    "deductee_gstin": "29ABCDE1234F1Z5",
+                    "deductee_name": "Deductee One",
+                    "document_count": 1,
+                    "payment_amount": "100000.00",
+                    "taxable_value": "100000.00",
+                    "igst_amount": "0.00",
+                    "cgst_amount": "500.00",
+                    "sgst_amount": "500.00",
+                    "tds_amount": "1000.00",
+                    "transaction_ids": ["1"],
+                }
+            ],
+        },
+        "whitebooks_gstr7_file_payload": {
+            "gstin": "29ABCDE1234P1Z5",
+            "fp": "042026",
+            "tds": {"ttl_igst": 0.0, "ttl_cgst": 500.0, "ttl_sgst": 500.0, "ttl_amtDed": 100000.0, "no_rec": 1},
+            "tdsa": {"ttl_igst": 0.0, "ttl_cgst": 0.0, "ttl_sgst": 0.0, "ttl_amtDed": 0.0, "no_rec": 0},
+            "tax_pay": [],
+            "offset": [],
+        },
+    }
+    filings_context["prepared_return"].save(update_fields=["return_type", "summary_snapshot", "updated_at"])
+    filings_context["compliance_period"].return_type = "GSTR-7"
+    filings_context["compliance_period"].save(update_fields=["return_type", "updated_at"])
+
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR7,
+        status=ReturnFiling.FilingStatus.QUEUED_FOR_FILING,
+        approved_by=filings_context["user"],
+        filed_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    attempt = ReturnFilingAttempt.objects.create(
+        return_filing=filing,
+        attempt_number=1,
+        status=ReturnFilingAttempt.AttemptStatus.QUEUED,
+        triggered_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    create_ready_whitebooks_auth_session(filings_context, txn="txn-live-g7-file-001")
+
+    monkeypatch.setattr(WhiteBooksClient, "save_gstr7_return", lambda self, **kwargs: {"status_cd": "1", "header": {"txn": kwargs["txn"]}})
+    monkeypatch.setattr(WhiteBooksClient, "file_gstr7_return", lambda self, **kwargs: {"status_cd": "1", "status_desc": "File request accepted", "ref_id": "wb-g7-file-001"})
+
+    result = process_return_filing(filing_id=filing.id, actor_id=filings_context["user"].id)
+
+    filing.refresh_from_db()
+    attempt.refresh_from_db()
+    assert result["status"] == ReturnFiling.FilingStatus.SUBMITTED
+    assert filing.provider_reference_id == "wb-g7-file-001"
+    assert attempt.status == ReturnFilingAttempt.AttemptStatus.AWAITING_STATUS
+    assert attempt.request_summary["provider_stage"] == "file_requested"
+    assert attempt.response_summary["provider_stage"] == "file_requested"
+    assert attempt.response_summary["operations_completed"] == ["draft_saved", "file_requested"]
+    assert attempt.response_summary["next_action"] == "resync_for_arn_or_status"
+    assert ReturnFilingEvent.objects.filter(return_filing=filing, event_type="filing.file_requested").exists()
+    assert ReturnFilingEvent.objects.filter(return_filing=filing, event_type="filing.file_submitted").exists()
 
 
 @pytest.mark.django_db

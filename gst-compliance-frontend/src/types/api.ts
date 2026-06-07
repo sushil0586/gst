@@ -336,7 +336,7 @@ export type ImportBatchRecord = {
   import_template_name?: string | null;
   compliance_period: string;
   compliance_period_label?: string;
-  import_type: "sales" | "purchase" | "credit_note" | "debit_note" | "advance_received" | "advance_adjusted" | "gstr_2b";
+  import_type: "sales" | "purchase" | "credit_note" | "debit_note" | "tds_deducted" | "advance_received" | "advance_adjusted" | "gstr_2b";
   source_type: "csv" | "excel" | "provider";
   file_name: string;
   source_metadata?: Record<string, unknown>;
@@ -804,7 +804,7 @@ export type ReturnPreparationRecord = {
   gstin_value?: string;
   compliance_period: string;
   compliance_period_label?: string;
-  return_type: "gstr1" | "gstr3b" | "gstr9" | "gstr9c";
+  return_type: "gstr1" | "gstr3b" | "gstr7" | "gstr9" | "gstr9c";
   status: "draft" | "validating" | "ready_for_review" | "blocked_by_stale_reconciliation" | "approved" | "filed" | "failed";
   summary_snapshot: Record<string, unknown>;
   prepared_by: number | null;
@@ -838,7 +838,7 @@ export type ReturnReadinessIssue = {
 };
 
 export type ReturnReadinessResult = {
-  return_type: "gstr1" | "gstr3b" | "gstr9" | "gstr9c";
+  return_type: "gstr1" | "gstr3b" | "gstr7" | "gstr9" | "gstr9c";
   status: "ready" | "ready_with_warnings" | "blocked";
   can_prepare: boolean;
   can_export: boolean;
@@ -867,6 +867,7 @@ export type ReturnReadinessPayload = {
   };
   gstr1: ReturnReadinessResult;
   gstr3b: ReturnReadinessResult;
+  gstr7: ReturnReadinessResult;
   gstr9: ReturnReadinessResult;
   gstr9c: ReturnReadinessResult;
   overall_status: "ready" | "ready_with_warnings" | "blocked";
@@ -1027,7 +1028,7 @@ export type ReturnFilingRecord = {
   approval_request: string | null;
   approval_request_status?: string;
   provider: "whitebooks";
-  return_type: "gstr1" | "gstr3b" | "gstr9" | "gstr9c";
+  return_type: "gstr1" | "gstr3b" | "gstr7" | "gstr9" | "gstr9c";
   status: "draft" | "ready_for_review" | "approved" | "queued_for_filing" | "submitted" | "arn_received" | "filed" | "failed" | "needs_retry" | "cancelled";
   provider_reference_id: string;
   provider_acknowledgement_id: string;
@@ -1066,7 +1067,7 @@ export type ReturnFilingRolloutPolicySummary = {
   policy_present: boolean;
   policy_scope: string[];
   provider: "whitebooks";
-  return_type: "gstr1" | "gstr3b" | "gstr9" | "gstr9c";
+  return_type: "gstr1" | "gstr3b" | "gstr7" | "gstr9" | "gstr9c";
   enable_live_submission: boolean;
   enable_live_status_sync: boolean;
   live_submission_allowed: boolean;

@@ -1,5 +1,19 @@
 # Phase 2 Plan: GSTR-9, GSTR-9C, GSTR-2X
 
+## Status note
+
+This document captures the original Phase 2 sequencing for annual returns.
+
+Because market demand has shifted toward GST-TDS support, the active near-term Phase 2 implementation order is now:
+
+1. `GSTR-7`
+2. `GSTR-2X`
+3. deeper `GSTR-9C` workflow layers after annual MVP validation
+
+See:
+
+- [gstr7-gstr2x-implementation-plan.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr7-gstr2x-implementation-plan.md:1)
+
 ## Purpose
 
 This document defines the lean but implementation-ready Phase 2 plan for:

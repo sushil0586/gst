@@ -233,6 +233,66 @@ class WhiteBooksClient:
         )
         return self._normalize_submission_payload(response, default_message="WhiteBooks GSTR-1 filing failed.")
 
+    def save_gstr7_return(self, *, email: str, gstin: str, ret_period: str, txn: str, payload: dict) -> dict:
+        response = self._request_json(
+            "/gstr7/retsave",
+            method="PUT",
+            query_params={"email": email},
+            headers=self._filing_headers(gstin=gstin, ret_period=ret_period, txn=txn),
+            body=payload,
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks GSTR-7 draft save failed.")
+
+    def file_gstr7_return(self, *, email: str, gstin: str, ret_period: str, txn: str, payload: dict) -> dict:
+        response = self._request_json(
+            "/gstr7/retfile",
+            method="POST",
+            query_params={"email": email},
+            headers=self._filing_headers(gstin=gstin, ret_period=ret_period, txn=txn),
+            body=payload,
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks GSTR-7 filing failed.")
+
+    def save_gstr9_return(self, *, email: str, gstin: str, ret_period: str, txn: str, payload: dict) -> dict:
+        response = self._request_json(
+            "/gstr9/retsave",
+            method="PUT",
+            query_params={"email": email},
+            headers=self._filing_headers(gstin=gstin, ret_period=ret_period, txn=txn),
+            body=payload,
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks GSTR-9 draft save failed.")
+
+    def file_gstr9_return(self, *, email: str, gstin: str, ret_period: str, txn: str, payload: dict) -> dict:
+        response = self._request_json(
+            "/gstr9/retfile",
+            method="POST",
+            query_params={"email": email},
+            headers=self._filing_headers(gstin=gstin, ret_period=ret_period, txn=txn),
+            body=payload,
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks GSTR-9 filing failed.")
+
+    def save_gstr9c_return(self, *, email: str, gstin: str, ret_period: str, txn: str, payload: dict) -> dict:
+        response = self._request_json(
+            "/gstr9c/retsave",
+            method="PUT",
+            query_params={"email": email},
+            headers=self._filing_headers(gstin=gstin, ret_period=ret_period, txn=txn),
+            body=payload,
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks GSTR-9C draft save failed.")
+
+    def file_gstr9c_return(self, *, email: str, gstin: str, ret_period: str, txn: str, payload: dict) -> dict:
+        response = self._request_json(
+            "/gstr9c/retfile",
+            method="POST",
+            query_params={"email": email},
+            headers=self._filing_headers(gstin=gstin, ret_period=ret_period, txn=txn),
+            body=payload,
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks GSTR-9C filing failed.")
+
     def save_gstr3b_return(self, *, email: str, gstin: str, ret_period: str, txn: str, payload: dict) -> dict:
         response = self._request_json(
             "/gstr3b/retsave",

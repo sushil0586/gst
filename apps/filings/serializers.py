@@ -72,6 +72,48 @@ def _is_auth_recoverable_queued_filing(filing):
     }
 
 
+def _has_explicit_gstr9_live_save_payload(prepared_return) -> bool:
+    summary_snapshot = prepared_return.summary_snapshot if isinstance(prepared_return.summary_snapshot, dict) else {}
+    direct = summary_snapshot.get("whitebooks_gstr9_save_payload")
+    if isinstance(direct, dict) and direct:
+        return True
+    nested = summary_snapshot.get("whitebooks")
+    if isinstance(nested, dict):
+        nested_payload = nested.get("gstr9_save_payload") or nested.get("save_payload")
+        if isinstance(nested_payload, dict) and nested_payload:
+            return True
+    legacy = summary_snapshot.get("gstr9_save_payload")
+    return isinstance(legacy, dict) and bool(legacy)
+
+
+def _has_explicit_gstr9c_live_save_payload(prepared_return) -> bool:
+    summary_snapshot = prepared_return.summary_snapshot if isinstance(prepared_return.summary_snapshot, dict) else {}
+    direct = summary_snapshot.get("whitebooks_gstr9c_save_payload")
+    if isinstance(direct, dict) and direct:
+        return True
+    nested = summary_snapshot.get("whitebooks")
+    if isinstance(nested, dict):
+        nested_payload = nested.get("gstr9c_save_payload") or nested.get("save_payload")
+        if isinstance(nested_payload, dict) and nested_payload:
+            return True
+    legacy = summary_snapshot.get("gstr9c_save_payload")
+    return isinstance(legacy, dict) and bool(legacy)
+
+
+def _requires_live_whitebooks_auth(*, return_type: str) -> bool:
+    if return_type in {
+        ReturnPreparation.ReturnType.GSTR1,
+        ReturnPreparation.ReturnType.GSTR7,
+        ReturnPreparation.ReturnType.GSTR3B,
+    }:
+        return True
+    if return_type == ReturnPreparation.ReturnType.GSTR9:
+        return bool(settings.WHITEBOOKS_ENABLE_GSTR9_SAVE_LIVE)
+    if return_type == ReturnPreparation.ReturnType.GSTR9C:
+        return bool(settings.WHITEBOOKS_ENABLE_GSTR9C_SAVE_LIVE)
+    return False
+
+
 class ReturnFilingAttemptSerializer(serializers.ModelSerializer):
     triggered_by_name = serializers.SerializerMethodField()
     request_summary = serializers.SerializerMethodField()
@@ -570,10 +612,11 @@ class ReturnFilingStartSerializer(serializers.Serializer):
             raise serializers.ValidationError({"prepared_return": "Prepared return not found."})
         provider_auth_session = None
         provider_auth_error = None
-        filing_requires_live_provider_auth = prepared_return.return_type in {
-            ReturnPreparation.ReturnType.GSTR1,
-            ReturnPreparation.ReturnType.GSTR3B,
-        }
+        filing_requires_live_provider_auth = _requires_live_whitebooks_auth(return_type=prepared_return.return_type)
+        if filing_requires_live_provider_auth and prepared_return.return_type == ReturnPreparation.ReturnType.GSTR9:
+            filing_requires_live_provider_auth = _has_explicit_gstr9_live_save_payload(prepared_return)
+        if filing_requires_live_provider_auth and prepared_return.return_type == ReturnPreparation.ReturnType.GSTR9C:
+            filing_requires_live_provider_auth = _has_explicit_gstr9c_live_save_payload(prepared_return)
         if attrs["provider"] == ReturnFiling.Provider.WHITEBOOKS and filing_requires_live_provider_auth:
             provider_auth_session = _get_latest_provider_auth_session(
                 workspace_id=attrs["workspace"],

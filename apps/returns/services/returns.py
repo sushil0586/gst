@@ -93,6 +93,8 @@ def prepare_return(*, workspace_id, client_id, gstin_id, compliance_period_id, r
                 summary = prepare_gstr1(compliance_period=compliance_period)
             elif return_type == ReturnPreparation.ReturnType.GSTR3B:
                 summary = prepare_gstr3b(compliance_period=compliance_period)
+            elif return_type == ReturnPreparation.ReturnType.GSTR7:
+                summary = prepare_gstr7(compliance_period=compliance_period)
             elif return_type == ReturnPreparation.ReturnType.GSTR9:
                 summary = prepare_gstr9(compliance_period=compliance_period)
             elif return_type == ReturnPreparation.ReturnType.GSTR9C:
@@ -874,6 +876,90 @@ def _infer_supply_category(transaction):
     if tax_amount == Decimal("0.00") and taxable_value > Decimal("0.00"):
         return "nil_rated"
     return None
+
+
+def prepare_gstr7(*, compliance_period):
+    transactions = list(
+        GSTTransaction.objects.filter(
+            is_active=True,
+            compliance_period=compliance_period,
+            transaction_type="tds_deducted",
+        ).select_related("gstin")
+    )
+
+    grouped = {}
+    for transaction in transactions:
+        deductee_gstin = str(transaction.counterparty_gstin or "").strip().upper()
+        deductee_name = str(transaction.counterparty_name or "").strip()
+        key = (deductee_gstin, deductee_name)
+        entry = grouped.setdefault(
+            key,
+            {
+                "deductee_gstin": deductee_gstin,
+                "deductee_name": deductee_name,
+                "document_count": 0,
+                "payment_amount": Decimal("0.00"),
+                "taxable_value": Decimal("0.00"),
+                "igst_amount": Decimal("0.00"),
+                "cgst_amount": Decimal("0.00"),
+                "sgst_amount": Decimal("0.00"),
+                "tds_amount": Decimal("0.00"),
+                "transaction_ids": [],
+            },
+        )
+        entry["document_count"] += 1
+        entry["payment_amount"] += _decimal_or_zero(transaction.total_amount)
+        entry["taxable_value"] += _decimal_or_zero(transaction.taxable_value)
+        entry["igst_amount"] += _decimal_or_zero(transaction.igst_amount)
+        entry["cgst_amount"] += _decimal_or_zero(transaction.cgst_amount)
+        entry["sgst_amount"] += _decimal_or_zero(transaction.sgst_amount)
+        entry["tds_amount"] += _decimal_or_zero(transaction.tax_amount)
+        entry["transaction_ids"].append(str(transaction.id))
+
+    deductee_rows = []
+    for key in sorted(grouped.keys()):
+        entry = grouped[key]
+        deductee_rows.append(
+            {
+                "deductee_gstin": entry["deductee_gstin"],
+                "deductee_name": entry["deductee_name"],
+                "document_count": entry["document_count"],
+                "payment_amount": _decimal_to_string(entry["payment_amount"]),
+                "taxable_value": _decimal_to_string(entry["taxable_value"]),
+                "igst_amount": _decimal_to_string(entry["igst_amount"]),
+                "cgst_amount": _decimal_to_string(entry["cgst_amount"]),
+                "sgst_amount": _decimal_to_string(entry["sgst_amount"]),
+                "tds_amount": _decimal_to_string(entry["tds_amount"]),
+                "transaction_ids": entry["transaction_ids"],
+            }
+        )
+
+    total_payment_amount = _sum_decimal_list(transactions, "total_amount")
+    total_taxable_value = _sum_decimal_list(transactions, "taxable_value")
+    total_igst_amount = _sum_decimal_list(transactions, "igst_amount")
+    total_cgst_amount = _sum_decimal_list(transactions, "cgst_amount")
+    total_sgst_amount = _sum_decimal_list(transactions, "sgst_amount")
+    total_tds_amount = _sum_decimal_list(transactions, "tax_amount")
+
+    return {
+        "return_type": ReturnPreparation.ReturnType.GSTR7,
+        "summary_version": "gstr7.monthly.v1",
+        "tds_summary": {
+            "document_count": len(transactions),
+            "deductee_count": len(deductee_rows),
+            "payment_amount": _decimal_to_string(total_payment_amount),
+            "taxable_value": _decimal_to_string(total_taxable_value),
+            "igst_amount": _decimal_to_string(total_igst_amount),
+            "cgst_amount": _decimal_to_string(total_cgst_amount),
+            "sgst_amount": _decimal_to_string(total_sgst_amount),
+            "tds_amount": _decimal_to_string(total_tds_amount),
+        },
+        "deductees": {
+            "row_count": len(deductee_rows),
+            "rows": deductee_rows,
+        },
+        "period_exceptions": _build_period_exception_summary(transactions=transactions),
+    }
 
 
 def prepare_gstr3b(*, compliance_period):

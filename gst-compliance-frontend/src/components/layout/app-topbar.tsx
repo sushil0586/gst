@@ -104,7 +104,7 @@ function ClientContextPicker({
         <Button
           type="button"
           variant="outline"
-          className="topbar-select w-full min-w-0 justify-between gap-2 rounded-full border-slate-200/80 px-3 font-normal text-slate-700 sm:min-w-[13rem]"
+          className="topbar-select w-full min-w-0 justify-between gap-2 rounded-full border-slate-200/80 px-3 font-normal text-slate-700"
           disabled={disabled}
         >
           <span className="truncate">
@@ -209,7 +209,7 @@ function CompactContextSelectors({
 
   return (
     <div className={className}>
-      <div>
+      <div className="min-w-0">
         {showLabels ? <span className="field-label">Workspace</span> : null}
         <Select
           value={selectedWorkspaceId}
@@ -217,7 +217,7 @@ function CompactContextSelectors({
             setSelectedWorkspaceId(value);
           }}
         >
-          <SelectTrigger className="topbar-select w-full min-w-0 sm:min-w-[9rem]">
+          <SelectTrigger className="topbar-select w-full min-w-0 xl:w-[8.5rem]">
             <SelectValue placeholder="Workspace" />
           </SelectTrigger>
           <SelectContent>
@@ -230,7 +230,7 @@ function CompactContextSelectors({
         </Select>
       </div>
 
-      <div>
+      <div className="min-w-0">
         {showLabels ? <span className="field-label">Client</span> : null}
         <ClientContextPicker
           clients={clients}
@@ -240,7 +240,7 @@ function CompactContextSelectors({
         />
       </div>
 
-      <div>
+      <div className="min-w-0">
         {showLabels ? <span className="field-label">GSTIN</span> : null}
         <Select
           value={selectedGstinId}
@@ -248,7 +248,7 @@ function CompactContextSelectors({
             setSelectedGstinId(value);
           }}
         >
-          <SelectTrigger className="topbar-select w-full min-w-0 sm:min-w-[9.5rem]">
+          <SelectTrigger className="topbar-select w-full min-w-0 xl:w-[10.5rem]">
             <SelectValue placeholder="GSTIN" />
           </SelectTrigger>
           <SelectContent>
@@ -261,7 +261,7 @@ function CompactContextSelectors({
         </Select>
       </div>
 
-      <div>
+      <div className="min-w-0">
         {showLabels ? <span className="field-label">Compliance Period</span> : null}
         <Select
           value={selectedPeriodId}
@@ -269,7 +269,7 @@ function CompactContextSelectors({
             setSelectedPeriodId(value);
           }}
         >
-          <SelectTrigger className="topbar-select w-full min-w-0 sm:min-w-[8.5rem]">
+          <SelectTrigger className="topbar-select w-full min-w-0 xl:w-[7.5rem]">
             <SelectValue placeholder="Period" />
           </SelectTrigger>
           <SelectContent>
@@ -368,9 +368,9 @@ export function AppTopbar({ onMenuClick }: { onMenuClick: () => void }) {
               </div>
             </div>
 
-            <div className="hidden flex-1 justify-center xl:flex">
+            <div className="hidden min-w-0 flex-1 justify-center xl:flex">
               <CompactContextSelectors
-                className="flex flex-wrap items-center gap-2"
+                className="grid min-w-0 grid-cols-[8.5rem_minmax(13rem,16rem)_10.5rem_7.5rem] items-center gap-2"
                 clientSearchSignal={clientSearchSignal}
               />
             </div>

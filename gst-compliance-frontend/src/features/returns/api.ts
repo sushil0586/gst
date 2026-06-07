@@ -18,7 +18,7 @@ type PrepareReturnPayload = {
   client: string;
   gstin: string;
   compliance_period: string;
-  return_type: "gstr1" | "gstr3b" | "gstr9" | "gstr9c";
+  return_type: "gstr1" | "gstr3b" | "gstr7" | "gstr9" | "gstr9c";
 };
 
 export function useReturnsQuery(filters: ReturnFilters) {
