@@ -234,6 +234,111 @@ def verify_provider_otp_session(*, auth_session, otp, txn, user):
         raise
 
 
+def refresh_provider_auth_session(*, auth_session, txn, user):
+    from apps.filings.providers.registry import get_filing_provider
+
+    resolved_txn = txn or auth_session.txn
+    if not resolved_txn:
+        raise serializers.ValidationError({"txn": "A provider txn value is required to refresh the auth session."})
+
+    provider = get_filing_provider(auth_session.provider)
+    refresh_auth_session = getattr(provider, "refresh_auth_session", None)
+    if not callable(refresh_auth_session):
+        raise serializers.ValidationError({"provider": "This provider does not support auth session refresh."})
+
+    gstin = getattr(auth_session, "gstin", None)
+    state_code = _resolve_state_code(gstin)
+    gst_username = _resolve_gst_username(gstin)
+    try:
+        session = _invoke_provider_auth_callable(
+            refresh_auth_session,
+            email=auth_session.email,
+            txn=resolved_txn,
+            state_code=state_code,
+            gst_username=gst_username,
+        )
+        auth_session.txn = resolved_txn
+        auth_session.auth_token_payload = _sanitize_provider_payload(session.raw_response)
+        existing_session_metadata = auth_session.session_metadata if isinstance(auth_session.session_metadata, dict) else {}
+        auth_session.session_metadata = _sanitize_provider_payload(
+            {
+                **existing_session_metadata,
+                **session.metadata,
+                "state_code": state_code,
+                "gst_username": gst_username,
+                "refresh_confirmed": True,
+            }
+        )
+        auth_session.response_contract_confirmed = session.response_contract_confirmed
+        auth_session.status = (
+            ProviderAuthSession.SessionStatus.SESSION_ACTIVE
+            if session.response_contract_confirmed
+            else ProviderAuthSession.SessionStatus.AUTH_TOKEN_RECEIVED
+        )
+        auth_session.error_summary = {}
+        auth_session.verified_at = timezone.now()
+        auth_session.verified_by = user
+        auth_session.updated_by = user
+        auth_session.save(
+            update_fields=[
+                "txn",
+                "auth_token_payload",
+                "session_metadata",
+                "response_contract_confirmed",
+                "status",
+                "error_summary",
+                "verified_at",
+                "verified_by",
+                "updated_by",
+                "updated_at",
+            ]
+        )
+        record_audit_log(
+            actor=user,
+            action=_provider_auth_action(auth_session.provider, "refreshed"),
+            entity=auth_session,
+            workspace_id=auth_session.workspace_id,
+            client_id=auth_session.client_id,
+            gstin_id=auth_session.gstin_id,
+            metadata={
+                "email": auth_session.email,
+                "txn": resolved_txn,
+                "state_code": state_code,
+                "gst_username": gst_username,
+                "response_contract_confirmed": session.response_contract_confirmed,
+            },
+        )
+        log_security_event(
+            event="provider_auth.refreshed",
+            severity="info",
+            details={
+                "provider": auth_session.provider,
+                "workspace_id": str(auth_session.workspace_id),
+                "client_id": str(auth_session.client_id),
+                "gstin_id": str(auth_session.gstin_id or ""),
+            },
+        )
+        return auth_session
+    except FilingProviderSessionLimitError as exc:
+        _mark_auth_session_failed(
+            auth_session=auth_session,
+            actor=user,
+            error_code=f"{_provider_error_prefix(auth_session.provider)}_session_limit",
+            error_message=str(exc),
+            audit_action=_provider_auth_action(auth_session.provider, "failed"),
+        )
+        raise
+    except FilingProviderAuthenticationError as exc:
+        _mark_auth_session_failed(
+            auth_session=auth_session,
+            actor=user,
+            error_code=f"{_provider_error_prefix(auth_session.provider)}_authentication_error",
+            error_message=str(exc),
+            audit_action=_provider_auth_action(auth_session.provider, "failed"),
+        )
+        raise
+
+
 def _provider_auth_action(provider_code: str, action: str) -> str:
     return f"{_provider_error_prefix(provider_code)}_auth.{action}"
 

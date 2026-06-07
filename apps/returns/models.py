@@ -18,6 +18,8 @@ class ReturnPreparation(BaseModel):
     class ReturnType(models.TextChoices):
         GSTR1 = "gstr1", "GSTR-1"
         GSTR3B = "gstr3b", "GSTR-3B"
+        GSTR9 = "gstr9", "GSTR-9"
+        GSTR9C = "gstr9c", "GSTR-9C"
 
     compliance_period = models.ForeignKey(CompliancePeriod, on_delete=models.CASCADE, related_name="return_preparations")
     return_type = models.CharField(max_length=32, choices=ReturnType.choices)

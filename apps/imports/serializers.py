@@ -14,6 +14,10 @@ def infer_import_type_from_filename(file_name):
     normalized = (file_name or "").lower()
     if "gstr" in normalized and "2b" in normalized:
         return ImportBatch.ImportType.GSTR_2B
+    if "advance" in normalized and any(token in normalized for token in {"adjust", "adjusted", "txpd"}):
+        return ImportBatch.ImportType.ADVANCE_ADJUSTED
+    if "advance" in normalized and any(token in normalized for token in {"receipt", "received", "voucher", "11a"}):
+        return ImportBatch.ImportType.ADVANCE_RECEIVED
     if "credit" in normalized and "note" in normalized:
         return ImportBatch.ImportType.CREDIT_NOTE
     if "debit" in normalized and "note" in normalized:

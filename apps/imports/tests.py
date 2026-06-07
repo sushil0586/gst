@@ -371,7 +371,7 @@ def test_row_correction_invalidates_reconciliation_and_blocks_returns(import_aut
     )
     return_prep = ReturnPreparation.objects.create(
         compliance_period=import_context["compliance_period"],
-        return_type=ReturnPreparation.ReturnType.GSTR1,
+        return_type=ReturnPreparation.ReturnType.GSTR3B,
         status=ReturnPreparation.PreparationStatus.DRAFT,
         summary_snapshot={},
         created_by=import_user,
@@ -466,7 +466,7 @@ def test_row_discard_invalidates_reconciliation_and_blocks_returns(import_authen
     )
     return_prep = ReturnPreparation.objects.create(
         compliance_period=import_context["compliance_period"],
-        return_type=ReturnPreparation.ReturnType.GSTR1,
+        return_type=ReturnPreparation.ReturnType.GSTR3B,
         status=ReturnPreparation.PreparationStatus.DRAFT,
         summary_snapshot={},
         created_by=import_user,
@@ -545,7 +545,7 @@ def test_batch_discard_invalidates_reconciliation_and_blocks_returns(import_auth
     )
     return_prep = ReturnPreparation.objects.create(
         compliance_period=import_context["compliance_period"],
-        return_type=ReturnPreparation.ReturnType.GSTR1,
+        return_type=ReturnPreparation.ReturnType.GSTR3B,
         status=ReturnPreparation.PreparationStatus.DRAFT,
         summary_snapshot={},
         created_by=import_user,
@@ -627,7 +627,7 @@ def test_batch_replacement_invalidates_reconciliation_and_blocks_returns(import_
     )
     return_prep = ReturnPreparation.objects.create(
         compliance_period=import_context["compliance_period"],
-        return_type=ReturnPreparation.ReturnType.GSTR1,
+        return_type=ReturnPreparation.ReturnType.GSTR3B,
         status=ReturnPreparation.PreparationStatus.DRAFT,
         summary_snapshot={},
         created_by=import_user,
@@ -911,6 +911,95 @@ def test_import_captures_enriched_metadata_for_returns(import_authenticated_clie
 
 
 @pytest.mark.django_db
+def test_advance_received_import_captures_rate_and_reference_metadata(import_authenticated_client, import_context):
+    file = build_csv_file(
+        "advance-received-apr.csv",
+        "document_number,document_date,counterparty_name,taxable_value,igst_amount,total_amount,place_of_supply,rate,receipt_voucher_number,description\n"
+        "AR-1001,2026-04-21,Advance Customer,10000,1800,11800,27,18,RV-1001,Service advance received\n",
+    )
+    response = import_authenticated_client.post(
+        "/api/v1/imports/batches/",
+        upload_payload(import_context, import_type="advance_received", file=file),
+        format="multipart",
+    )
+
+    assert response.status_code == 201
+    batch = ImportBatch.objects.get(pk=response.data["data"]["id"])
+    transaction = GSTTransaction.objects.get(import_batch=batch)
+    assert transaction.transaction_type == "advance_received"
+    assert transaction.document_type == "receipt_voucher"
+    assert transaction.place_of_supply == "27"
+    assert transaction.metadata["rate"] == "18"
+    assert transaction.metadata["advance_reference"] == "RV-1001"
+    assert transaction.metadata["line_items"][0]["rate"] == "18"
+
+
+@pytest.mark.django_db
+def test_advance_adjusted_filename_hint_must_match_selected_type(import_authenticated_client, import_context):
+    file = build_csv_file(
+        "advance-adjusted-apr.csv",
+        "document_number,document_date,counterparty_name,taxable_value,igst_amount,total_amount,place_of_supply,rate,advance_reference\n"
+        "AA-1001,2026-04-22,Advance Customer,4000,720,4720,27,18,AR-1001\n",
+    )
+    response = import_authenticated_client.post(
+        "/api/v1/imports/batches/",
+        upload_payload(import_context, import_type="advance_received", file=file),
+        format="multipart",
+    )
+
+    assert response.status_code == 400
+    assert "looks like advance adjusted data" in response.data["errors"]["import_type"][0].lower()
+
+
+@pytest.mark.django_db
+def test_sales_import_captures_export_metadata(import_authenticated_client, import_context):
+    file = build_csv_file(
+        "sales-export-apr.csv",
+        "invoice_no,invoice_date,counterparty_name,taxable_value,igst_amount,total_amount,place_of_supply,rate,special_supply_type,shipping_bill_number,shipping_bill_date,port_code\n"
+        "EXP-2001,2026-04-24,Overseas Buyer,25000,4500,29500,96,18,export_wpay,SB-2001,2026-04-24,INBLR4\n",
+    )
+    response = import_authenticated_client.post(
+        "/api/v1/imports/batches/",
+        upload_payload(import_context, import_type="sales", file=file),
+        format="multipart",
+    )
+
+    assert response.status_code == 201
+    batch = ImportBatch.objects.get(pk=response.data["data"]["id"])
+    transaction = GSTTransaction.objects.get(import_batch=batch)
+    assert transaction.transaction_type == "sales"
+    assert transaction.metadata["special_supply_type"] == "export_wpay"
+    assert transaction.metadata["shipping_bill_number"] == "SB-2001"
+    assert transaction.metadata["shipping_bill_date"] == "2026-04-24"
+    assert transaction.metadata["port_code"] == "INBLR4"
+
+
+@pytest.mark.django_db
+def test_sales_import_captures_amendment_and_ecommerce_section_metadata(import_authenticated_client, import_context):
+    file = build_csv_file(
+        "sales-amendment-ecom-apr.csv",
+        "invoice_no,invoice_date,recipient_gstin,counterparty_name,taxable_value,cgst_amount,sgst_amount,total_amount,place_of_supply,ecommerce_gstin,ecommerce_section,original_document_number,original_document_date,original_period,original_counterparty_gstin\n"
+        "AMD-2001,2026-04-26,29ABCDE1234F1Z5,Customer One,6000,540,540,7080,29,29ECOM1234F1Z5,14,S-1001,2026-03-31,2026-03,29ABCDE1234F1Z5\n",
+    )
+    response = import_authenticated_client.post(
+        "/api/v1/imports/batches/",
+        upload_payload(import_context, import_type="sales", file=file),
+        format="multipart",
+    )
+
+    assert response.status_code == 201
+    batch = ImportBatch.objects.get(pk=response.data["data"]["id"])
+    transaction = GSTTransaction.objects.get(import_batch=batch)
+    assert transaction.metadata["ecommerce_gstin"] == "29ECOM1234F1Z5"
+    assert transaction.metadata["ecommerce_section"] == "table_14"
+    assert transaction.metadata["original_document_number"] == "S-1001"
+    assert transaction.metadata["original_document_date"] == "2026-03-31"
+    assert transaction.metadata["original_period"] == "2026-03"
+    assert transaction.metadata["original_counterparty_gstin"] == "29ABCDE1234F1Z5"
+    assert transaction.metadata["is_amendment"] is True
+
+
+@pytest.mark.django_db
 def test_import_list_detail_error_and_transaction_apis(import_authenticated_client, import_context):
     file = build_csv_file(
         "purchase-history.csv",
@@ -1017,7 +1106,7 @@ def test_import_correction_policy_requires_elevated_role_after_approval(import_a
     batch_id = create_response.data["data"]["id"]
     ReturnPreparation.objects.create(
         compliance_period=import_context_with_accountant["compliance_period"],
-        return_type=ReturnPreparation.ReturnType.GSTR1,
+        return_type=ReturnPreparation.ReturnType.GSTR3B,
         status=ReturnPreparation.PreparationStatus.APPROVED,
         summary_snapshot={},
         approved_by=import_user,
@@ -1049,7 +1138,7 @@ def test_import_correction_policy_locks_batch_when_return_is_filed(import_authen
     batch_id = create_response.data["data"]["id"]
     ReturnPreparation.objects.create(
         compliance_period=import_context["compliance_period"],
-        return_type=ReturnPreparation.ReturnType.GSTR1,
+        return_type=ReturnPreparation.ReturnType.GSTR3B,
         status=ReturnPreparation.PreparationStatus.FILED,
         summary_snapshot={},
         filed_by=import_user,
@@ -1088,6 +1177,38 @@ def test_import_impact_summary_surfaces_allowed_actions(import_authenticated_cli
     assert data["severity"] == "success"
     assert any(action["key"] == "edit_rows" and action["allowed"] for action in data["actions"])
     assert any(action["key"] == "replace_file" and action["allowed"] for action in data["actions"])
+
+
+@pytest.mark.django_db
+def test_gstr2b_batch_is_not_locked_by_unrelated_gstr1_filing(import_authenticated_client, import_context, import_user):
+    file = build_csv_file(
+        "gstr2b-policy.csv",
+        "invoice_no,invoice_date,supplier_gstin,supplier_name,taxable_value,cgst,sgst,igst,cess,total_amount\n"
+        "INV-2B-001,2026-04-21,29ABCDE1234F1Z5,Vendor Portal,1000,90,90,0,0,1180\n",
+    )
+    create_response = import_authenticated_client.post(
+        "/api/v1/imports/batches/",
+        upload_payload(import_context, import_type="gstr_2b", file=file),
+        format="multipart",
+    )
+    batch_id = create_response.data["data"]["id"]
+    ReturnPreparation.objects.create(
+        compliance_period=import_context["compliance_period"],
+        return_type=ReturnPreparation.ReturnType.GSTR1,
+        status=ReturnPreparation.PreparationStatus.FILED,
+        summary_snapshot={},
+        filed_by=import_user,
+        created_by=import_user,
+        updated_by=import_user,
+    )
+
+    response = import_authenticated_client.get(f"/api/v1/imports/batches/{batch_id}/correction-policy/")
+
+    assert response.status_code == 200
+    data = response.data["data"]
+    assert data["is_locked_by_filing"] is False
+    assert data["can_discard_batch"] is True
+    assert data["can_replace_file"] is True
 
 
 @pytest.mark.django_db

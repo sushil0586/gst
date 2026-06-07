@@ -4,18 +4,22 @@ import re
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
 from apps.audit_logs.services.audit import record_audit_log
 from apps.compliance_periods.services.compliance_periods import ensure_period_modifiable
-from apps.gst_transactions.models import GSTTransaction
+from apps.gst_transactions.models import GSTTransaction, TransactionCorrection
 from apps.reconciliation.models import ReconciliationItem, ReconciliationRun
 
 User = get_user_model()
 
 AMOUNT_TOLERANCE = Decimal("1.00")
-BOOK_TYPES = {"purchase", "debit_note", "credit_note"}
+# Purchase-vs-2B reconciliation is the inward ITC lane.
+# Outward credit/debit notes still matter for GSTR-1 and outward tax,
+# but they should not be pulled into purchase-side ITC review.
+BOOK_TYPES = {"purchase"}
 PORTAL_TYPES = {"gstr_2b"}
 
 
@@ -104,6 +108,12 @@ def process_reconciliation_run(*, run_id, actor_id=None):
                 "duplicate_count",
                 "total_tax_difference",
                 "total_itc_at_risk",
+                "itc_ready_count",
+                "itc_pending_2b_count",
+                "itc_pending_review_count",
+                "itc_blocked_count",
+                "itc_timing_difference_count",
+                "itc_vendor_followup_required_count",
                 "updated_at",
             ]
         )
@@ -143,7 +153,11 @@ def update_reconciliation_item(*, serializer, user):
         entity=instance,
         workspace_id=instance.reconciliation_run.workspace_id,
         client_id=instance.reconciliation_run.client_id,
-        metadata={"action_status": instance.action_status, "assigned_to": instance.assigned_to_id},
+        metadata={
+            "action_status": instance.action_status,
+            "review_decision": instance.review_decision,
+            "assigned_to": instance.assigned_to_id,
+        },
     )
     if instance.assigned_to_id and instance.assigned_to_id != old_assignee_id:
         record_audit_log(
@@ -168,6 +182,291 @@ def update_reconciliation_item(*, serializer, user):
             metadata={"remarks": instance.remarks},
         )
     return instance
+
+
+@transaction.atomic
+def apply_reconciliation_item_books_correction(*, item, validated_data, user):
+    ensure_period_modifiable(
+        item.reconciliation_run.compliance_period,
+        actor=user,
+        attempted_action="reconciliation.item_correct",
+    )
+    transaction_record = item.books_transaction
+    if transaction_record is None:
+        raise ValidationError("Books correction is only available for reconciliation rows that already have a books transaction.")
+
+    before_snapshot = _serialize_transaction_snapshot(transaction_record)
+    editable_fields = {
+        "reference_number",
+        "transaction_date",
+        "counterparty_gstin",
+        "counterparty_name",
+        "taxable_value",
+        "cgst_amount",
+        "sgst_amount",
+        "igst_amount",
+        "cess_amount",
+        "total_amount",
+        "place_of_supply",
+        "reverse_charge",
+    }
+    update_values = {field: validated_data[field] for field in editable_fields if field in validated_data}
+
+    for field, value in update_values.items():
+        setattr(transaction_record, field, value)
+
+    transaction_record.tax_amount = (
+        Decimal(transaction_record.cgst_amount)
+        + Decimal(transaction_record.sgst_amount)
+        + Decimal(transaction_record.igst_amount)
+        + Decimal(transaction_record.cess_amount)
+    )
+    if "total_amount" not in update_values:
+        transaction_record.total_amount = Decimal(transaction_record.taxable_value) + Decimal(transaction_record.tax_amount)
+    transaction_record.status = GSTTransaction.TransactionStatus.REVIEW
+    transaction_record.updated_by = user
+    transaction_record.save(
+        update_fields=[
+            "reference_number",
+            "transaction_date",
+            "counterparty_gstin",
+            "counterparty_name",
+            "taxable_value",
+            "cgst_amount",
+            "sgst_amount",
+            "igst_amount",
+            "cess_amount",
+            "tax_amount",
+            "total_amount",
+            "place_of_supply",
+            "reverse_charge",
+            "status",
+            "updated_by",
+            "updated_at",
+        ]
+    )
+
+    after_snapshot = _serialize_transaction_snapshot(transaction_record)
+    comparable_fields = [
+        "reference_number",
+        "transaction_date",
+        "counterparty_gstin",
+        "counterparty_name",
+        "taxable_value",
+        "cgst_amount",
+        "sgst_amount",
+        "igst_amount",
+        "cess_amount",
+        "tax_amount",
+        "total_amount",
+        "place_of_supply",
+        "reverse_charge",
+    ]
+    changed_fields = [field for field in comparable_fields if before_snapshot.get(field) != after_snapshot.get(field)]
+    if not changed_fields:
+        raise ValidationError("No books-side values changed. Update at least one field before saving.")
+
+    correction = TransactionCorrection.objects.create(
+        workspace=transaction_record.workspace,
+        client=transaction_record.client,
+        gstin=transaction_record.gstin,
+        compliance_period=transaction_record.compliance_period,
+        transaction=transaction_record,
+        reconciliation_item=item,
+        correction_scope=TransactionCorrection.CorrectionScope.RECONCILIATION_BOOKS,
+        status=TransactionCorrection.CorrectionStatus.APPLIED,
+        reason_code=validated_data["reason_code"],
+        reason_note=validated_data["reason_note"],
+        changed_fields=changed_fields,
+        before_snapshot=before_snapshot,
+        after_snapshot=after_snapshot,
+        applied_at=timezone.now(),
+        applied_by=user,
+        created_by=user,
+        updated_by=user,
+    )
+    record_audit_log(
+        actor=user,
+        action="transaction_correction.created",
+        entity=correction,
+        workspace_id=transaction_record.workspace_id,
+        client_id=transaction_record.client_id,
+        gstin_id=transaction_record.gstin_id,
+        compliance_period_id=transaction_record.compliance_period_id,
+        metadata={
+            "reason_code": correction.reason_code,
+            "changed_fields": changed_fields,
+            "correction_scope": correction.correction_scope,
+        },
+        before_state=before_snapshot,
+        after_state=after_snapshot,
+    )
+    record_audit_log(
+        actor=user,
+        action="transaction_correction.applied",
+        entity=correction,
+        workspace_id=transaction_record.workspace_id,
+        client_id=transaction_record.client_id,
+        gstin_id=transaction_record.gstin_id,
+        compliance_period_id=transaction_record.compliance_period_id,
+        metadata={
+            "reason_code": correction.reason_code,
+            "changed_fields": changed_fields,
+            "reconciliation_run_id": str(item.reconciliation_run_id),
+        },
+        before_state=before_snapshot,
+        after_state=after_snapshot,
+    )
+    enqueue_reconciliation_run(run=item.reconciliation_run, actor=user)
+    return correction
+
+
+@transaction.atomic
+def create_reconciliation_item_books_entry(*, item, validated_data, user):
+    ensure_period_modifiable(
+        item.reconciliation_run.compliance_period,
+        actor=user,
+        attempted_action="reconciliation.item_create_books_entry",
+    )
+    if item.books_transaction_id is not None:
+        raise ValidationError("This reconciliation row already has a books transaction.")
+    portal_transaction = item.portal_transaction
+    if portal_transaction is None:
+        raise ValidationError("Books entry creation is only available for rows that already have a portal-side transaction.")
+
+    before_snapshot = _serialize_transaction_snapshot(portal_transaction)
+    editable_fields = {
+        "reference_number",
+        "transaction_date",
+        "counterparty_gstin",
+        "counterparty_name",
+        "taxable_value",
+        "cgst_amount",
+        "sgst_amount",
+        "igst_amount",
+        "cess_amount",
+        "total_amount",
+        "place_of_supply",
+        "reverse_charge",
+    }
+    initial_values = {
+        "workspace": item.reconciliation_run.workspace,
+        "client": item.reconciliation_run.client,
+        "gstin": item.reconciliation_run.gstin,
+        "compliance_period": item.reconciliation_run.compliance_period,
+        "transaction_type": "purchase",
+        "document_type": portal_transaction.document_type or "invoice",
+        "reference_number": validated_data.get("reference_number", portal_transaction.reference_number),
+        "transaction_date": validated_data.get("transaction_date", portal_transaction.transaction_date),
+        "counterparty_gstin": validated_data.get("counterparty_gstin", portal_transaction.counterparty_gstin),
+        "counterparty_name": validated_data.get("counterparty_name", portal_transaction.counterparty_name),
+        "taxable_value": Decimal(validated_data.get("taxable_value", portal_transaction.taxable_value)),
+        "cgst_amount": Decimal(validated_data.get("cgst_amount", portal_transaction.cgst_amount)),
+        "sgst_amount": Decimal(validated_data.get("sgst_amount", portal_transaction.sgst_amount)),
+        "igst_amount": Decimal(validated_data.get("igst_amount", portal_transaction.igst_amount)),
+        "cess_amount": Decimal(validated_data.get("cess_amount", portal_transaction.cess_amount)),
+        "place_of_supply": validated_data.get("place_of_supply", portal_transaction.place_of_supply),
+        "reverse_charge": validated_data.get("reverse_charge", portal_transaction.reverse_charge),
+        "status": GSTTransaction.TransactionStatus.REVIEW,
+        "metadata": {
+            **(portal_transaction.metadata or {}),
+            "created_via_reconciliation": True,
+            "source_reconciliation_item_id": str(item.id),
+            "source_portal_transaction_id": str(portal_transaction.id),
+            "source_transaction_type": portal_transaction.transaction_type,
+        },
+        "created_by": user,
+        "updated_by": user,
+    }
+    tax_amount = (
+        initial_values["cgst_amount"]
+        + initial_values["sgst_amount"]
+        + initial_values["igst_amount"]
+        + initial_values["cess_amount"]
+    )
+    initial_values["tax_amount"] = tax_amount
+    initial_values["total_amount"] = Decimal(validated_data.get("total_amount", initial_values["taxable_value"] + tax_amount))
+
+    created_transaction = GSTTransaction.objects.create(**initial_values)
+    after_snapshot = _serialize_transaction_snapshot(created_transaction)
+    changed_fields = [field for field in editable_fields if field in validated_data and before_snapshot.get(field) != after_snapshot.get(field)]
+    if not changed_fields:
+        changed_fields = ["books_entry_created_from_portal"]
+
+    correction = TransactionCorrection.objects.create(
+        workspace=created_transaction.workspace,
+        client=created_transaction.client,
+        gstin=created_transaction.gstin,
+        compliance_period=created_transaction.compliance_period,
+        transaction=created_transaction,
+        reconciliation_item=item,
+        correction_scope=TransactionCorrection.CorrectionScope.RECONCILIATION_BOOKS_CREATE,
+        status=TransactionCorrection.CorrectionStatus.APPLIED,
+        reason_code=validated_data["reason_code"],
+        reason_note=validated_data["reason_note"],
+        changed_fields=changed_fields,
+        before_snapshot=before_snapshot,
+        after_snapshot=after_snapshot,
+        applied_at=timezone.now(),
+        applied_by=user,
+        created_by=user,
+        updated_by=user,
+    )
+    record_audit_log(
+        actor=user,
+        action="transaction_correction.created",
+        entity=correction,
+        workspace_id=created_transaction.workspace_id,
+        client_id=created_transaction.client_id,
+        gstin_id=created_transaction.gstin_id,
+        compliance_period_id=created_transaction.compliance_period_id,
+        metadata={
+            "reason_code": correction.reason_code,
+            "changed_fields": changed_fields,
+            "correction_scope": correction.correction_scope,
+            "source_portal_transaction_id": str(portal_transaction.id),
+        },
+        before_state=before_snapshot,
+        after_state=after_snapshot,
+    )
+    record_audit_log(
+        actor=user,
+        action="transaction_correction.applied",
+        entity=correction,
+        workspace_id=created_transaction.workspace_id,
+        client_id=created_transaction.client_id,
+        gstin_id=created_transaction.gstin_id,
+        compliance_period_id=created_transaction.compliance_period_id,
+        metadata={
+            "reason_code": correction.reason_code,
+            "changed_fields": changed_fields,
+            "reconciliation_run_id": str(item.reconciliation_run_id),
+            "source_portal_transaction_id": str(portal_transaction.id),
+        },
+        before_state=before_snapshot,
+        after_state=after_snapshot,
+    )
+    enqueue_reconciliation_run(run=item.reconciliation_run, actor=user)
+    return correction
+
+
+def _serialize_transaction_snapshot(transaction_record):
+    return {
+        "reference_number": transaction_record.reference_number,
+        "transaction_date": transaction_record.transaction_date.isoformat() if transaction_record.transaction_date else None,
+        "counterparty_gstin": transaction_record.counterparty_gstin,
+        "counterparty_name": transaction_record.counterparty_name,
+        "taxable_value": str(transaction_record.taxable_value),
+        "cgst_amount": str(transaction_record.cgst_amount),
+        "sgst_amount": str(transaction_record.sgst_amount),
+        "igst_amount": str(transaction_record.igst_amount),
+        "cess_amount": str(transaction_record.cess_amount),
+        "tax_amount": str(transaction_record.tax_amount),
+        "total_amount": str(transaction_record.total_amount),
+        "place_of_supply": transaction_record.place_of_supply,
+        "reverse_charge": transaction_record.reverse_charge,
+        "status": transaction_record.status,
+    }
 
 
 def _get_books_transactions(run):
@@ -307,6 +606,7 @@ def _compare_transactions(books_tx, portal_tx, forced_status=None, forced_reason
     taxable_difference = abs((books_tx.taxable_value or Decimal("0")) - (portal_tx.taxable_value or Decimal("0")))
     tax_difference = abs((books_tx.tax_amount or Decimal("0")) - (portal_tx.tax_amount or Decimal("0")))
     total_difference = abs((books_tx.total_amount or Decimal("0")) - (portal_tx.total_amount or Decimal("0")))
+    period_relationship = _period_relationship(books_tx, portal_tx)
 
     if forced_status and forced_reason:
         return {
@@ -318,8 +618,20 @@ def _compare_transactions(books_tx, portal_tx, forced_status=None, forced_reason
         }
 
     if books_tx.transaction_date != portal_tx.transaction_date:
-        status = ReconciliationItem.MatchStatus.MISMATCH
-        reason = ReconciliationItem.MismatchReason.DATE_MISMATCH
+        if (
+            period_relationship in {
+                ReconciliationItem.PeriodRelationship.PRIOR_PERIOD,
+                ReconciliationItem.PeriodRelationship.NEXT_PERIOD,
+            }
+            and taxable_difference <= AMOUNT_TOLERANCE
+            and tax_difference <= AMOUNT_TOLERANCE
+            and total_difference <= AMOUNT_TOLERANCE
+        ):
+            status = ReconciliationItem.MatchStatus.PARTIAL_MATCH
+            reason = ReconciliationItem.MismatchReason.DATE_MISMATCH
+        else:
+            status = ReconciliationItem.MatchStatus.MISMATCH
+            reason = ReconciliationItem.MismatchReason.DATE_MISMATCH
     elif taxable_difference == 0 and tax_difference == 0 and total_difference == 0:
         status = ReconciliationItem.MatchStatus.MATCHED
         reason = ""
@@ -416,6 +728,103 @@ def _amounts_within_tolerance(books_tx, portal_tx):
     )
 
 
+def _period_key(transaction):
+    if transaction is None or transaction.transaction_date is None:
+        return None
+    return (transaction.transaction_date.year, transaction.transaction_date.month)
+
+
+def _period_relationship(books_transaction, portal_transaction):
+    books_period = _period_key(books_transaction)
+    portal_period = _period_key(portal_transaction)
+    if not books_period or not portal_period:
+        return ReconciliationItem.PeriodRelationship.UNKNOWN
+    if books_period == portal_period:
+        return ReconciliationItem.PeriodRelationship.SAME_PERIOD
+    if books_period < portal_period:
+        return ReconciliationItem.PeriodRelationship.NEXT_PERIOD
+    return ReconciliationItem.PeriodRelationship.PRIOR_PERIOD
+
+
+def _derive_issue_bucket(match_status, mismatch_reason, books_transaction, portal_transaction):
+    relationship = _period_relationship(books_transaction, portal_transaction)
+
+    if match_status == ReconciliationItem.MatchStatus.MATCHED:
+        return ReconciliationItem.IssueBucket.READY, "No action needed", relationship
+
+    if match_status in {
+        ReconciliationItem.MatchStatus.DUPLICATE_IN_BOOKS,
+        ReconciliationItem.MatchStatus.DUPLICATE_IN_PORTAL,
+    } or mismatch_reason == ReconciliationItem.MismatchReason.DUPLICATE_INVOICE:
+        return ReconciliationItem.IssueBucket.DUPLICATE_CLEANUP, "Review and clear duplicate", relationship
+
+    if mismatch_reason == ReconciliationItem.MismatchReason.DATE_MISMATCH or relationship in {
+        ReconciliationItem.PeriodRelationship.PRIOR_PERIOD,
+        ReconciliationItem.PeriodRelationship.NEXT_PERIOD,
+    }:
+        return ReconciliationItem.IssueBucket.TIMING_DIFFERENCE, "Review period timing", relationship
+
+    if match_status == ReconciliationItem.MatchStatus.MISSING_IN_PORTAL or mismatch_reason == ReconciliationItem.MismatchReason.MISSING_IN_PORTAL:
+        return ReconciliationItem.IssueBucket.VENDOR_FOLLOW_UP, "Follow up with supplier", relationship
+
+    if match_status == ReconciliationItem.MatchStatus.MISSING_IN_BOOKS or mismatch_reason == ReconciliationItem.MismatchReason.MISSING_IN_BOOKS:
+        return ReconciliationItem.IssueBucket.BOOKS_CORRECTION, "Check missing booking", relationship
+
+    if mismatch_reason in {
+        ReconciliationItem.MismatchReason.GSTIN_MISMATCH,
+        ReconciliationItem.MismatchReason.DOCUMENT_NUMBER_MISMATCH,
+    }:
+        return ReconciliationItem.IssueBucket.DOCUMENT_REVIEW, "Compare source invoice", relationship
+
+    if match_status == ReconciliationItem.MatchStatus.PARTIAL_MATCH or mismatch_reason in {
+        ReconciliationItem.MismatchReason.TAXABLE_VALUE_MISMATCH,
+        ReconciliationItem.MismatchReason.TAX_AMOUNT_MISMATCH,
+        ReconciliationItem.MismatchReason.TOTAL_AMOUNT_MISMATCH,
+    }:
+        return ReconciliationItem.IssueBucket.VALUE_REVIEW, "Review values against source", relationship
+
+    return ReconciliationItem.IssueBucket.ISSUE_REVIEW, "Open and review", relationship
+
+
+def _derive_itc_status(match_status, mismatch_reason, issue_bucket, books_transaction, portal_transaction):
+    relationship = _period_relationship(books_transaction, portal_transaction)
+
+    if match_status == ReconciliationItem.MatchStatus.MATCHED:
+        return ReconciliationItem.ITCStatus.ITC_READY
+
+    if issue_bucket == ReconciliationItem.IssueBucket.TIMING_DIFFERENCE or relationship in {
+        ReconciliationItem.PeriodRelationship.PRIOR_PERIOD,
+        ReconciliationItem.PeriodRelationship.NEXT_PERIOD,
+    }:
+        return ReconciliationItem.ITCStatus.ITC_TIMING_DIFFERENCE
+
+    if match_status == ReconciliationItem.MatchStatus.MISSING_IN_PORTAL or mismatch_reason == ReconciliationItem.MismatchReason.MISSING_IN_PORTAL:
+        return ReconciliationItem.ITCStatus.ITC_PENDING_2B
+
+    if match_status == ReconciliationItem.MatchStatus.MISSING_IN_BOOKS:
+        return ReconciliationItem.ITCStatus.ITC_BLOCKED
+
+    if issue_bucket in {
+        ReconciliationItem.IssueBucket.DUPLICATE_CLEANUP,
+        ReconciliationItem.IssueBucket.BOOKS_CORRECTION,
+    }:
+        return ReconciliationItem.ITCStatus.ITC_BLOCKED
+
+    if issue_bucket in {
+        ReconciliationItem.IssueBucket.VENDOR_FOLLOW_UP,
+        ReconciliationItem.IssueBucket.DOCUMENT_REVIEW,
+    }:
+        return ReconciliationItem.ITCStatus.ITC_VENDOR_FOLLOWUP_REQUIRED
+
+    if issue_bucket in {
+        ReconciliationItem.IssueBucket.VALUE_REVIEW,
+        ReconciliationItem.IssueBucket.ISSUE_REVIEW,
+    }:
+        return ReconciliationItem.ITCStatus.ITC_PENDING_REVIEW
+
+    return ReconciliationItem.ITCStatus.ITC_PENDING_REVIEW
+
+
 def _build_item(
     *,
     run,
@@ -427,6 +836,19 @@ def _build_item(
     taxable_difference=Decimal("0.00"),
     total_difference=Decimal("0.00"),
 ):
+    issue_bucket, recommended_next_action, period_relationship = _derive_issue_bucket(
+        match_status,
+        mismatch_reason,
+        books_transaction,
+        portal_transaction,
+    )
+    itc_status = _derive_itc_status(
+        match_status,
+        mismatch_reason,
+        issue_bucket,
+        books_transaction,
+        portal_transaction,
+    )
     return ReconciliationItem(
         reconciliation_run=run,
         books_transaction=books_transaction,
@@ -437,6 +859,10 @@ def _build_item(
         taxable_difference=taxable_difference,
         total_difference=total_difference,
         action_status=ReconciliationItem.ActionStatus.OPEN,
+        issue_bucket=issue_bucket,
+        recommended_next_action=recommended_next_action,
+        period_relationship=period_relationship,
+        itc_status=itc_status,
         metadata={
             "books_reference": getattr(books_transaction, "reference_number", ""),
             "portal_reference": getattr(portal_transaction, "reference_number", ""),
@@ -474,6 +900,14 @@ def _apply_summary(*, run, items):
             and item.portal_transaction is not None
         ),
         Decimal("0.00"),
+    )
+    run.itc_ready_count = sum(1 for item in items if item.itc_status == ReconciliationItem.ITCStatus.ITC_READY)
+    run.itc_pending_2b_count = sum(1 for item in items if item.itc_status == ReconciliationItem.ITCStatus.ITC_PENDING_2B)
+    run.itc_pending_review_count = sum(1 for item in items if item.itc_status == ReconciliationItem.ITCStatus.ITC_PENDING_REVIEW)
+    run.itc_blocked_count = sum(1 for item in items if item.itc_status == ReconciliationItem.ITCStatus.ITC_BLOCKED)
+    run.itc_timing_difference_count = sum(1 for item in items if item.itc_status == ReconciliationItem.ITCStatus.ITC_TIMING_DIFFERENCE)
+    run.itc_vendor_followup_required_count = sum(
+        1 for item in items if item.itc_status == ReconciliationItem.ITCStatus.ITC_VENDOR_FOLLOWUP_REQUIRED
     )
 
 

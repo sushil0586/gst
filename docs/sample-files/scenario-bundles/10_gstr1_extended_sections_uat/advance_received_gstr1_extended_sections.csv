@@ -1,0 +1,2 @@
+document_number,document_date,counterparty_name,taxable_value,igst_amount,total_amount,place_of_supply,rate,receipt_voucher_number,description
+AR-3001,2026-05-20,Advance Customer One,10000,1800,11800,27,18,RV-3001,Advance received for future taxable supply

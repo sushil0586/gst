@@ -1,0 +1,6 @@
+invoice_no,invoice_date,recipient_gstin,recipient_name,taxable_value,cgst,sgst,igst,cess,total_amount,place_of_supply,reverse_charge,document_type,hsn_code,description,uqc,quantity,is_service,supply_category,ecommerce_gstin,ecommerce_section,special_supply_type,original_document_number,original_document_date,original_period,original_counterparty_gstin,shipping_bill_number,shipping_bill_date,port_code
+G1A-2001,2026-05-15,29AAACB1001A1Z5,Core B2B Buyer Amendment,6000,540,540,0,0,7080,29,FALSE,invoice,8504,B2B amendment row,PCS,1,FALSE,taxable,,,,G1S-1001,2026-04-05,2026-03,29AAACB1001A1Z5,,,
+G1A-2002,2026-05-16,,Large Interstate Retail Amendment,280000,0,0,50400,0,330400,07,FALSE,invoice,8471,B2CL amendment row,PCS,10,FALSE,taxable,,,,G1S-1002,2026-04-06,2026-03,,,,
+G1A-2003,2026-05-17,,Domestic Retail Amendment,6000,540,540,0,0,7080,29,FALSE,invoice,9403,B2CS amendment row,PCS,2,FALSE,taxable,,,,G1S-1003,2026-04-07,2026-03,,,,
+G1A-2004,2026-05-18,,Export Amendment Buyer,5000,0,0,900,0,5900,96,FALSE,invoice,9983,Export amendment row,PCS,1,TRUE,taxable,,,export_wpay,G1S-1006,2026-04-10,2026-03,,SB-2004,2026-04-18,INBLR4
+G1A-2005,2026-05-19,,Marketplace Amendment Table14,3000,270,270,0,0,3540,29,FALSE,invoice,8517,E-commerce amendment row,PCS,1,FALSE,taxable,29ECOM1234F1Z5,14,,G1S-1004,2026-04-08,2026-03,,,,

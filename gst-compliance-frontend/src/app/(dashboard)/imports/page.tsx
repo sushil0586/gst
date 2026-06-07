@@ -81,6 +81,8 @@ const importTypeOptions: Array<{ value: ImportBatchRecord["import_type"]; label:
   { value: "purchase", label: "Purchase" },
   { value: "credit_note", label: "Credit Note" },
   { value: "debit_note", label: "Debit Note" },
+  { value: "advance_received", label: "Advance Received" },
+  { value: "advance_adjusted", label: "Advance Adjusted" },
   { value: "gstr_2b", label: "GSTR-2B" },
 ];
 
@@ -241,6 +243,12 @@ function getImpactActionIcon(actionKey: string) {
 function inferImportTypeFromFileName(fileName: string): ImportBatchRecord["import_type"] | null {
   const normalized = fileName.toLowerCase();
   if (normalized.includes("gstr") && normalized.includes("2b")) return "gstr_2b";
+  if (normalized.includes("advance") && (normalized.includes("adjust") || normalized.includes("adjusted") || normalized.includes("txpd"))) {
+    return "advance_adjusted";
+  }
+  if (normalized.includes("advance") && (normalized.includes("receipt") || normalized.includes("received") || normalized.includes("voucher") || normalized.includes("11a"))) {
+    return "advance_received";
+  }
   if (normalized.includes("credit") && normalized.includes("note")) return "credit_note";
   if (normalized.includes("debit") && normalized.includes("note")) return "debit_note";
   if (normalized.includes("sales")) return "sales";
@@ -589,17 +597,14 @@ export default function ImportsPage() {
   const transactionCount = selectedBatch?.transaction_count ?? latestBatch?.transaction_count ?? 0;
   const batchesRequiringRerun = batches.filter((batch) => batch.correction_summary?.requires_reconciliation_rerun).length;
   const filingLockedBatchCount = batches.filter((batch) => batch.correction_summary?.is_locked_by_filing).length;
-  const correctionActionRowIds = useMemo(() => {
-    const seen = new Set<number>();
-    const ids = new Set<string>();
-    for (const error of rowErrors) {
-      if (!seen.has(error.row_number)) {
-        seen.add(error.row_number);
-        ids.add(error.id);
-      }
-    }
-    return ids;
-  }, [rowErrors]);
+  const selectedBatchHasOnlyInvalidRows = Boolean(
+    selectedBatch &&
+      selectedBatch.total_rows > 0 &&
+      selectedBatch.valid_rows === 0 &&
+      selectedBatch.invalid_rows === selectedBatch.total_rows,
+  );
+  const showInvalidOnlyWarning =
+    selectedBatchHasOnlyInvalidRows && Boolean(correctionPolicy) && !correctionPolicy?.warning_message;
   const rowCorrectionEntries = useMemo(() => Object.entries(rowCorrectionDraft), [rowCorrectionDraft]);
   const rowCorrectionNeedsPeriodException = rowCorrectionTarget?.error_code === "period_mismatch";
   const lineageDetails = useMemo(() => {
@@ -1058,7 +1063,7 @@ export default function ImportsPage() {
                 </div>
                 <div className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3">
                   <span>Import categories</span>
-                  <span className="font-semibold text-slate-900">Sales, Purchase, Notes, 2B</span>
+                  <span className="font-semibold text-slate-900">Sales, Purchase, Notes, Advances, 2B</span>
                 </div>
                 <div className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3">
                   <span>Latest batch status</span>
@@ -1302,7 +1307,7 @@ export default function ImportsPage() {
       </SectionCard>
 
       <Dialog open={Boolean(selectedBatchId)} onOpenChange={(open) => !open && setSelectedBatchId(null)}>
-        <AppModalContent size="xl">
+        <AppModalContent size="xl" className="overflow-x-hidden">
           <AppModalHeader
             title="Import batch details"
             description="Review the processing outcome, captured row issues, and created transaction count."
@@ -1320,7 +1325,7 @@ export default function ImportsPage() {
                   title="Batch summary"
                   description={selectedBatch.file_name}
                   action={
-                    <div className="flex gap-2">
+                    <div className="flex w-full flex-wrap justify-start gap-2">
                       <Button
                         size="sm"
                         variant="outline"
@@ -1423,6 +1428,19 @@ export default function ImportsPage() {
                             </div>
                           </div>
                         </div>
+                      ) : showInvalidOnlyWarning ? (
+                        <div className="rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-4">
+                          <div className="flex items-start gap-3">
+                            <AlertTriangle className="mt-0.5 size-4 text-amber-700" />
+                            <div>
+                              <p className="text-sm font-semibold text-amber-900">No valid rows imported yet</p>
+                              <p className="mt-1 text-sm leading-6 text-amber-800">
+                                This batch only contains invalid rows, so nothing usable has been created yet. Replace the
+                                file, correct the invalid rows, or discard the batch to start cleanly.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
                       ) : (
                         <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-4">
                           <div className="flex items-start gap-3">
@@ -1452,7 +1470,7 @@ export default function ImportsPage() {
                         </div>
                       </div>
 
-                      <div className="grid gap-3 md:grid-cols-2">
+                      <div className="grid gap-3 xl:grid-cols-2">
                         <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
                           <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">Allowed actions</p>
                           <div className="mt-3 flex flex-wrap gap-2">
@@ -1466,7 +1484,10 @@ export default function ImportsPage() {
                         <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
                           <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">Next required action</p>
                           <p className="mt-3 text-sm leading-6 text-slate-700">
-                            {correctionPolicy.next_required_action || "Row-level correction actions will follow this policy when enabled."}
+                            {correctionPolicy.next_required_action ||
+                              (showInvalidOnlyWarning
+                                ? "Use Replace file, row correction, or Discard batch to resolve this invalid-only upload."
+                                : "Row-level correction actions will follow this policy when enabled.")}
                           </p>
                         </div>
                       </div>
@@ -1656,28 +1677,24 @@ export default function ImportsPage() {
                                   .join(" | ") || "No raw preview"}
                               </TableCell>
                               <TableCell className="text-right">
-                                {correctionActionRowIds.has(error.id) ? (
-                                  <div className="flex justify-end gap-2">
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() => openRowCorrectionDialog(error)}
-                                      disabled={!correctionPolicy?.can_edit_rows}
-                                    >
-                                      Correct row
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={() => openRowDiscardDialog(error)}
-                                      disabled={!correctionPolicy?.can_discard_rows}
-                                    >
-                                      Discard row
-                                    </Button>
-                                  </div>
-                                ) : (
-                                  <span className="text-xs text-slate-400">Same row</span>
-                                )}
+                                <div className="flex justify-end gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => openRowCorrectionDialog(error)}
+                                    disabled={!correctionPolicy?.can_edit_rows}
+                                  >
+                                    Correct row
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => openRowDiscardDialog(error)}
+                                    disabled={!correctionPolicy?.can_discard_rows}
+                                  >
+                                    Discard row
+                                  </Button>
+                                </div>
                               </TableCell>
                             </TableRow>
                           ))}

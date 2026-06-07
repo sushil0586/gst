@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.core import mail
@@ -22,11 +24,12 @@ from apps.filings.models import (
 )
 from apps.filings.providers.base import FilingProvider, ProviderCapabilitySet
 from apps.filings.providers.registry import get_filing_provider
-from apps.filings.services.provider_auth import request_provider_otp_session, verify_provider_otp_session
+from apps.filings.services.provider_auth import request_provider_otp_session, verify_provider_otp_session, refresh_provider_auth_session
 from apps.filings.services.auth_session_freshness import (
     get_provider_auth_session_freshness,
     is_provider_auth_session_live_enabled,
 )
+from apps.filings.services.filings import process_return_filing
 from apps.gstins.models import GSTIN
 from apps.integrations.whitebooks.exceptions import WhiteBooksSessionLimitError, WhiteBooksSubmissionError
 from apps.integrations.whitebooks.mappers import map_return_filing_to_whitebooks_payload
@@ -220,6 +223,170 @@ def test_start_filing_api_requires_live_confirmed_provider_auth_session(filings_
 
     assert response.status_code == 400
     assert "Request OTP and verify a live filing session" in str(response.data["errors"]["provider_auth"][0])
+
+
+@pytest.mark.django_db
+def test_start_filing_api_opens_manual_gstr9_record_without_provider_auth(filings_authenticated_client, filings_context):
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR9
+    filings_context["prepared_return"].status = ReturnPreparation.PreparationStatus.APPROVED
+    filings_context["prepared_return"].save(update_fields=["return_type", "status", "updated_at"])
+    filings_context["compliance_period"].return_type = "GSTR-9"
+    filings_context["compliance_period"].save(update_fields=["return_type", "updated_at"])
+
+    response = filings_authenticated_client.post(
+        "/api/v1/filings/start/",
+        {
+            "workspace": str(filings_context["workspace"].id),
+            "client": str(filings_context["client"].id),
+            "gstin": str(filings_context["gstin"].id),
+            "compliance_period": str(filings_context["compliance_period"].id),
+            "prepared_return": str(filings_context["prepared_return"].id),
+            "return_type": ReturnPreparation.ReturnType.GSTR9,
+            "provider": ReturnFiling.Provider.WHITEBOOKS,
+            "approval_request": str(filings_context["approval_request"].id),
+            "confirmation_note": "Opened annual filing record from returns workspace.",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    filing = ReturnFiling.objects.get(prepared_return=filings_context["prepared_return"])
+    assert filing.status == ReturnFiling.FilingStatus.APPROVED
+    assert filing.return_type == ReturnPreparation.ReturnType.GSTR9
+
+
+@pytest.mark.django_db
+def test_start_filing_api_opens_manual_gstr9c_record_without_provider_auth(filings_authenticated_client, filings_context):
+    filings_context["prepared_return"].return_type = ReturnPreparation.ReturnType.GSTR9C
+    filings_context["prepared_return"].status = ReturnPreparation.PreparationStatus.APPROVED
+    filings_context["prepared_return"].save(update_fields=["return_type", "status", "updated_at"])
+    filings_context["compliance_period"].return_type = "GSTR-9C"
+    filings_context["compliance_period"].save(update_fields=["return_type", "updated_at"])
+
+    response = filings_authenticated_client.post(
+        "/api/v1/filings/start/",
+        {
+            "workspace": str(filings_context["workspace"].id),
+            "client": str(filings_context["client"].id),
+            "gstin": str(filings_context["gstin"].id),
+            "compliance_period": str(filings_context["compliance_period"].id),
+            "prepared_return": str(filings_context["prepared_return"].id),
+            "return_type": ReturnPreparation.ReturnType.GSTR9C,
+            "provider": ReturnFiling.Provider.WHITEBOOKS,
+            "approval_request": str(filings_context["approval_request"].id),
+            "confirmation_note": "Opened annual comparison filing record from returns workspace.",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    filing = ReturnFiling.objects.get(prepared_return=filings_context["prepared_return"])
+    assert filing.status == ReturnFiling.FilingStatus.APPROVED
+    assert filing.return_type == ReturnPreparation.ReturnType.GSTR9C
+    assert filing.attempts.count() == 0
+    assert filing.readiness_snapshot["manual_filing_only"] is True
+    assert ReturnFilingEvent.objects.filter(return_filing=filing, event_type="filing.manual_tracking_opened").exists()
+    assert AuditLog.objects.filter(action="return_filing.manual_tracking_opened", entity_id=filing.id).exists()
+
+
+@pytest.mark.django_db
+def test_start_filing_api_prefers_verified_auth_session_over_newer_failed_sessions(
+    filings_authenticated_client,
+    filings_context,
+):
+    create_ready_whitebooks_auth_session(
+        filings_context,
+        created_at=timezone.now() - timedelta(minutes=2),
+        updated_at=timezone.now() - timedelta(minutes=2),
+    )
+    WhiteBooksAuthSession.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        email="ops@example.com",
+        txn="",
+        status=WhiteBooksAuthSession.SessionStatus.FAILED,
+        response_contract_confirmed=False,
+        initiated_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    WhiteBooksAuthSession.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        email="ops@example.com",
+        txn="",
+        status=WhiteBooksAuthSession.SessionStatus.FAILED,
+        response_contract_confirmed=False,
+        initiated_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+
+    response = filings_authenticated_client.post(
+        "/api/v1/filings/start/",
+        {
+            "workspace": str(filings_context["workspace"].id),
+            "client": str(filings_context["client"].id),
+            "gstin": str(filings_context["gstin"].id),
+            "compliance_period": str(filings_context["compliance_period"].id),
+            "prepared_return": str(filings_context["prepared_return"].id),
+            "return_type": filings_context["prepared_return"].return_type,
+            "provider": ReturnFiling.Provider.WHITEBOOKS,
+            "approval_request": str(filings_context["approval_request"].id),
+            "confirmation_note": "Ready to file after a successful OTP verification.",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.data["status"] == "success"
+
+
+@pytest.mark.django_db
+def test_enqueue_return_filing_uses_inline_processing_when_celery_is_eager(monkeypatch, settings, filings_context):
+    from apps.filings.services import filings as filings_service
+    from apps.filings.tasks import process_return_filing_task
+
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=filings_context["prepared_return"].return_type,
+        status=ReturnFiling.FilingStatus.QUEUED_FOR_FILING,
+        approved_by=filings_context["user"],
+        filed_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+
+    called = {}
+
+    def fake_process_return_filing(*, filing_id, actor_id=None):
+        called["filing_id"] = str(filing_id)
+        called["actor_id"] = actor_id
+        return {"filing_id": str(filing_id), "status": ReturnFiling.FilingStatus.QUEUED_FOR_FILING}
+
+    def fail_apply_async(*args, **kwargs):
+        raise AssertionError("apply_async should not be used when CELERY_TASK_ALWAYS_EAGER is true")
+
+    settings.CELERY_TASK_ALWAYS_EAGER = True
+    monkeypatch.setattr(filings_service, "process_return_filing", fake_process_return_filing)
+    monkeypatch.setattr(process_return_filing_task, "apply_async", fail_apply_async)
+
+    filings_service.enqueue_return_filing(filing=filing, actor=filings_context["user"])
+
+    assert called == {
+        "filing_id": str(filing.id),
+        "actor_id": filings_context["user"].id,
+    }
 
 
 @pytest.mark.django_db
@@ -648,6 +815,41 @@ def test_start_filing_api_creates_filing_attempt_and_event(filings_authenticated
 
 
 @pytest.mark.django_db
+def test_process_return_filing_can_lock_record_inside_service_transaction(filings_context):
+    create_ready_whitebooks_auth_session(filings_context)
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR3B,
+        status=ReturnFiling.FilingStatus.QUEUED_FOR_FILING,
+        approved_by=filings_context["user"],
+        filed_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    ReturnFilingAttempt.objects.create(
+        return_filing=filing,
+        attempt_number=1,
+        status=ReturnFilingAttempt.AttemptStatus.QUEUED,
+        idempotency_key=f"{filing.id}:1",
+        triggered_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+
+    result = process_return_filing(filing_id=filing.id, actor_id=filings_context["user"].id)
+
+    filing.refresh_from_db()
+    assert result["filing_id"] == str(filing.id)
+    assert filing.status == ReturnFiling.FilingStatus.FILED
+
+
+@pytest.mark.django_db
 def test_start_filing_api_is_idempotent_for_active_snapshot(filings_authenticated_client, filings_context):
     create_ready_whitebooks_auth_session(filings_context)
     payload = {
@@ -972,6 +1174,93 @@ def test_verify_whitebooks_otp_api_stores_unresolved_auth_token_payload(monkeypa
 
 
 @pytest.mark.django_db
+def test_refresh_provider_auth_session_updates_verified_session(monkeypatch, filings_context):
+    auth_session = WhiteBooksAuthSession.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        email="ops@example.com",
+        txn="txn-refresh-001",
+        status=WhiteBooksAuthSession.SessionStatus.SESSION_ACTIVE,
+        response_contract_confirmed=True,
+        auth_token_payload={"status_cd": "1", "header": {"txn": "txn-refresh-001"}},
+        session_metadata={"txn": "txn-refresh-001", "response_contract_confirmed": True},
+        initiated_by=filings_context["user"],
+        verified_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+
+    class FakeSession:
+        def __init__(self):
+            self.raw_response = {"status_cd": "1", "status_desc": "refresh ok", "header": {"txn": "txn-refresh-001"}}
+            self.metadata = {
+                "txn": "txn-refresh-001",
+                "response_contract_confirmed": True,
+                "session_credentials_present": True,
+            }
+
+        @property
+        def response_contract_confirmed(self):
+            return True
+
+    def fake_refresh(self, *, email, txn, state_code=None, gst_username=None):
+        return FakeSession()
+
+    monkeypatch.setattr(WhiteBooksProvider, "refresh_auth_session", fake_refresh)
+
+    refreshed = refresh_provider_auth_session(auth_session=auth_session, txn="", user=filings_context["user"])
+
+    assert refreshed.status == WhiteBooksAuthSession.SessionStatus.SESSION_ACTIVE
+    assert refreshed.response_contract_confirmed is True
+    assert refreshed.auth_token_payload["status_desc"] == "refresh ok"
+    assert refreshed.session_metadata["refresh_confirmed"] is True
+    assert AuditLog.objects.filter(action="whitebooks_auth.refreshed", entity_id=auth_session.id).exists()
+
+
+@pytest.mark.django_db
+def test_refresh_whitebooks_auth_session_api(monkeypatch, filings_authenticated_client, filings_context):
+    auth_session = WhiteBooksAuthSession.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        email="ops@example.com",
+        txn="txn-refresh-api-001",
+        status=WhiteBooksAuthSession.SessionStatus.SESSION_ACTIVE,
+        response_contract_confirmed=True,
+        auth_token_payload={"status_cd": "1", "header": {"txn": "txn-refresh-api-001"}},
+        session_metadata={"txn": "txn-refresh-api-001", "response_contract_confirmed": True},
+        initiated_by=filings_context["user"],
+        verified_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+
+    def fake_refresh(self, *, email, txn, state_code=None, gst_username=None):
+        return WhiteBooksSession(
+            mode="live",
+            authenticated=True,
+            raw_response={"status_cd": "1", "status_desc": "refresh ok", "header": {"txn": txn}},
+            metadata={"txn": txn, "response_contract_confirmed": True, "session_credentials_present": True},
+        )
+
+    monkeypatch.setattr(WhiteBooksProvider, "refresh_auth_session", fake_refresh)
+
+    response = filings_authenticated_client.post(
+        f"/api/v1/whitebooks-auth-sessions/{auth_session.id}/refresh-token/",
+        {},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    auth_session.refresh_from_db()
+    assert auth_session.session_metadata["refresh_confirmed"] is True
+    assert response.data["message"] == "Provider auth session refreshed"
+
+
+@pytest.mark.django_db
 def test_whitebooks_success_payload_with_txn_is_treated_as_live_enabled(filings_context):
     auth_session = WhiteBooksAuthSession.objects.create(
         workspace=filings_context["workspace"],
@@ -1062,6 +1351,193 @@ def test_whitebooks_mapper_builds_gstr1_retsave_payload_from_transactions(filing
         created_by=filings_context["user"],
         updated_by=filings_context["user"],
     )
+    GSTTransaction.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        transaction_type="sales",
+        document_type="invoice",
+        reference_number="ECOM-001",
+        transaction_date="2026-04-06",
+        counterparty_gstin="",
+        counterparty_name="Marketplace Customer",
+        taxable_value="8000.00",
+        cgst_amount="720.00",
+        sgst_amount="720.00",
+        tax_amount="1440.00",
+        total_amount="9440.00",
+        place_of_supply="29",
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+        metadata={
+            "ecommerce_gstin": "29ECOM1234F1Z5",
+            "ecommerce_section": "table_14",
+            "line_items": [{"taxable_value": "8000.00", "cgst_amount": "720.00", "sgst_amount": "720.00", "rate": "18"}],
+        },
+    )
+    GSTTransaction.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        transaction_type="sales",
+        document_type="invoice",
+        reference_number="S-003",
+        transaction_date="2026-04-07",
+        counterparty_gstin="",
+        counterparty_name="Large Interstate Customer",
+        taxable_value="300000.00",
+        igst_amount="54000.00",
+        tax_amount="54000.00",
+        total_amount="354000.00",
+        place_of_supply="27",
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+        metadata={"line_items": [{"taxable_value": "300000.00", "igst_amount": "54000.00", "rate": "18"}]},
+    )
+    GSTTransaction.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        transaction_type="sales",
+        document_type="invoice",
+        reference_number="EXP-001",
+        transaction_date="2026-04-07",
+        counterparty_gstin="",
+        counterparty_name="Overseas Buyer",
+        taxable_value="25000.00",
+        igst_amount="4500.00",
+        tax_amount="4500.00",
+        total_amount="29500.00",
+        place_of_supply="96",
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+        metadata={"special_supply_type": "export_wpay", "port_code": "INBLR4", "shipping_bill_number": "SB-001", "shipping_bill_date": "2026-04-07", "line_items": [{"taxable_value": "25000.00", "igst_amount": "4500.00", "rate": "18", "total_amount": "29500.00"}]},
+    )
+    GSTTransaction.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        transaction_type="sales",
+        document_type="invoice",
+        reference_number="AMD-001",
+        transaction_date="2026-04-08",
+        counterparty_gstin="29ABCDE1234F1Z5",
+        counterparty_name="B2B Buyer",
+        taxable_value="6000.00",
+        igst_amount="1080.00",
+        tax_amount="1080.00",
+        total_amount="7080.00",
+        place_of_supply="29",
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+        metadata={
+            "is_amendment": True,
+            "original_document_number": "S-001",
+            "original_document_date": "2026-03-31",
+            "original_period": "032026",
+            "line_items": [{"taxable_value": "6000.00", "igst_amount": "1080.00", "rate": "18"}],
+        },
+    )
+    GSTTransaction.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        transaction_type="sales",
+        document_type="invoice",
+        reference_number="EXPA-001",
+        transaction_date="2026-04-08",
+        counterparty_gstin="",
+        counterparty_name="Overseas Buyer",
+        taxable_value="5000.00",
+        igst_amount="900.00",
+        tax_amount="900.00",
+        total_amount="5900.00",
+        place_of_supply="96",
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+        metadata={
+            "is_amendment": True,
+            "special_supply_type": "export_wpay",
+            "original_document_number": "EXP-0001",
+            "original_document_date": "2026-03-31",
+            "original_period": "032026",
+            "port_code": "INBLR4",
+            "shipping_bill_number": "SB-001A",
+            "shipping_bill_date": "2026-04-08",
+            "line_items": [{"taxable_value": "5000.00", "igst_amount": "900.00", "rate": "18", "total_amount": "5900.00"}],
+        },
+    )
+    GSTTransaction.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        transaction_type="credit_note",
+        document_type="credit_note",
+        reference_number="CN-A001",
+        transaction_date="2026-04-08",
+        counterparty_gstin="29ABCDE1234F1Z5",
+        counterparty_name="B2B Buyer",
+        taxable_value="100.00",
+        igst_amount="18.00",
+        tax_amount="18.00",
+        total_amount="118.00",
+        place_of_supply="29",
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+        metadata={
+            "is_amendment": True,
+            "original_document_number": "CN-0001",
+            "original_document_date": "2026-03-31",
+            "original_period": "032026",
+            "line_items": [{"taxable_value": "100.00", "igst_amount": "18.00", "rate": "18"}],
+        },
+    )
+    GSTTransaction.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        transaction_type="advance_received",
+        document_type="receipt_voucher",
+        reference_number="AR-001",
+        transaction_date="2026-04-08",
+        counterparty_gstin="",
+        counterparty_name="Advance Customer",
+        taxable_value="10000.00",
+        igst_amount="1800.00",
+        tax_amount="1800.00",
+        total_amount="11800.00",
+        place_of_supply="27",
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+        metadata={"line_items": [{"taxable_value": "10000.00", "igst_amount": "1800.00", "rate": "18", "total_amount": "11800.00"}]},
+    )
+    GSTTransaction.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        transaction_type="advance_adjusted",
+        document_type="advance_adjustment",
+        reference_number="AA-001",
+        transaction_date="2026-04-09",
+        counterparty_gstin="",
+        counterparty_name="Advance Customer",
+        taxable_value="4000.00",
+        igst_amount="720.00",
+        tax_amount="720.00",
+        total_amount="4720.00",
+        place_of_supply="27",
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+        metadata={"advance_reference": "AR-001", "line_items": [{"taxable_value": "4000.00", "igst_amount": "720.00", "rate": "18", "total_amount": "4720.00"}]},
+    )
 
     filing = ReturnFiling.objects.create(
         workspace=filings_context["workspace"],
@@ -1080,8 +1556,8 @@ def test_whitebooks_mapper_builds_gstr1_retsave_payload_from_transactions(filing
     filing.prepared_return.return_type = ReturnPreparation.ReturnType.GSTR1
     filing.prepared_return.summary_snapshot = {
         "outward_supplies": {
-            "total_taxable_value": "1500.00",
-            "total_tax_amount": "270.00",
+            "total_taxable_value": "340500.00",
+            "total_tax_amount": "61290.00",
         }
     }
     filing.prepared_return.save(update_fields=["return_type", "summary_snapshot", "updated_at"])
@@ -1092,23 +1568,77 @@ def test_whitebooks_mapper_builds_gstr1_retsave_payload_from_transactions(filing
     assert payload["whitebooks"]["readiness"]["save_supported"] is True
     assert payload["whitebooks"]["readiness"]["file_supported"] is True
     assert payload["whitebooks"]["operations"]["save"]["fp"] == "042026"
-    assert payload["whitebooks"]["operations"]["save"]["gt"] == 1500.0
+    assert payload["whitebooks"]["operations"]["save"]["gt"] == 340500.0
     assert payload["whitebooks"]["operations"]["save"]["b2b"][0]["ctin"] == "29ABCDE1234F1Z5"
+    assert payload["whitebooks"]["operations"]["save"]["b2cl"][0]["pos"] == "27"
+    assert payload["whitebooks"]["operations"]["save"]["b2cl"][0]["inv"][0]["inum"] == "S-003"
     assert payload["whitebooks"]["operations"]["save"]["b2cs"][0]["txval"] == 500.0
+    assert payload["whitebooks"]["operations"]["save"]["b2cs"][1]["etin"] == "29ECOM1234F1Z5"
+    assert payload["whitebooks"]["operations"]["save"]["b2ba"][0]["ctin"] == "29ABCDE1234F1Z5"
+    assert payload["whitebooks"]["operations"]["save"]["b2ba"][0]["inv"][0]["inum"] == "AMD-001"
+    assert payload["whitebooks"]["operations"]["save"]["cdnra"][0]["ctin"] == "29ABCDE1234F1Z5"
+    assert payload["whitebooks"]["operations"]["save"]["cdnra"][0]["nt"][0]["ont_num"] == "CN-0001"
+    assert payload["whitebooks"]["operations"]["save"]["exp"][0]["exp_typ"] == "WPAY"
+    assert payload["whitebooks"]["operations"]["save"]["exp"][0]["inv"][0]["inum"] == "EXP-001"
+    assert payload["whitebooks"]["operations"]["save"]["expa"][0]["exp_typ"] == "WPAY"
+    assert payload["whitebooks"]["operations"]["save"]["expa"][0]["inv"][0]["oinum"] == "EXP-0001"
+    assert payload["whitebooks"]["operations"]["save"]["at"][0]["pos"] == "27"
+    assert payload["whitebooks"]["operations"]["save"]["at"][0]["itms"][0]["ad_amt"] == 10000.0
+    assert payload["whitebooks"]["operations"]["save"]["txpd"][0]["itms"][0]["ad_amt"] == 4000.0
+    amended_invoice = next(
+        invoice
+        for entry in payload["whitebooks"]["operations"]["save"]["b2ba"]
+        if entry["ctin"] == "29ABCDE1234F1Z5"
+        for invoice in entry["inv"]
+        if invoice["inum"] == "AMD-001"
+    )
+    assert amended_invoice["oinum"] == "S-001"
+    assert amended_invoice["oidt"] == "31-03-2026"
+    assert amended_invoice["ofp"] == "032026"
     assert payload["whitebooks"]["operations"]["proceed"]["type"] == "GSTR1"
+    assert payload["whitebooks"]["operations"]["proceed"]["isNil"] == "N"
     assert payload["whitebooks"]["operations"]["file"]["gstin"] == filings_context["gstin"].gstin
     assert payload["whitebooks"]["operations"]["file"]["ret_period"] == "042026"
     assert payload["whitebooks"]["operations"]["file"]["newSumFlag"] is True
     assert len(payload["whitebooks"]["operations"]["file"]["chksum"]) == 64
-    assert len(payload["whitebooks"]["operations"]["file"]["sec_sum"]) >= 2
+    assert len(payload["whitebooks"]["operations"]["file"]["sec_sum"]) >= 9
     section_names = {section["sec_nm"] for section in payload["whitebooks"]["operations"]["file"]["sec_sum"]}
-    assert {"B2B", "B2CS"}.issubset(section_names)
+    assert {"B2B", "B2CL", "B2CS", "B2BA", "CDNRA", "AT", "TXPD", "EXP", "EXPA"}.issubset(section_names)
     b2b_section = next(section for section in payload["whitebooks"]["operations"]["file"]["sec_sum"] if section["sec_nm"] == "B2B")
+    b2ba_section = next(section for section in payload["whitebooks"]["operations"]["file"]["sec_sum"] if section["sec_nm"] == "B2BA")
+    b2cl_section = next(section for section in payload["whitebooks"]["operations"]["file"]["sec_sum"] if section["sec_nm"] == "B2CL")
+    cdnra_section = next(section for section in payload["whitebooks"]["operations"]["file"]["sec_sum"] if section["sec_nm"] == "CDNRA")
+    at_section = next(section for section in payload["whitebooks"]["operations"]["file"]["sec_sum"] if section["sec_nm"] == "AT")
+    txpd_section = next(section for section in payload["whitebooks"]["operations"]["file"]["sec_sum"] if section["sec_nm"] == "TXPD")
+    exp_section = next(section for section in payload["whitebooks"]["operations"]["file"]["sec_sum"] if section["sec_nm"] == "EXP")
+    expa_section = next(section for section in payload["whitebooks"]["operations"]["file"]["sec_sum"] if section["sec_nm"] == "EXPA")
     assert b2b_section["ttl_rec"] == 1
     assert b2b_section["ttl_val"] == 1000.0
     assert b2b_section["ttl_igst"] == 180.0
     assert len(b2b_section["chksum"]) == 64
     assert b2b_section["sub_sections"][0]["sec_nm"].startswith("B2B_29ABCDE1234F1Z5")
+    assert b2ba_section["ttl_rec"] == 1
+    assert b2ba_section["ttl_val"] == 6000.0
+    assert b2ba_section["ttl_igst"] == 1080.0
+    assert b2cl_section["ttl_rec"] == 1
+    assert b2cl_section["ttl_val"] == 300000.0
+    assert b2cl_section["ttl_igst"] == 54000.0
+    assert b2cl_section["sub_sections"][0]["sec_nm"] == "B2CL_27"
+    assert cdnra_section["ttl_rec"] == 1
+    assert cdnra_section["ttl_val"] == -100.0
+    assert cdnra_section["ttl_igst"] == -18.0
+    assert at_section["ttl_rec"] == 1
+    assert at_section["ttl_val"] == 10000.0
+    assert at_section["ttl_igst"] == 1800.0
+    assert txpd_section["ttl_rec"] == 1
+    assert txpd_section["ttl_val"] == 4000.0
+    assert txpd_section["ttl_igst"] == 720.0
+    assert exp_section["ttl_rec"] == 1
+    assert exp_section["ttl_val"] == 25000.0
+    assert exp_section["ttl_igst"] == 4500.0
+    assert expa_section["ttl_rec"] == 1
+    assert expa_section["ttl_val"] == 5000.0
+    assert expa_section["ttl_igst"] == 900.0
 
 
 @pytest.mark.django_db
@@ -2257,6 +2787,94 @@ def test_live_gstr1_file_requested_status_sync_marks_filed_when_arn_is_returned(
     assert attempt.response_summary["track_response"]["status_desc"] == "Return filed successfully"
     assert filings_context["prepared_return"].status == ReturnPreparation.PreparationStatus.FILED
     assert filings_context["prepared_return"].arn == "ARNWB1234567890"
+
+
+@pytest.mark.django_db
+def test_live_gstr1_file_requested_status_sync_falls_back_to_public_track(monkeypatch, settings, filings_context):
+    from apps.filings.services.filings import sync_return_filing_status
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+
+    settings.WHITEBOOKS_SANDBOX_MODE = False
+
+    filing = ReturnFiling.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        compliance_period=filings_context["compliance_period"],
+        prepared_return=filings_context["prepared_return"],
+        approval_request=filings_context["approval_request"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type=ReturnPreparation.ReturnType.GSTR1,
+        status=ReturnFiling.FilingStatus.SUBMITTED,
+        provider_reference_id="wb-file-public-track-001",
+        approved_by=filings_context["user"],
+        filed_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    attempt = ReturnFilingAttempt.objects.create(
+        return_filing=filing,
+        attempt_number=1,
+        status=ReturnFilingAttempt.AttemptStatus.AWAITING_STATUS,
+        provider_request_id="wb-file-public-track-001",
+        request_summary={"provider_stage": "file_requested"},
+        response_summary={
+            "provider_stage": "file_requested",
+            "operations_completed": ["draft_saved", "proceeded_to_file", "file_requested"],
+            "next_action": "resync_for_arn_or_status",
+        },
+        triggered_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    WhiteBooksAuthSession.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        email="ops@example.com",
+        txn="txn-live-public-track-001",
+        status=WhiteBooksAuthSession.SessionStatus.AUTH_TOKEN_RECEIVED,
+        initiated_by=filings_context["user"],
+        verified_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+
+    observed = {}
+
+    monkeypatch.setattr(
+        WhiteBooksClient,
+        "get_return_status",
+        lambda self, **kwargs: {"status_cd": "1", "data": {}},
+    )
+    monkeypatch.setattr(
+        WhiteBooksClient,
+        "track_return",
+        lambda self, **kwargs: {"status_cd": "1", "status_desc": "Confirmation pending"},
+    )
+
+    def fake_track_return_public(self, **kwargs):
+        observed["fy"] = kwargs.get("fy")
+        observed["type"] = kwargs.get("return_type")
+        return {"status_cd": "1", "data": {"arn": "ARNPUBLIC1234567890"}, "status_desc": "Return filed successfully"}
+
+    monkeypatch.setattr(WhiteBooksClient, "track_return_public", fake_track_return_public)
+
+    result = sync_return_filing_status(filing_id=filing.id, actor_id=filings_context["user"].id)
+
+    filing.refresh_from_db()
+    attempt.refresh_from_db()
+    filings_context["prepared_return"].refresh_from_db()
+    assert observed["fy"] == "2026-27"
+    assert observed["type"] == "GSTR1"
+    assert result["status"] == ReturnFiling.FilingStatus.FILED
+    assert filing.status == ReturnFiling.FilingStatus.FILED
+    assert filing.arn == "ARNPUBLIC1234567890"
+    assert attempt.status == ReturnFilingAttempt.AttemptStatus.COMPLETED
+    assert attempt.response_summary["public_track_response"]["data"]["arn"] == "ARNPUBLIC1234567890"
+    assert filings_context["prepared_return"].status == ReturnPreparation.PreparationStatus.FILED
+    assert filings_context["prepared_return"].arn == "ARNPUBLIC1234567890"
 
 
 @pytest.mark.django_db

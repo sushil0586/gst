@@ -21,7 +21,7 @@ def export_gstr1_workbook(*, compliance_period, prepared_return: ReturnPreparati
         GSTTransaction.objects.filter(
             is_active=True,
             compliance_period=compliance_period,
-            transaction_type__in=["sales", "credit_note", "debit_note"],
+            transaction_type__in=["sales", "credit_note", "debit_note", "advance_received", "advance_adjusted"],
         )
         .select_related("gstin", "client")
         .order_by("transaction_date", "reference_number")
@@ -38,10 +38,19 @@ def export_gstr1_workbook(*, compliance_period, prepared_return: ReturnPreparati
     gstin = compliance_period.gstin
 
     sales_transactions = [transaction for transaction in transactions if transaction.transaction_type == "sales"]
+    amendment_transactions = [transaction for transaction in transactions if is_amendment_transaction(transaction)]
+    non_amendment_sales_transactions = [transaction for transaction in sales_transactions if not is_amendment_transaction(transaction)]
+    export_transactions = [transaction for transaction in non_amendment_sales_transactions if special_supply_type(transaction)]
+    regular_sales_transactions = [transaction for transaction in non_amendment_sales_transactions if not special_supply_type(transaction)]
+    ecommerce_transactions = [transaction for transaction in non_amendment_sales_transactions if ecommerce_gstin(transaction)]
+    amendment_ecommerce_transactions = [transaction for transaction in amendment_transactions if ecommerce_gstin(transaction)]
     credit_debit_notes = [transaction for transaction in transactions if transaction.transaction_type in {"credit_note", "debit_note"}]
-    b2b_transactions = [transaction for transaction in sales_transactions if transaction.counterparty_gstin]
-    b2cl_transactions = [transaction for transaction in sales_transactions if not transaction.counterparty_gstin and is_large_interstate_invoice(transaction)]
-    b2cs_transactions = [transaction for transaction in sales_transactions if not transaction.counterparty_gstin and not is_large_interstate_invoice(transaction)]
+    advance_received_transactions = [transaction for transaction in transactions if transaction.transaction_type == "advance_received"]
+    advance_adjusted_transactions = [transaction for transaction in transactions if transaction.transaction_type == "advance_adjusted"]
+    b2b_transactions = [transaction for transaction in regular_sales_transactions if transaction.counterparty_gstin]
+    b2cl_transactions = [transaction for transaction in regular_sales_transactions if not transaction.counterparty_gstin and is_large_interstate_invoice(transaction)]
+    b2cs_transactions = [transaction for transaction in regular_sales_transactions if not transaction.counterparty_gstin and not is_large_interstate_invoice(transaction)]
+    hsn_transactions = sales_transactions + credit_debit_notes
 
     append_sheet(
         worksheet=workbook.create_sheet("Section Summary"),
@@ -52,6 +61,11 @@ def export_gstr1_workbook(*, compliance_period, prepared_return: ReturnPreparati
             b2cl_transactions=b2cl_transactions,
             b2cs_transactions=b2cs_transactions,
             credit_debit_notes=credit_debit_notes,
+            advance_received_transactions=advance_received_transactions,
+            advance_adjusted_transactions=advance_adjusted_transactions,
+            export_transactions=export_transactions,
+            amendment_transactions=amendment_transactions,
+            ecommerce_transactions=ecommerce_transactions,
         ),
     )
 
@@ -59,7 +73,7 @@ def export_gstr1_workbook(*, compliance_period, prepared_return: ReturnPreparati
         worksheet=workbook.create_sheet("HSN Summary"),
         title="HSN Summary",
         headers=["HSN/SAC", "Service", "GST Rate", "Qty", "Taxable", "CGST", "SGST", "IGST", "Cess", "Docs"],
-        rows=build_hsn_review_summary_rows(transactions),
+        rows=build_hsn_review_summary_rows(hsn_transactions),
     )
 
     append_sheet(
@@ -163,10 +177,31 @@ def export_gstr1_workbook(*, compliance_period, prepared_return: ReturnPreparati
         empty_message="No rows for selected scope.",
     )
 
-    append_info_sheet(
+    append_data_or_info_sheet(
         worksheet=workbook.create_sheet("6 6 Exports Deemed Exports SEZ"),
         title="6 6 Exports Deemed Exports SEZ",
-        message="No rows for selected scope.",
+        headers=[
+            "Invoice Number",
+            "Invoice Date",
+            "Customer Name",
+            "Customer Gstin",
+            "Special Supply Type",
+            "Place Of Supply State Code",
+            "Port Code",
+            "Shipping Bill Number",
+            "Shipping Bill Date",
+            "Hsn Sac Code",
+            "Is Service",
+            "Taxable Amount",
+            "Gst Rate",
+            "Cgst Amount",
+            "Sgst Amount",
+            "Igst Amount",
+            "Cess Amount",
+            "Grand Total",
+        ],
+        rows=build_gstr1_export_rows(export_transactions),
+        empty_message="No rows for selected scope.",
     )
 
     append_data_or_info_sheet(
@@ -196,10 +231,25 @@ def export_gstr1_workbook(*, compliance_period, prepared_return: ReturnPreparati
         rows=build_gstr1_nil_exempt_rows(sales_transactions),
     )
 
-    append_info_sheet(
+    append_data_or_info_sheet(
         worksheet=workbook.create_sheet("9 9 Amendments (4 5 6)"),
         title="9 9 Amendments (4 5 6)",
-        message="No amendment rows for selected scope.",
+        headers=[
+            "Target Section",
+            "Current Document Number",
+            "Current Document Date",
+            "Original Document Number",
+            "Original Document Date",
+            "Original Period",
+            "Original Counterparty Gstin",
+            "Customer Name",
+            "Ecommerce Gstin",
+            "Special Supply Type",
+            "Taxable Amount",
+            "Tax Amount",
+        ],
+        rows=build_gstr1_amendment_rows(amendment_transactions),
+        empty_message="No amendment rows for selected scope.",
     )
 
     append_data_or_info_sheet(
@@ -233,13 +283,54 @@ def export_gstr1_workbook(*, compliance_period, prepared_return: ReturnPreparati
         empty_message="No rows for selected scope.",
     )
 
-    append_info_sheet(
+    append_data_or_info_sheet(
         worksheet=workbook.create_sheet("11 11 Advances and Adjustments"),
         title="11 11 Advances and Adjustments",
-        message="Advance receipt and adjustment flows are not modeled in the current dataset.",
+        headers=["Section", "Grouped Rows", "Taxable", "CGST", "SGST", "IGST", "Cess", "Total"],
+        rows=build_gstr1_advance_summary_rows(
+            advance_received_transactions=advance_received_transactions,
+            advance_adjusted_transactions=advance_adjusted_transactions,
+        ),
+        empty_message="No rows for selected scope.",
     )
-    append_info_sheet(worksheet=workbook.create_sheet("11A Advances"), title="11A Advances", message="No rows for selected scope.")
-    append_info_sheet(worksheet=workbook.create_sheet("11B Advances"), title="11B Advances", message="No rows for selected scope.")
+    append_data_or_info_sheet(
+        worksheet=workbook.create_sheet("11A Advances"),
+        title="11A Advances",
+        headers=[
+            "Place Of Supply State Code",
+            "Supply Type",
+            "Gst Rate",
+            "Gross Advance Amount",
+            "Cgst Amount",
+            "Sgst Amount",
+            "Igst Amount",
+            "Cess Amount",
+            "Tax Amount",
+            "Grand Total",
+            "Document Count",
+        ],
+        rows=build_gstr1_advance_rows(advance_received_transactions),
+        empty_message="No rows for selected scope.",
+    )
+    append_data_or_info_sheet(
+        worksheet=workbook.create_sheet("11B Advances"),
+        title="11B Advances",
+        headers=[
+            "Place Of Supply State Code",
+            "Supply Type",
+            "Gst Rate",
+            "Gross Advance Adjusted",
+            "Cgst Amount",
+            "Sgst Amount",
+            "Igst Amount",
+            "Cess Amount",
+            "Tax Amount",
+            "Grand Total",
+            "Document Count",
+        ],
+        rows=build_gstr1_advance_rows(advance_adjusted_transactions),
+        empty_message="No rows for selected scope.",
+    )
 
     append_sheet(
         worksheet=workbook.create_sheet("12 12 HSN Summary"),
@@ -255,7 +346,7 @@ def export_gstr1_workbook(*, compliance_period, prepared_return: ReturnPreparati
             "Igst Amount",
             "Cess Amount",
         ],
-        rows=build_hsn_summary_rows(transactions),
+        rows=build_hsn_summary_rows(hsn_transactions),
     )
 
     append_sheet(
@@ -273,25 +364,33 @@ def export_gstr1_workbook(*, compliance_period, prepared_return: ReturnPreparati
         rows=build_document_summary_rows(transactions),
     )
 
-    append_info_sheet(
+    append_data_or_info_sheet(
         worksheet=workbook.create_sheet("14 14 Supplier ECO GSTIN-wise S"),
         title="14 14 Supplier ECO GSTIN-wise S",
-        message="No e-commerce operator supply rows for selected scope.",
+        headers=["Ecommerce Gstin", "Section", "Place Of Supply", "Rate", "Document Count", "Taxable", "CGST", "SGST", "IGST", "Cess", "Total"],
+        rows=build_gstr1_ecommerce_rows(ecommerce_transactions, section_filter="table_14"),
+        empty_message="No e-commerce operator supply rows for selected scope.",
     )
-    append_info_sheet(
+    append_data_or_info_sheet(
         worksheet=workbook.create_sheet("14A 14A Amendments to Table 14"),
         title="14A 14A Amendments to Table 14",
-        message="No amendment rows for selected scope.",
+        headers=["Ecommerce Gstin", "Section", "Place Of Supply", "Rate", "Document Count", "Taxable", "CGST", "SGST", "IGST", "Cess", "Total"],
+        rows=build_gstr1_ecommerce_rows(amendment_ecommerce_transactions, section_filter="table_14"),
+        empty_message="No amendment rows for selected scope.",
     )
-    append_info_sheet(
+    append_data_or_info_sheet(
         worksheet=workbook.create_sheet("15 15 ECO Operator GSTIN-wise B"),
         title="15 15 ECO Operator GSTIN-wise B",
-        message="No e-commerce operator rows for selected scope.",
+        headers=["Ecommerce Gstin", "Section", "Place Of Supply", "Rate", "Document Count", "Taxable", "CGST", "SGST", "IGST", "Cess", "Total"],
+        rows=build_gstr1_ecommerce_rows(ecommerce_transactions, section_filter="table_15"),
+        empty_message="No e-commerce operator rows for selected scope.",
     )
-    append_info_sheet(
+    append_data_or_info_sheet(
         worksheet=workbook.create_sheet("15A 15A Amendments to Table 15"),
         title="15A 15A Amendments to Table 15",
-        message="No amendment rows for selected scope.",
+        headers=["Ecommerce Gstin", "Section", "Place Of Supply", "Rate", "Document Count", "Taxable", "CGST", "SGST", "IGST", "Cess", "Total"],
+        rows=build_gstr1_ecommerce_rows(amendment_ecommerce_transactions, section_filter="table_15"),
+        empty_message="No amendment rows for selected scope.",
     )
 
     return workbook_response(workbook=workbook, filename=f"gstr1_{compliance_period.period}.xlsx")
@@ -356,6 +455,14 @@ def export_gstr3b_workbook(*, compliance_period, prepared_return: ReturnPreparat
             ["ARN", prepared_return.arn if prepared_return else ""],
             ["Outward Taxable Value", outward_supplies.get("outward_taxable_value", "0.00")],
             ["Outward Tax Liability", outward_supplies.get("outward_tax_liability", "0.00")],
+            ["Books ITC", itc_summary.get("books_itc", "0.00")],
+            ["2B Reflected ITC", itc_summary.get("reflected_itc", "0.00")],
+            ["Claim-ready ITC", itc_summary.get("claim_ready_itc", itc_summary.get("eligible_itc", "0.00"))],
+            ["Pending in 2B ITC", itc_summary.get("pending_2b_itc", "0.00")],
+            ["Pending Review ITC", itc_summary.get("pending_review_itc", "0.00")],
+            ["Blocked ITC", itc_summary.get("blocked_itc", "0.00")],
+            ["Timing Difference ITC", itc_summary.get("timing_difference_itc", "0.00")],
+            ["Vendor Follow-up ITC", itc_summary.get("vendor_followup_required_itc", "0.00")],
             ["Eligible ITC", itc_summary.get("eligible_itc", "0.00")],
             ["ITC At Risk", itc_summary.get("itc_at_risk", "0.00")],
             ["Deferred / Blocked ITC", itc_summary.get("deferred_blocked_itc", "0.00")],
@@ -517,6 +624,18 @@ def export_gstr3b_workbook(*, compliance_period, prepared_return: ReturnPreparat
             ["Missing In Books Count", reconciliation_summary.get("missing_in_books_count", latest_run.missing_in_books_count if latest_run else 0)],
             ["Missing In Portal Count", reconciliation_summary.get("missing_in_portal_count", latest_run.missing_in_portal_count if latest_run else 0)],
             ["Duplicate Count", reconciliation_summary.get("duplicate_count", latest_run.duplicate_count if latest_run else 0)],
+            ["ITC Ready Count", reconciliation_summary.get("itc_ready_count", latest_run.itc_ready_count if latest_run else 0)],
+            ["Pending In 2B Count", reconciliation_summary.get("itc_pending_2b_count", latest_run.itc_pending_2b_count if latest_run else 0)],
+            ["Pending Review Count", reconciliation_summary.get("itc_pending_review_count", latest_run.itc_pending_review_count if latest_run else 0)],
+            ["Blocked ITC Count", reconciliation_summary.get("itc_blocked_count", latest_run.itc_blocked_count if latest_run else 0)],
+            ["Timing Difference Count", reconciliation_summary.get("itc_timing_difference_count", latest_run.itc_timing_difference_count if latest_run else 0)],
+            [
+                "Vendor Follow-up Count",
+                reconciliation_summary.get(
+                    "itc_vendor_followup_required_count",
+                    latest_run.itc_vendor_followup_required_count if latest_run else 0,
+                ),
+            ],
             ["ITC At Risk", itc_summary.get("itc_at_risk", "0.00")],
             ["Deferred / Blocked ITC", itc_summary.get("deferred_blocked_itc", "0.00")],
             ["Unresolved Mismatch Count", itc_summary.get("unresolved_mismatch_count", 0)],
@@ -576,6 +695,153 @@ def export_gstr3b_workbook(*, compliance_period, prepared_return: ReturnPreparat
     )
 
     return workbook_response(workbook=workbook, filename=f"gstr3b_{compliance_period.period}.xlsx")
+
+
+def export_gstr9_workbook(*, compliance_period, prepared_return: ReturnPreparation | None = None) -> HttpResponse:
+    workbook = Workbook()
+    default_sheet = workbook.active
+    workbook.remove(default_sheet)
+
+    summary_snapshot = prepared_return.summary_snapshot if prepared_return else {}
+    summary_snapshot = summary_snapshot if isinstance(summary_snapshot, dict) else {}
+    client = compliance_period.gstin.client
+    gstin = compliance_period.gstin
+
+    outward_summary = summary_snapshot.get("outward_summary", {}) if isinstance(summary_snapshot.get("outward_summary"), dict) else {}
+    itc_summary = summary_snapshot.get("itc_summary", {}) if isinstance(summary_snapshot.get("itc_summary"), dict) else {}
+    liability_summary = summary_snapshot.get("liability_summary", {}) if isinstance(summary_snapshot.get("liability_summary"), dict) else {}
+    annual_sections = summary_snapshot.get("annual_sections", {}) if isinstance(summary_snapshot.get("annual_sections"), dict) else {}
+    source_months = summary_snapshot.get("source_months", {}) if isinstance(summary_snapshot.get("source_months"), dict) else {}
+    warnings_summary = summary_snapshot.get("warnings_summary", {}) if isinstance(summary_snapshot.get("warnings_summary"), dict) else {}
+    source_trace = summary_snapshot.get("source_trace", {}) if isinstance(summary_snapshot.get("source_trace"), dict) else {}
+
+    gstr1_return_ids = [str(item) for item in source_trace.get("gstr1_return_ids", []) if item]
+    gstr3b_return_ids = [str(item) for item in source_trace.get("gstr3b_return_ids", []) if item]
+    linked_returns = list(
+        ReturnPreparation.objects.filter(id__in=[*gstr1_return_ids, *gstr3b_return_ids])
+        .select_related("compliance_period")
+        .order_by("compliance_period__period", "return_type")
+    )
+
+    append_sheet(
+        worksheet=workbook.create_sheet("Summary"),
+        title="Summary",
+        headers=["Field", "Value"],
+        rows=[
+            ["Return Type", "GSTR-9"],
+            ["Workspace", client.workspace.name],
+            ["Client", client.legal_name],
+            ["GSTIN", gstin.gstin],
+            ["Anchor Period", compliance_period.period],
+            ["Financial Year", summary_snapshot.get("financial_year", "")],
+            ["Preparation Status", prepared_return.status if prepared_return else "not_prepared"],
+            ["Prepared By", display_user(prepared_return.prepared_by) if prepared_return else "System"],
+            ["Approved By", display_user(prepared_return.approved_by) if prepared_return and prepared_return.approved_by else ""],
+            ["Filed By", display_user(prepared_return.filed_by) if prepared_return and prepared_return.filed_by else ""],
+            ["Filed At", prepared_return.filed_at.isoformat() if prepared_return and prepared_return.filed_at else ""],
+            ["ARN", prepared_return.arn if prepared_return else ""],
+            ["Annual Taxable Value", outward_summary.get("annual_taxable_value", "0.00")],
+            ["Annual Tax Liability", outward_summary.get("annual_tax_liability", "0.00")],
+            ["Claim-ready ITC", itc_summary.get("claim_ready_itc", "0.00")],
+            ["ITC At Risk", itc_summary.get("itc_at_risk", "0.00")],
+            ["Net Tax Payable", liability_summary.get("net_tax_payable", "0.00")],
+            ["Warning Count", warnings_summary.get("warning_count", 0)],
+        ],
+    )
+
+    append_sheet(
+        worksheet=workbook.create_sheet("Annual Outward"),
+        title="Annual Outward",
+        headers=["Metric", "Value"],
+        rows=[
+            ["GSTR-1 Taxable Value", outward_summary.get("gstr1_taxable_value", "0.00")],
+            ["GSTR-1 Tax Amount", outward_summary.get("gstr1_tax_amount", "0.00")],
+            ["GSTR-3B Outward Taxable Value", outward_summary.get("gstr3b_outward_taxable_value", "0.00")],
+            ["GSTR-3B Tax Liability", outward_summary.get("gstr3b_outward_tax_liability", "0.00")],
+            ["Annual Taxable Value", outward_summary.get("annual_taxable_value", "0.00")],
+            ["Annual Tax Liability", outward_summary.get("annual_tax_liability", "0.00")],
+            ["Amendment Document Count", (annual_sections.get("notes_and_amendments") or {}).get("amendment_document_count", 0)],
+        ],
+    )
+
+    append_sheet(
+        worksheet=workbook.create_sheet("Annual ITC"),
+        title="Annual ITC",
+        headers=["Metric", "Value"],
+        rows=[
+            ["Books ITC", itc_summary.get("books_itc", "0.00")],
+            ["2B Reflected ITC", itc_summary.get("reflected_itc", "0.00")],
+            ["Claim-ready ITC", itc_summary.get("claim_ready_itc", "0.00")],
+            ["Pending in 2B ITC", itc_summary.get("pending_2b_itc", "0.00")],
+            ["Pending Review ITC", itc_summary.get("pending_review_itc", "0.00")],
+            ["Blocked ITC", itc_summary.get("blocked_itc", "0.00")],
+            ["Timing Difference ITC", itc_summary.get("timing_difference_itc", "0.00")],
+            ["Vendor Follow-up ITC", itc_summary.get("vendor_followup_required_itc", "0.00")],
+            ["ITC At Risk", itc_summary.get("itc_at_risk", "0.00")],
+            ["Annual Claim-ready ITC", liability_summary.get("annual_claim_ready_itc", "0.00")],
+            ["Net Tax Payable", liability_summary.get("net_tax_payable", "0.00")],
+        ],
+    )
+
+    append_sheet(
+        worksheet=workbook.create_sheet("Source Months"),
+        title="Source Months",
+        headers=["Category", "Periods"],
+        rows=[
+            ["Expected", ", ".join(str(item) for item in source_months.get("expected_periods", []))],
+            ["Available", ", ".join(str(item) for item in source_months.get("available_periods", []))],
+            ["Missing", ", ".join(str(item) for item in source_months.get("missing_periods", []))],
+            ["GSTR-1 Prepared", ", ".join(str(item) for item in source_months.get("gstr1_prepared_periods", []))],
+            ["GSTR-3B Prepared", ", ".join(str(item) for item in source_months.get("gstr3b_prepared_periods", []))],
+            ["Blocked", ", ".join(str(item) for item in source_months.get("blocked_source_periods", []))],
+            ["Failed", ", ".join(str(item) for item in source_months.get("failed_source_periods", []))],
+            ["Filed", ", ".join(str(item) for item in source_months.get("filed_source_periods", []))],
+        ],
+    )
+
+    append_data_or_info_sheet(
+        worksheet=workbook.create_sheet("Linked Source Returns"),
+        title="Linked Source Returns",
+        headers=["Period", "Return Type", "Status", "Return ID"],
+        rows=[
+            [item.compliance_period.period, item.return_type.upper(), item.status, str(item.id)]
+            for item in linked_returns
+        ],
+        empty_message="No monthly source returns are linked to this annual draft yet.",
+    )
+
+    append_data_or_info_sheet(
+        worksheet=workbook.create_sheet("Warnings"),
+        title="Warnings",
+        headers=["Code", "Severity", "Title", "Detail"],
+        rows=[
+            [
+                str(item.get("code", "")),
+                str(item.get("severity", "")),
+                str(item.get("title", "")),
+                str(item.get("detail", "")),
+            ]
+            for item in warnings_summary.get("items", [])
+            if isinstance(item, dict)
+        ],
+        empty_message="No annual warnings were captured for this return.",
+    )
+
+    append_sheet(
+        worksheet=workbook.create_sheet("Source Exceptions"),
+        title="Source Exceptions",
+        headers=["Metric", "Value"],
+        rows=[
+            ["Period Exception Count", (annual_sections.get("source_exceptions") or {}).get("period_exception_count", 0)],
+            ["Missing Month Count", (annual_sections.get("source_exceptions") or {}).get("missing_month_count", 0)],
+            ["Blocked Source Count", (annual_sections.get("source_exceptions") or {}).get("blocked_source_count", 0)],
+            ["Failed Source Count", (annual_sections.get("source_exceptions") or {}).get("failed_source_count", 0)],
+            ["Unresolved Mismatch Count", (annual_sections.get("source_exceptions") or {}).get("unresolved_mismatch_count", 0)],
+            ["Manual Review Decision Count", (annual_sections.get("source_exceptions") or {}).get("manual_review_decision_count", 0)],
+        ],
+    )
+
+    return workbook_response(workbook=workbook, filename=f"gstr9_{compliance_period.period}.xlsx")
 
 
 def append_sheet(*, worksheet, title: str, headers: list[str], rows: list[list[object]]) -> None:
@@ -993,6 +1259,10 @@ def document_type_id_for_summary(transaction_type: str, document_type: str) -> i
         return 5
     if transaction_type == "debit_note":
         return 6
+    if transaction_type == "advance_received":
+        return 7
+    if transaction_type == "advance_adjusted":
+        return 8
     return 99
 
 
@@ -1003,6 +1273,10 @@ def document_type_label_for_summary(transaction_type: str, document_type: str) -
         return "Credit Note"
     if transaction_type == "debit_note":
         return "Debit Note"
+    if transaction_type == "advance_received":
+        return "Receipt Voucher"
+    if transaction_type == "advance_adjusted":
+        return "Advance Adjustment"
     return prettify_document_type(document_type)
 
 
@@ -1013,6 +1287,10 @@ def document_code_for_type(transaction_type: str, document_type: str) -> str:
         return "CRN"
     if transaction_type == "debit_note":
         return "DBN"
+    if transaction_type == "advance_received":
+        return "RCV"
+    if transaction_type == "advance_adjusted":
+        return "ADVADJ"
     return document_type.replace("_", "").upper()[:8] or "DOC"
 
 
@@ -1045,12 +1323,22 @@ def build_gstr1_section_summary_rows(
     b2cl_transactions: list[GSTTransaction],
     b2cs_transactions: list[GSTTransaction],
     credit_debit_notes: list[GSTTransaction],
+    advance_received_transactions: list[GSTTransaction],
+    advance_adjusted_transactions: list[GSTTransaction],
+    export_transactions: list[GSTTransaction],
+    amendment_transactions: list[GSTTransaction],
+    ecommerce_transactions: list[GSTTransaction],
 ) -> list[list[object]]:
     return [
         ["B2B", len(b2b_transactions), *section_tax_summary(b2b_transactions)],
         ["B2CL", len(b2cl_transactions), *section_tax_summary(b2cl_transactions)],
         ["B2CS", len(b2cs_transactions), *section_tax_summary(b2cs_transactions)],
         ["CDN", len(credit_debit_notes), *section_tax_summary(credit_debit_notes)],
+        ["ADV_RECEIVED", len(build_gstr1_advance_rows(advance_received_transactions)), *section_tax_summary(advance_received_transactions)],
+        ["ADV_ADJUSTED", len(build_gstr1_advance_rows(advance_adjusted_transactions)), *section_tax_summary(advance_adjusted_transactions)],
+        ["EXPORTS", len(build_gstr1_export_rows(export_transactions)), *section_tax_summary(export_transactions)],
+        ["AMENDMENTS", len(build_gstr1_amendment_rows(amendment_transactions)), *section_tax_summary(amendment_transactions)],
+        ["ECOMMERCE", len(build_gstr1_ecommerce_rows(ecommerce_transactions)), *section_tax_summary(ecommerce_transactions)],
     ]
 
 
@@ -1255,16 +1543,201 @@ def build_gstr1_note_rows(transactions: list[GSTTransaction]) -> list[list[objec
     return rows
 
 
+def build_gstr1_advance_summary_rows(
+    *,
+    advance_received_transactions: list[GSTTransaction],
+    advance_adjusted_transactions: list[GSTTransaction],
+) -> list[list[object]]:
+    advance_received_rows = build_gstr1_advance_rows(advance_received_transactions)
+    advance_adjusted_rows = build_gstr1_advance_rows(advance_adjusted_transactions)
+    return [
+        ["Advances Received", len(advance_received_rows), *section_tax_summary(advance_received_transactions)],
+        ["Advances Adjusted", len(advance_adjusted_rows), *section_tax_summary(advance_adjusted_transactions)],
+    ]
+
+
+def build_gstr1_advance_rows(transactions: list[GSTTransaction]) -> list[list[object]]:
+    grouped: dict[tuple[str, str, str], dict[str, Decimal | int]] = {}
+    for transaction in transactions:
+        place_of_supply = str(transaction.place_of_supply or "").strip() or "00"
+        supply_type = "INTER" if (transaction.igst_amount or Decimal("0.00")) > Decimal("0.00") else "INTRA"
+        for component in iter_transaction_components(transaction):
+            rate = format_decimal(component["rate"])
+            key = (place_of_supply, supply_type, rate)
+            entry = grouped.setdefault(
+                key,
+                {
+                    "taxable_value": Decimal("0.00"),
+                    "cgst_amount": Decimal("0.00"),
+                    "sgst_amount": Decimal("0.00"),
+                    "igst_amount": Decimal("0.00"),
+                    "cess_amount": Decimal("0.00"),
+                    "tax_amount": Decimal("0.00"),
+                    "total_amount": Decimal("0.00"),
+                    "document_count": 0,
+                },
+            )
+            entry["taxable_value"] += decimal_or_zero(component["taxable_value"])
+            entry["cgst_amount"] += decimal_or_zero(component["cgst_amount"])
+            entry["sgst_amount"] += decimal_or_zero(component["sgst_amount"])
+            entry["igst_amount"] += decimal_or_zero(component["igst_amount"])
+            entry["cess_amount"] += decimal_or_zero(component["cess_amount"])
+            entry["tax_amount"] += (
+                decimal_or_zero(component["cgst_amount"])
+                + decimal_or_zero(component["sgst_amount"])
+                + decimal_or_zero(component["igst_amount"])
+                + decimal_or_zero(component["cess_amount"])
+            )
+            entry["total_amount"] += decimal_or_zero(component["total_amount"])
+            entry["document_count"] += 1
+
+    rows = []
+    for (place_of_supply, supply_type, rate), entry in sorted(grouped.items()):
+        rows.append(
+            [
+                place_of_supply,
+                supply_type,
+                decimal_or_zero(rate),
+                decimal_or_zero(entry["taxable_value"]),
+                decimal_or_zero(entry["cgst_amount"]),
+                decimal_or_zero(entry["sgst_amount"]),
+                decimal_or_zero(entry["igst_amount"]),
+                decimal_or_zero(entry["cess_amount"]),
+                decimal_or_zero(entry["tax_amount"]),
+                decimal_or_zero(entry["total_amount"]),
+                int(entry["document_count"]),
+            ]
+        )
+    return rows
+
+
+def build_gstr1_export_rows(transactions: list[GSTTransaction]) -> list[list[object]]:
+    rows = []
+    for transaction in transactions:
+        metadata = transaction.metadata if isinstance(transaction.metadata, dict) else {}
+        for component in iter_transaction_components(transaction):
+            rows.append(
+                [
+                    transaction.reference_number,
+                    date_to_iso(transaction.transaction_date),
+                    transaction.counterparty_name,
+                    transaction.counterparty_gstin,
+                    special_supply_type_label(transaction),
+                    transaction.place_of_supply or "",
+                    metadata.get("port_code", ""),
+                    metadata.get("shipping_bill_number", ""),
+                    metadata.get("shipping_bill_date", ""),
+                    component["hsn_code"],
+                    bool(component["is_service"]),
+                    decimal_or_zero(component["taxable_value"]),
+                    decimal_or_zero(component["rate"]),
+                    decimal_or_zero(component["cgst_amount"]),
+                    decimal_or_zero(component["sgst_amount"]),
+                    decimal_or_zero(component["igst_amount"]),
+                    decimal_or_zero(component["cess_amount"]),
+                    decimal_or_zero(component["total_amount"]),
+                ]
+            )
+    return rows
+
+
+def build_gstr1_amendment_rows(transactions: list[GSTTransaction]) -> list[list[object]]:
+    rows = []
+    for transaction in transactions:
+        rows.append(
+            [
+                amendment_target_section(transaction),
+                transaction.reference_number,
+                date_to_iso(transaction.transaction_date),
+                original_document_number(transaction),
+                original_document_date(transaction),
+                original_period(transaction),
+                original_counterparty_gstin(transaction),
+                transaction.counterparty_name,
+                ecommerce_gstin(transaction),
+                special_supply_type_label(transaction) if special_supply_type(transaction) else "",
+                decimal_or_zero(transaction.taxable_value),
+                decimal_or_zero(transaction.tax_amount),
+            ]
+        )
+    return rows
+
+
+def build_gstr1_ecommerce_rows(transactions: list[GSTTransaction], section_filter: str | None = None) -> list[list[object]]:
+    grouped: dict[tuple[str, str, str, str], dict[str, Decimal | int]] = {}
+    for transaction in transactions:
+        etin = ecommerce_gstin(transaction)
+        section_code = ecommerce_section(transaction)
+        if not etin or (section_filter and section_code != section_filter):
+            continue
+        place_of_supply = str(transaction.place_of_supply or "").strip() or "00"
+        for component in iter_transaction_components(transaction):
+            rate = format_decimal(component["rate"])
+            key = (etin, section_code, place_of_supply, rate)
+            entry = grouped.setdefault(
+                key,
+                {
+                    "taxable_value": Decimal("0.00"),
+                    "cgst_amount": Decimal("0.00"),
+                    "sgst_amount": Decimal("0.00"),
+                    "igst_amount": Decimal("0.00"),
+                    "cess_amount": Decimal("0.00"),
+                    "total_amount": Decimal("0.00"),
+                    "document_count": 0,
+                },
+            )
+            entry["taxable_value"] += decimal_or_zero(component["taxable_value"])
+            entry["cgst_amount"] += decimal_or_zero(component["cgst_amount"])
+            entry["sgst_amount"] += decimal_or_zero(component["sgst_amount"])
+            entry["igst_amount"] += decimal_or_zero(component["igst_amount"])
+            entry["cess_amount"] += decimal_or_zero(component["cess_amount"])
+            entry["total_amount"] += decimal_or_zero(component["total_amount"])
+            entry["document_count"] += 1
+
+    rows = []
+    for (etin, section_code, place_of_supply, rate), entry in sorted(grouped.items()):
+        rows.append(
+            [
+                etin,
+                section_code,
+                place_of_supply,
+                decimal_or_zero(rate),
+                int(entry["document_count"]),
+                decimal_or_zero(entry["taxable_value"]),
+                decimal_or_zero(entry["cgst_amount"]),
+                decimal_or_zero(entry["sgst_amount"]),
+                decimal_or_zero(entry["igst_amount"]),
+                decimal_or_zero(entry["cess_amount"]),
+                decimal_or_zero(entry["total_amount"]),
+            ]
+        )
+    return rows
+
+
 def build_gstr1_validation_rows(transactions: list[GSTTransaction]) -> list[list[object]]:
     rows = []
     for index, transaction in enumerate(transactions, start=1):
         metadata = transaction.metadata if isinstance(transaction.metadata, dict) else {}
-        if not metadata.get("hsn_code"):
+        if transaction.transaction_type not in {"advance_received", "advance_adjusted"} and not metadata.get("hsn_code"):
             rows.append(["HSN_MISSING", "warning", "HSN/SAC is not available; workbook uses UNSPECIFIED.", index, transaction.reference_number, "hsn_code"])
-        if not metadata.get("uqc"):
+        if transaction.transaction_type not in {"advance_received", "advance_adjusted"} and not metadata.get("uqc"):
             rows.append(["UQC_MISSING", "warning", "Unit quantity code is missing; HSN summary quantity may be incomplete.", index, transaction.reference_number, "uqc"])
         if transaction.transaction_type == "sales" and not transaction.counterparty_gstin and not transaction.place_of_supply:
             rows.append(["POS_MISSING", "error", "Place of supply is required for unregistered outward supply classification.", index, transaction.reference_number, "place_of_supply"])
+        if transaction.transaction_type in {"advance_received", "advance_adjusted"} and not transaction.place_of_supply:
+            rows.append(["ADVANCE_POS_MISSING", "error", "Place of supply is required for advance classification in table 11.", index, transaction.reference_number, "place_of_supply"])
+        if transaction.transaction_type in {"advance_received", "advance_adjusted"} and not _transaction_has_usable_rate(transaction):
+            rows.append(["ADVANCE_RATE_MISSING", "error", "Advance transaction is missing a usable GST rate.", index, transaction.reference_number, "rate"])
+        if transaction.transaction_type == "advance_adjusted" and not _advance_reference_present(transaction):
+            rows.append(["ADVANCE_REFERENCE_MISSING", "warning", "Advance adjustment does not reference the original advance voucher.", index, transaction.reference_number, "advance_reference"])
+        if special_supply_type(transaction) in {"sez_wpay", "sez_wopay", "deemed_export"} and not transaction.counterparty_gstin:
+            rows.append(["SPECIAL_SUPPLY_GSTIN_MISSING", "error", "SEZ and deemed export rows should include recipient GSTIN.", index, transaction.reference_number, "counterparty_gstin"])
+        if special_supply_type(transaction) in {"export_wpay", "export_wopay"} and not _export_reference_present(transaction):
+            rows.append(["EXPORT_REFERENCE_MISSING", "warning", "Export row is missing shipping bill or port-code metadata.", index, transaction.reference_number, "shipping_bill_number"])
+        if ecommerce_section(transaction) and not ecommerce_gstin(transaction):
+            rows.append(["ECOMMERCE_GSTIN_MISSING", "error", "E-commerce section is set but operator GSTIN is missing.", index, transaction.reference_number, "ecommerce_gstin"])
+        if is_amendment_transaction(transaction) and (not original_document_number(transaction) or not original_period(transaction)):
+            rows.append(["AMENDMENT_REFERENCE_MISSING", "error", "Amendment row is missing original document number or original period.", index, transaction.reference_number, "original_document_number"])
         if inferred_supply_category(transaction) in {"nil_rated", "exempt", "non_gst"} and transaction.tax_amount not in (None, Decimal("0.00")):
             rows.append(["SUPPLY_CATEGORY_CONFLICT", "warning", "Supply category indicates non-taxable treatment but tax amounts are present.", index, transaction.reference_number, "supply_category"])
     return rows
@@ -1287,6 +1760,112 @@ def hsn_code(transaction: GSTTransaction) -> str:
 def is_service_transaction(transaction: GSTTransaction) -> bool:
     metadata = transaction.metadata if isinstance(transaction.metadata, dict) else {}
     return bool(metadata.get("is_service") or metadata.get("service"))
+
+
+def special_supply_type(transaction: GSTTransaction) -> str:
+    metadata = transaction.metadata if isinstance(transaction.metadata, dict) else {}
+    value = str(metadata.get("special_supply_type") or "").strip().lower()
+    if value in {"export_wpay", "export_wopay", "sez_wpay", "sez_wopay", "deemed_export"}:
+        return value
+    return ""
+
+
+def special_supply_type_label(transaction: GSTTransaction) -> str:
+    labels = {
+        "export_wpay": "Export with payment",
+        "export_wopay": "Export without payment",
+        "sez_wpay": "SEZ with payment",
+        "sez_wopay": "SEZ without payment",
+        "deemed_export": "Deemed export",
+    }
+    return labels.get(special_supply_type(transaction), "Regular")
+
+
+def ecommerce_gstin(transaction: GSTTransaction) -> str:
+    metadata = transaction.metadata if isinstance(transaction.metadata, dict) else {}
+    return str(metadata.get("ecommerce_gstin") or "").strip().upper()
+
+
+def ecommerce_section(transaction: GSTTransaction) -> str:
+    metadata = transaction.metadata if isinstance(transaction.metadata, dict) else {}
+    value = str(metadata.get("ecommerce_section") or "").strip().lower()
+    if value in {"table_14", "table_15"}:
+        return value
+    return "table_14" if ecommerce_gstin(transaction) else ""
+
+
+def is_amendment_transaction(transaction: GSTTransaction) -> bool:
+    metadata = transaction.metadata if isinstance(transaction.metadata, dict) else {}
+    return bool(
+        metadata.get("is_amendment")
+        or metadata.get("original_document_number")
+        or metadata.get("original_document_date")
+        or metadata.get("original_period")
+    )
+
+
+def original_document_number(transaction: GSTTransaction) -> str:
+    metadata = transaction.metadata if isinstance(transaction.metadata, dict) else {}
+    return str(metadata.get("original_document_number") or "").strip()
+
+
+def original_document_date(transaction: GSTTransaction) -> str:
+    metadata = transaction.metadata if isinstance(transaction.metadata, dict) else {}
+    return str(metadata.get("original_document_date") or "").strip()
+
+
+def original_period(transaction: GSTTransaction) -> str:
+    metadata = transaction.metadata if isinstance(transaction.metadata, dict) else {}
+    return str(metadata.get("original_period") or "").strip()
+
+
+def original_counterparty_gstin(transaction: GSTTransaction) -> str:
+    metadata = transaction.metadata if isinstance(transaction.metadata, dict) else {}
+    return str(metadata.get("original_counterparty_gstin") or "").strip().upper()
+
+
+def amendment_target_section(transaction: GSTTransaction) -> str:
+    if ecommerce_gstin(transaction):
+        return ecommerce_section(transaction)
+    if special_supply_type(transaction):
+        return special_supply_type(transaction)
+    if transaction.transaction_type in {"credit_note", "debit_note"}:
+        return "cdnr" if transaction.counterparty_gstin else "cdnur"
+    if transaction.counterparty_gstin:
+        return "b2b"
+    if is_large_interstate_invoice(transaction):
+        return "b2cl"
+    return "b2cs"
+
+
+def _transaction_has_usable_rate(transaction: GSTTransaction) -> bool:
+    for component in iter_transaction_components(transaction):
+        if decimal_or_zero(component.get("rate")) > Decimal("0.00"):
+            return True
+        taxable_value = decimal_or_zero(component.get("taxable_value"))
+        tax_amount = (
+            decimal_or_zero(component.get("cgst_amount"))
+            + decimal_or_zero(component.get("sgst_amount"))
+            + decimal_or_zero(component.get("igst_amount"))
+            + decimal_or_zero(component.get("cess_amount"))
+        )
+        if taxable_value > Decimal("0.00") and tax_amount > Decimal("0.00"):
+            return True
+    return False
+
+
+def _advance_reference_present(transaction: GSTTransaction) -> bool:
+    metadata = transaction.metadata if isinstance(transaction.metadata, dict) else {}
+    return bool(
+        metadata.get("advance_reference")
+        or metadata.get("original_advance_reference")
+        or metadata.get("receipt_voucher_number")
+    )
+
+
+def _export_reference_present(transaction: GSTTransaction) -> bool:
+    metadata = transaction.metadata if isinstance(transaction.metadata, dict) else {}
+    return bool(metadata.get("shipping_bill_number") or metadata.get("port_code"))
 
 
 def build_rcm_contract(transaction: GSTTransaction, *, table_code: str) -> str:

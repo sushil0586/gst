@@ -64,6 +64,18 @@ def create_return_filing(*, validated_data, user):
     approval_request = validated_data.get("approval_request_instance")
     confirmation_note = validated_data.get("confirmation_note", "")
 
+    if prepared_return.return_type in {
+        ReturnPreparation.ReturnType.GSTR9,
+        ReturnPreparation.ReturnType.GSTR9C,
+    }:
+        return _create_manual_return_filing(
+            validated_data=validated_data,
+            user=user,
+            prepared_return=prepared_return,
+            approval_request=approval_request,
+            confirmation_note=confirmation_note,
+        )
+
     if settings.FILING_ENFORCE_MAKER_CHECKER and prepared_return.approved_by_id and prepared_return.approved_by_id == user.id:
         raise serializers.ValidationError(
             {
@@ -141,8 +153,77 @@ def create_return_filing(*, validated_data, user):
     return filing, True
 
 
+def _create_manual_return_filing(*, validated_data, user, prepared_return, approval_request, confirmation_note):
+    existing = ReturnFiling.objects.filter(
+        prepared_return=prepared_return,
+        prepared_snapshot_version=1,
+        is_active=True,
+    ).first()
+    if existing is not None:
+        return existing, False
+
+    with transaction.atomic():
+        filing = ReturnFiling.objects.create(
+            workspace_id=validated_data["workspace"],
+            client_id=validated_data["client"],
+            gstin_id=validated_data["gstin"],
+            compliance_period_id=validated_data["compliance_period"],
+            prepared_return=prepared_return,
+            approval_request=approval_request,
+            provider=validated_data["provider"],
+            return_type=validated_data["return_type"],
+            status=ReturnFiling.FilingStatus.APPROVED,
+            prepared_snapshot_version=1,
+            readiness_snapshot={
+                "return_status": prepared_return.status,
+                "confirmation_note": confirmation_note,
+                "validated_for_filing": True,
+                "manual_filing_only": True,
+                "manual_filing_reason": (
+                    "Annual filing is currently tracked as an operational manual filing flow "
+                    "for GSTR-9 and GSTR-9C."
+                ),
+            },
+            approved_by=prepared_return.approved_by,
+            filed_by=None,
+            created_by=user,
+            updated_by=user,
+        )
+        ReturnFilingEvent.objects.create(
+            return_filing=filing,
+            event_type="filing.manual_tracking_opened",
+            old_status="",
+            new_status=filing.status,
+            actor=user,
+            metadata={
+                "provider": filing.provider,
+                "manual_filing_only": True,
+                "return_type": filing.return_type,
+            },
+        )
+        record_audit_log(
+            actor=user,
+            action="return_filing.manual_tracking_opened",
+            entity=filing,
+            workspace_id=filing.workspace_id,
+            client_id=filing.client_id,
+            gstin_id=filing.gstin_id,
+            compliance_period_id=filing.compliance_period_id,
+            metadata={
+                "prepared_return_id": str(prepared_return.id),
+                "provider": filing.provider,
+                "return_type": filing.return_type,
+            },
+        )
+    return filing, True
+
+
 def enqueue_return_filing(*, filing, actor):
     from apps.filings.tasks import process_return_filing_task
+
+    if settings.CELERY_TASK_ALWAYS_EAGER:
+        process_return_filing(filing_id=filing.id, actor_id=actor.id if actor else None)
+        return
 
     try:
         process_return_filing_task.apply_async(
@@ -158,6 +239,10 @@ def enqueue_return_filing(*, filing, actor):
 def enqueue_return_filing_status_sync(*, filing, actor):
     from apps.filings.tasks import sync_return_filing_status_task
 
+    if settings.CELERY_TASK_ALWAYS_EAGER:
+        sync_return_filing_status(filing_id=filing.id, actor_id=actor.id if actor else None)
+        return
+
     try:
         sync_return_filing_status_task.apply_async(
             args=[str(filing.id), actor.id if actor else None],
@@ -169,6 +254,7 @@ def enqueue_return_filing_status_sync(*, filing, actor):
         sync_return_filing_status(filing_id=filing.id, actor_id=actor.id if actor else None)
 
 
+@transaction.atomic
 def process_return_filing(*, filing_id, actor_id=None):
     actor = User.objects.filter(pk=actor_id).first() if actor_id else None
     filing = (
@@ -1058,17 +1144,25 @@ def _extract_status_sync_failure_summary(raw_response):
 
     status_response = raw_response.get("status_response")
     track_response = raw_response.get("track_response")
+    public_track_response = raw_response.get("public_track_response")
     status_error = status_response.get("error") if isinstance(status_response, dict) and isinstance(status_response.get("error"), dict) else {}
     track_error = track_response.get("error") if isinstance(track_response, dict) and isinstance(track_response.get("error"), dict) else {}
+    public_track_error = (
+        public_track_response.get("error")
+        if isinstance(public_track_response, dict) and isinstance(public_track_response.get("error"), dict)
+        else {}
+    )
     code = (
         status_error.get("error_cd")
         or track_error.get("error_cd")
+        or public_track_error.get("error_cd")
         or raw_response.get("failure_code")
         or "provider_status_failed"
     )
     message = (
         status_error.get("message")
         or track_error.get("message")
+        or public_track_error.get("message")
         or raw_response.get("message")
         or "Provider status sync marked the filing as failed."
     )

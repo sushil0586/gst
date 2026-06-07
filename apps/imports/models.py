@@ -14,6 +14,8 @@ class ImportTemplate(BaseModel):
         PURCHASE = "purchase", "Purchase"
         CREDIT_NOTE = "credit_note", "Credit Note"
         DEBIT_NOTE = "debit_note", "Debit Note"
+        ADVANCE_RECEIVED = "advance_received", "Advance Received"
+        ADVANCE_ADJUSTED = "advance_adjusted", "Advance Adjusted"
         GSTR_2B = "gstr_2b", "GSTR-2B"
 
     class SourceType(models.TextChoices):
@@ -61,6 +63,8 @@ class ImportBatch(BaseModel):
         PURCHASE = "purchase", "Purchase"
         CREDIT_NOTE = "credit_note", "Credit Note"
         DEBIT_NOTE = "debit_note", "Debit Note"
+        ADVANCE_RECEIVED = "advance_received", "Advance Received"
+        ADVANCE_ADJUSTED = "advance_adjusted", "Advance Adjusted"
         GSTR_2B = "gstr_2b", "GSTR-2B"
 
     class SourceType(models.TextChoices):

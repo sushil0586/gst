@@ -1,0 +1,9 @@
+invoice_no,invoice_date,recipient_gstin,recipient_name,taxable_value,cgst,sgst,igst,cess,total_amount,place_of_supply,reverse_charge,document_type,hsn_code,description,uqc,quantity,is_service,supply_category,ecommerce_gstin,ecommerce_section,special_supply_type,shipping_bill_number,shipping_bill_date,port_code
+G1S-1001,2026-05-05,29AAACB1001A1Z5,Core B2B Buyer,100000,9000,9000,0,0,118000,29,FALSE,invoice,8504,Industrial control panel,PCS,10,FALSE,taxable,,,,,
+G1S-1002,2026-05-06,,Large Interstate Retail Buyer,300000,0,0,54000,0,354000,07,FALSE,invoice,8471,Large interstate hardware sale,PCS,12,FALSE,taxable,,,,,
+G1S-1003,2026-05-07,,Domestic Retail Buyer,20000,1800,1800,0,0,23600,29,FALSE,invoice,9403,Standard domestic retail sale,PCS,8,FALSE,taxable,,,,,
+G1S-1004,2026-05-08,,Marketplace Consumer Table14,8000,720,720,0,0,9440,29,FALSE,invoice,8517,Marketplace seller transaction,PCS,3,FALSE,taxable,29ECOM1234F1Z5,14,,,
+G1S-1005,2026-05-09,,Marketplace Consumer Table15,4000,360,360,0,0,4720,29,FALSE,invoice,8517,Marketplace operator transaction,PCS,2,FALSE,taxable,29ECOM1234F1Z5,15,,,
+G1S-1006,2026-05-10,,Overseas Buyer Export,25000,0,0,4500,0,29500,96,FALSE,invoice,9983,Export with payment,PCS,5,TRUE,taxable,,,export_wpay,SB-1006,2026-04-10,INBLR4
+G1S-1007,2026-05-11,07AAACS1500A1Z3,SEZ Buyer Unit,15000,0,0,2700,0,17700,07,FALSE,invoice,8473,SEZ sale with payment,PCS,6,FALSE,taxable,,,sez_wpay,,,
+G1S-1008,2026-05-12,29AAACD1200A1Z4,Deemed Export Buyer,12000,1080,1080,0,0,14160,29,FALSE,invoice,8501,Deemed export goods,PCS,4,FALSE,taxable,,,deemed_export,,,

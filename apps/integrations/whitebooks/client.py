@@ -93,6 +93,26 @@ class WhiteBooksClient:
         )
         return self._normalize_auth_payload(payload)
 
+    def refresh_auth_token(
+        self,
+        *,
+        email: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        if not email:
+            raise WhiteBooksAuthenticationError("WhiteBooks contact email is required for refresh token request.")
+        if not txn:
+            raise WhiteBooksAuthenticationError("WhiteBooks txn header is required for refresh token request.")
+        payload = self._request_json(
+            "/authentication/refreshtoken",
+            method="GET",
+            query_params={"email": email},
+            headers=self._auth_headers({"txn": txn}, state_code=state_code, gst_username=gst_username),
+        )
+        return self._normalize_auth_payload(payload)
+
     def search_taxpayer(self, *, gstin: str, email: str | None = None) -> dict:
         resolved_email = email or self.contact_email
         if not resolved_email:
@@ -128,6 +148,23 @@ class WhiteBooksClient:
             self.request_auth_token,
             email=email,
             otp=otp,
+            txn=txn,
+            state_code=state_code,
+            gst_username=gst_username,
+        )
+        return self._build_session_from_auth_token_payload(payload=payload, email=email, requested_txn=txn)
+
+    def refresh_session(
+        self,
+        *,
+        email: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> WhiteBooksSession:
+        payload = self._invoke_with_optional_state_code(
+            self.refresh_auth_token,
+            email=email,
             txn=txn,
             state_code=state_code,
             gst_username=gst_username,
@@ -315,6 +352,23 @@ class WhiteBooksClient:
                 "email": email,
             },
             headers=self._auth_headers({"txn": txn}),
+        )
+
+    def track_return_public(self, *, email: str, gstin: str, fy: str, return_type: str) -> dict:
+        return self._request_json(
+            "/public/rettrack",
+            method="GET",
+            query_params={
+                "gstin": gstin,
+                "fy": fy,
+                "type": return_type,
+                "email": email,
+            },
+            headers={
+                "accept": "*/*",
+                "client_id": self.api_key,
+                "client_secret": self.api_secret,
+            },
         )
 
     def _build_url(self, path: str, query_params: dict[str, str]) -> str:

@@ -60,6 +60,11 @@ type VerifyProviderOTPPayload = {
   txn?: string;
 };
 
+type RefreshProviderAuthSessionPayload = {
+  sessionId: string;
+  txn?: string;
+};
+
 export function useFilingsQuery(filters: FilingFilters) {
   return useQuery({
     queryKey: queryKeys.filings.list(filters),
@@ -153,8 +158,26 @@ export function useVerifyProviderOTPMutation(filtersToInvalidate?: ProviderAuthS
   });
 }
 
+export function useRefreshProviderAuthSessionMutation(filtersToInvalidate?: ProviderAuthSessionFilters) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ sessionId, txn }: RefreshProviderAuthSessionPayload) => {
+      const response = await apiClient.post(`/provider-auth-sessions/${sessionId}/refresh-token/`, {
+        txn: txn ?? "",
+      });
+      return unwrapApiData<ProviderAuthSessionRecord>(response);
+    },
+    onSuccess: (session) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.providerAuthSessions.list(filtersToInvalidate) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.providerAuthSessions.detail(session.id) });
+    },
+  });
+}
+
 export const useWhiteBooksAuthSessionsQuery = useProviderAuthSessionsQuery;
 export const useRequestWhiteBooksOTPMutation = useRequestProviderOTPMutation;
+export const useRefreshWhiteBooksAuthSessionMutation = useRefreshProviderAuthSessionMutation;
 export const useVerifyWhiteBooksOTPMutation = useVerifyProviderOTPMutation;
 
 export function useStartFilingMutation(filtersToInvalidate?: FilingFilters) {

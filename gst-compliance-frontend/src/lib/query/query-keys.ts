@@ -87,6 +87,7 @@ export const queryKeys = {
     items: (runId?: string, filters?: Record<string, string | undefined>) =>
       ["reconciliation", "items", runId ?? "all", filters ?? {}] as const,
     item: (itemId: string) => ["reconciliation", "item", itemId] as const,
+    corrections: (itemId: string) => ["reconciliation", "item", itemId, "corrections"] as const,
   },
   returns: {
     list: (filters?: Record<string, string | undefined>) => ["returns", "list", filters ?? {}] as const,

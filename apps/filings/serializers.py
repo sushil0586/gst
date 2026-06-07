@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.db.models import F
 from rest_framework import serializers
 
 from apps.approvals.models import ApprovalRequest
@@ -28,7 +29,11 @@ def _get_latest_provider_auth_session(*, workspace_id, client_id, gstin_id, prov
             provider=provider_code,
             is_active=True,
         )
-        .order_by("-verified_at", "-updated_at", "-created_at")
+        .order_by(
+            F("verified_at").desc(nulls_last=True),
+            "-updated_at",
+            "-created_at",
+        )
         .first()
     )
 
@@ -565,7 +570,11 @@ class ReturnFilingStartSerializer(serializers.Serializer):
             raise serializers.ValidationError({"prepared_return": "Prepared return not found."})
         provider_auth_session = None
         provider_auth_error = None
-        if attrs["provider"] == ReturnFiling.Provider.WHITEBOOKS:
+        filing_requires_live_provider_auth = prepared_return.return_type in {
+            ReturnPreparation.ReturnType.GSTR1,
+            ReturnPreparation.ReturnType.GSTR3B,
+        }
+        if attrs["provider"] == ReturnFiling.Provider.WHITEBOOKS and filing_requires_live_provider_auth:
             provider_auth_session = _get_latest_provider_auth_session(
                 workspace_id=attrs["workspace"],
                 client_id=attrs["client"],
@@ -787,7 +796,12 @@ class ProviderOTPVerifySerializer(serializers.Serializer):
     txn = serializers.CharField(required=False, allow_blank=True, max_length=128)
 
 
+class ProviderAuthRefreshSerializer(serializers.Serializer):
+    txn = serializers.CharField(required=False, allow_blank=True, max_length=128)
+
+
 # Compatibility aliases for the existing WhiteBooks-named API surface.
 WhiteBooksAuthSessionSerializer = ProviderAuthSessionSerializer
 WhiteBooksOTPRequestSerializer = ProviderOTPRequestSerializer
 WhiteBooksOTPVerifySerializer = ProviderOTPVerifySerializer
+WhiteBooksAuthRefreshSerializer = ProviderAuthRefreshSerializer

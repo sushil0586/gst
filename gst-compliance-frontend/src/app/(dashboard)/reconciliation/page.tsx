@@ -25,7 +25,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { useFetchGstr2BImportBatchMutation, useGstTransactionsQuery } from "@/features/imports";
 import { useProviderAuthSessionsQuery, useRequestProviderOTPMutation, useVerifyProviderOTPMutation } from "@/features/filings";
 import {
+  useCreateReconciliationBooksEntryMutation,
+  useCorrectReconciliationItemMutation,
   useCreateReconciliationRunMutation,
+  useReconciliationItemCorrectionsQuery,
   useReconciliationRunItemsQuery,
   useReconciliationRunQuery,
   useReconciliationRunsQuery,
@@ -57,6 +60,14 @@ const actionStatusOptions = [
   { value: "ignored", label: "Ignored" },
 ];
 
+const reviewDecisionOptions = [
+  { value: "auto", label: "Auto from reconciliation" },
+  { value: "claim_now", label: "Claim now" },
+  { value: "defer", label: "Defer" },
+  { value: "blocked", label: "Blocked" },
+  { value: "vendor_follow_up", label: "Vendor follow-up" },
+];
+
 const mismatchReasonOptions = [
   { value: "all", label: "All reasons" },
   { value: "gstin_mismatch", label: "GSTIN mismatch" },
@@ -70,6 +81,44 @@ const mismatchReasonOptions = [
   { value: "missing_in_portal", label: "Missing in 2B" },
 ];
 
+const issueBucketOptions = [
+  { value: "all", label: "All issue buckets" },
+  { value: "ready", label: "Ready / matched" },
+  { value: "timing_difference", label: "Timing difference" },
+  { value: "vendor_follow_up", label: "Vendor follow-up" },
+  { value: "books_correction", label: "Books correction" },
+  { value: "value_review", label: "Value review" },
+  { value: "document_review", label: "Document review" },
+  { value: "duplicate_cleanup", label: "Duplicate cleanup" },
+  { value: "issue_review", label: "General review" },
+];
+
+const itcStatusOptions = [
+  { value: "all", label: "All ITC decisions" },
+  { value: "itc_ready", label: "ITC ready" },
+  { value: "itc_pending_2b", label: "Pending in 2B" },
+  { value: "itc_pending_review", label: "Pending review" },
+  { value: "itc_blocked", label: "Blocked" },
+  { value: "itc_timing_difference", label: "Timing difference" },
+  { value: "itc_vendor_followup_required", label: "Vendor follow-up required" },
+];
+
+const correctionReasonOptions = [
+  { value: "books_entry_error", label: "Books entry error" },
+  { value: "document_alignment", label: "Document alignment" },
+  { value: "tax_amount_correction", label: "Tax amount correction" },
+  { value: "vendor_clarification", label: "Vendor clarification" },
+  { value: "other", label: "Other" },
+];
+
+const creationReasonOptions = [
+  { value: "missing_books_entry", label: "Missing books entry" },
+  { value: "late_booking", label: "Late booking" },
+  { value: "portal_confirmed_booking", label: "Portal confirmed booking" },
+  { value: "vendor_clarification", label: "Vendor clarification" },
+  { value: "other", label: "Other" },
+];
+
 function formatDateTime(value?: string | null) {
   if (!value) return "Pending";
   return format(new Date(value), "dd MMM yyyy, h:mm a");
@@ -80,13 +129,6 @@ function formatMoney(value?: string | null) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
-}
-
-function itemStatusVariant(status: ReconciliationItemRecord["match_status"]) {
-  if (status === "matched") return "success" as const;
-  if (status === "partial_match") return "warning" as const;
-  if (status === "mismatch" || status === "missing_in_books" || status === "missing_in_portal") return "danger" as const;
-  return "primary" as const;
 }
 
 function actionStatusVariant(status: ReconciliationItemRecord["action_status"]) {
@@ -105,6 +147,167 @@ function hasPeriodException(metadata: Record<string, unknown> | null | undefined
     return false;
   }
   return (raw as Record<string, unknown>).allowed === true;
+}
+
+function getIssueBucket(item: ReconciliationItemRecord) {
+  switch (item.issue_bucket) {
+    case "ready":
+      return {
+        value: item.issue_bucket,
+        label: "Ready / matched",
+        detail: "Books and GSTR-2B align for this invoice.",
+        nextAction: item.recommended_next_action || "No action needed",
+        variant: "success" as const,
+      };
+    case "timing_difference":
+      return {
+        value: item.issue_bucket,
+        label: "Timing difference",
+        detail:
+          item.period_relationship === "prior_period"
+            ? "Books appear in a later period than the GST-side record."
+            : item.period_relationship === "next_period"
+              ? "Books appear in an earlier period than the GST-side record."
+              : "Document appears across different periods and needs timing review.",
+        nextAction: item.recommended_next_action || "Review period timing",
+        variant: "warning" as const,
+      };
+    case "vendor_follow_up":
+      return {
+        value: item.issue_bucket,
+        label: "Vendor follow-up",
+        detail: "Invoice is booked in books but not reflected in GSTR-2B yet.",
+        nextAction: item.recommended_next_action || "Follow up with supplier",
+        variant: "danger" as const,
+      };
+    case "books_correction":
+      return {
+        value: item.issue_bucket,
+        label: "Books correction",
+        detail: "Invoice appears in GSTR-2B but is missing from the purchase register.",
+        nextAction: item.recommended_next_action || "Check missing booking",
+        variant: "primary" as const,
+      };
+    case "value_review":
+      return {
+        value: item.issue_bucket,
+        label: "Value review",
+        detail: "Invoice exists in both sources, but values do not agree yet.",
+        nextAction: item.recommended_next_action || "Review values against source",
+        variant: "warning" as const,
+      };
+    case "document_review":
+      return {
+        value: item.issue_bucket,
+        label: "Document review",
+        detail: "Key identity fields do not match between books and GSTR-2B.",
+        nextAction: item.recommended_next_action || "Compare source invoice",
+        variant: "danger" as const,
+      };
+    case "duplicate_cleanup":
+      return {
+        value: item.issue_bucket,
+        label: "Duplicate cleanup",
+        detail: "Potential duplicate invoice needs cleanup before return work.",
+        nextAction: item.recommended_next_action || "Review and clear duplicate",
+        variant: "warning" as const,
+      };
+    default:
+      return {
+        value: item.issue_bucket,
+        label: "General review",
+        detail: "This row needs review before it can be treated as ready.",
+        nextAction: item.recommended_next_action || "Open and review",
+        variant: "primary" as const,
+      };
+  }
+}
+
+function getItcDecision(item: ReconciliationItemRecord) {
+  switch (item.itc_status) {
+    case "itc_ready":
+      return {
+        value: item.itc_status,
+        label: "ITC ready",
+        detail: "This row is aligned enough for ITC confidence in the current cycle.",
+        variant: "success" as const,
+      };
+    case "itc_pending_2b":
+      return {
+        value: item.itc_status,
+        label: "Pending in 2B",
+        detail: "Books entry exists, but the GST-side reflection is still pending.",
+        variant: "warning" as const,
+      };
+    case "itc_timing_difference":
+      return {
+        value: item.itc_status,
+        label: "Timing difference",
+        detail: "The invoice is matching across periods and needs ITC timing review.",
+        variant: "warning" as const,
+      };
+    case "itc_vendor_followup_required":
+      return {
+        value: item.itc_status,
+        label: "Vendor follow-up required",
+        detail: "Supplier-side action or clarification is needed before ITC is comfortable.",
+        variant: "danger" as const,
+      };
+    case "itc_blocked":
+      return {
+        value: item.itc_status,
+        label: "ITC blocked",
+        detail: "This row should not be relied on for ITC until books or source issues are fixed.",
+        variant: "danger" as const,
+      };
+    default:
+      return {
+        value: item.itc_status,
+        label: "Pending review",
+        detail: "The row needs review before a clean ITC decision can be made.",
+        variant: "primary" as const,
+      };
+  }
+}
+
+function getReviewDecision(item: ReconciliationItemRecord) {
+  switch (item.review_decision) {
+    case "claim_now":
+      return {
+        label: "CA: claim now",
+        detail: "A reviewer chose to include this row in the current ITC claim.",
+        variant: "success" as const,
+      };
+    case "defer":
+      return {
+        label: "CA: defer",
+        detail: "A reviewer chose to hold this row back from the current claim.",
+        variant: "warning" as const,
+      };
+    case "blocked":
+      return {
+        label: "CA: blocked",
+        detail: "A reviewer chose to keep this row out of the current ITC claim.",
+        variant: "danger" as const,
+      };
+    case "vendor_follow_up":
+      return {
+        label: "CA: vendor follow-up",
+        detail: "A reviewer chose to wait for supplier clarification before claiming.",
+        variant: "danger" as const,
+      };
+    default:
+      return {
+        label: "Auto from reconciliation",
+        detail: "No manual CA override has been applied to this row.",
+        variant: "neutral" as const,
+      };
+  }
+}
+
+function formatCorrectionReason(value?: string | null) {
+  if (!value) return "Unspecified";
+  return correctionReasonOptions.find((option) => option.value === value)?.label ?? value.replace(/_/g, " ");
 }
 
 export default function ReconciliationPage() {
@@ -131,6 +334,8 @@ export default function ReconciliationPage() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedItem, setSelectedItem] = useState<ReconciliationItemRecord | null>(null);
   const [matchStatus, setMatchStatus] = useState("all");
+  const [issueBucket, setIssueBucket] = useState("all");
+  const [itcStatus, setItcStatus] = useState("all");
   const [actionStatus, setActionStatus] = useState("all");
   const [mismatchReason, setMismatchReason] = useState("all");
   const [search, setSearch] = useState("");
@@ -143,8 +348,25 @@ export default function ReconciliationPage() {
   const queryPeriodId = searchParams.get("period") ?? searchParams.get("compliance_period");
   const [actionForm, setActionForm] = useState({
     action_status: "open" as ReconciliationItemRecord["action_status"],
+    review_decision: "auto" as ReconciliationItemRecord["review_decision"],
     assigned_to: "none",
     remarks: "",
+  });
+  const [correctionForm, setCorrectionForm] = useState({
+    reason_code: "books_entry_error",
+    reason_note: "",
+    reference_number: "",
+    transaction_date: "",
+    counterparty_gstin: "",
+    counterparty_name: "",
+    taxable_value: "",
+    cgst_amount: "",
+    sgst_amount: "",
+    igst_amount: "",
+    cess_amount: "",
+    total_amount: "",
+    place_of_supply: "",
+    reverse_charge: false,
   });
 
   useEffect(() => {
@@ -202,6 +424,8 @@ export default function ReconciliationPage() {
   const runQuery = useReconciliationRunQuery(activeRunId ?? undefined);
   const itemsQuery = useReconciliationRunItemsQuery(activeRunId ?? undefined, {
     match_status: matchStatus !== "all" ? matchStatus : undefined,
+    issue_bucket: issueBucket !== "all" ? issueBucket : undefined,
+    itc_status: itcStatus !== "all" ? itcStatus : undefined,
     action_status: actionStatus !== "all" ? actionStatus : undefined,
     mismatch_reason: mismatchReason !== "all" ? mismatchReason : undefined,
     search: search || undefined,
@@ -239,6 +463,25 @@ export default function ReconciliationPage() {
   const verifyProviderOTPMutation = useVerifyProviderOTPMutation(providerAuthFilters);
   const updateItemMutation = useUpdateReconciliationItemMutation(activeRunId ?? undefined, {
     match_status: matchStatus !== "all" ? matchStatus : undefined,
+    issue_bucket: issueBucket !== "all" ? issueBucket : undefined,
+    itc_status: itcStatus !== "all" ? itcStatus : undefined,
+    action_status: actionStatus !== "all" ? actionStatus : undefined,
+    mismatch_reason: mismatchReason !== "all" ? mismatchReason : undefined,
+    search: search || undefined,
+  });
+  const itemCorrectionsQuery = useReconciliationItemCorrectionsQuery(selectedItem?.id);
+  const correctItemMutation = useCorrectReconciliationItemMutation(activeRunId ?? undefined, {
+    match_status: matchStatus !== "all" ? matchStatus : undefined,
+    issue_bucket: issueBucket !== "all" ? issueBucket : undefined,
+    itc_status: itcStatus !== "all" ? itcStatus : undefined,
+    action_status: actionStatus !== "all" ? actionStatus : undefined,
+    mismatch_reason: mismatchReason !== "all" ? mismatchReason : undefined,
+    search: search || undefined,
+  });
+  const createBooksEntryMutation = useCreateReconciliationBooksEntryMutation(activeRunId ?? undefined, {
+    match_status: matchStatus !== "all" ? matchStatus : undefined,
+    issue_bucket: issueBucket !== "all" ? issueBucket : undefined,
+    itc_status: itcStatus !== "all" ? itcStatus : undefined,
     action_status: actionStatus !== "all" ? actionStatus : undefined,
     mismatch_reason: mismatchReason !== "all" ? mismatchReason : undefined,
     search: search || undefined,
@@ -413,6 +656,7 @@ export default function ReconciliationPage() {
       await updateItemMutation.mutateAsync({
         itemId: selectedItem.id,
         action_status: actionForm.action_status,
+        review_decision: actionForm.review_decision,
         assigned_to: actionForm.assigned_to === "none" ? null : Number(actionForm.assigned_to),
         remarks: actionForm.remarks,
       });
@@ -427,13 +671,134 @@ export default function ReconciliationPage() {
     setSelectedItem(item);
     setActionForm({
       action_status: item.action_status,
+      review_decision: item.review_decision,
       assigned_to: item.assigned_to ? String(item.assigned_to) : "none",
       remarks: item.remarks,
     });
+    setCorrectionForm({
+      reason_code: item.books_transaction_snapshot ? "books_entry_error" : "missing_books_entry",
+      reason_note: "",
+      reference_number: item.books_transaction_snapshot?.reference_number ?? item.portal_transaction_snapshot?.reference_number ?? "",
+      transaction_date: item.books_transaction_snapshot?.transaction_date ?? item.portal_transaction_snapshot?.transaction_date ?? "",
+      counterparty_gstin: item.books_transaction_snapshot?.counterparty_gstin ?? item.portal_transaction_snapshot?.counterparty_gstin ?? "",
+      counterparty_name: item.books_transaction_snapshot?.counterparty_name ?? item.portal_transaction_snapshot?.counterparty_name ?? "",
+      taxable_value: item.books_transaction_snapshot?.taxable_value ?? item.portal_transaction_snapshot?.taxable_value ?? "",
+      cgst_amount: item.books_transaction_snapshot?.cgst_amount ?? item.portal_transaction_snapshot?.cgst_amount ?? "",
+      sgst_amount: item.books_transaction_snapshot?.sgst_amount ?? item.portal_transaction_snapshot?.sgst_amount ?? "",
+      igst_amount: item.books_transaction_snapshot?.igst_amount ?? item.portal_transaction_snapshot?.igst_amount ?? "",
+      cess_amount: item.books_transaction_snapshot?.cess_amount ?? item.portal_transaction_snapshot?.cess_amount ?? "",
+      total_amount: item.books_transaction_snapshot?.total_amount ?? item.portal_transaction_snapshot?.total_amount ?? "",
+      place_of_supply: item.books_transaction_snapshot?.place_of_supply ?? item.portal_transaction_snapshot?.place_of_supply ?? "",
+      reverse_charge: item.books_transaction_snapshot?.reverse_charge ?? item.portal_transaction_snapshot?.reverse_charge ?? false,
+    });
+  };
+
+  const handleSaveBooksCorrection = async () => {
+    if (!selectedItem || !selectedItem.books_transaction_snapshot) {
+      toast.error("Books correction is only available when the row already has a books transaction.");
+      return;
+    }
+
+    try {
+      await correctItemMutation.mutateAsync({
+        itemId: selectedItem.id,
+        reason_code: correctionForm.reason_code,
+        reason_note: correctionForm.reason_note.trim(),
+        reference_number: correctionForm.reference_number.trim(),
+        transaction_date: correctionForm.transaction_date,
+        counterparty_gstin: correctionForm.counterparty_gstin.trim(),
+        counterparty_name: correctionForm.counterparty_name.trim(),
+        taxable_value: correctionForm.taxable_value,
+        cgst_amount: correctionForm.cgst_amount,
+        sgst_amount: correctionForm.sgst_amount,
+        igst_amount: correctionForm.igst_amount,
+        cess_amount: correctionForm.cess_amount,
+        total_amount: correctionForm.total_amount,
+        place_of_supply: correctionForm.place_of_supply.trim(),
+        reverse_charge: correctionForm.reverse_charge,
+      });
+      toast.success("Books correction saved. Reconciliation is rerunning with the updated books entry.");
+      setSelectedItem(null);
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
+  };
+
+  const handleCreateBooksEntry = async () => {
+    if (!selectedItem || !selectedItem.portal_transaction_snapshot) {
+      toast.error("Books entry creation is only available when the row already has a portal-side transaction.");
+      return;
+    }
+
+    try {
+      await createBooksEntryMutation.mutateAsync({
+        itemId: selectedItem.id,
+        reason_code: correctionForm.reason_code,
+        reason_note: correctionForm.reason_note.trim(),
+        reference_number: correctionForm.reference_number.trim(),
+        transaction_date: correctionForm.transaction_date,
+        counterparty_gstin: correctionForm.counterparty_gstin.trim(),
+        counterparty_name: correctionForm.counterparty_name.trim(),
+        taxable_value: correctionForm.taxable_value,
+        cgst_amount: correctionForm.cgst_amount,
+        sgst_amount: correctionForm.sgst_amount,
+        igst_amount: correctionForm.igst_amount,
+        cess_amount: correctionForm.cess_amount,
+        total_amount: correctionForm.total_amount,
+        place_of_supply: correctionForm.place_of_supply.trim(),
+        reverse_charge: correctionForm.reverse_charge,
+      });
+      toast.success("Books entry created from the reconciliation row. Reconciliation is rerunning now.");
+      setSelectedItem(null);
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
   };
 
   const run = runQuery.data;
-  const items = itemsQuery.data?.items ?? [];
+  const allItems = useMemo(() => itemsQuery.data?.items ?? [], [itemsQuery.data?.items]);
+  const items = allItems;
+  const issueBucketSummary = useMemo(() => {
+    const summary = {
+      ready: 0,
+      timing_difference: 0,
+      vendor_follow_up: 0,
+      books_correction: 0,
+      value_review: 0,
+      document_review: 0,
+      duplicate_cleanup: 0,
+      issue_review: 0,
+    };
+    for (const item of allItems) {
+      const bucket = getIssueBucket(item).value as keyof typeof summary;
+      summary[bucket] += 1;
+    }
+    return summary;
+  }, [allItems]);
+  const itcDecisionSummary = useMemo(
+    () => ({
+      itc_ready: run?.itc_ready_count ?? allItems.filter((item) => item.itc_status === "itc_ready").length,
+      itc_pending_2b: run?.itc_pending_2b_count ?? allItems.filter((item) => item.itc_status === "itc_pending_2b").length,
+      itc_pending_review: run?.itc_pending_review_count ?? allItems.filter((item) => item.itc_status === "itc_pending_review").length,
+      itc_blocked: run?.itc_blocked_count ?? allItems.filter((item) => item.itc_status === "itc_blocked").length,
+      itc_timing_difference:
+        run?.itc_timing_difference_count ?? allItems.filter((item) => item.itc_status === "itc_timing_difference").length,
+      itc_vendor_followup_required:
+        run?.itc_vendor_followup_required_count ??
+        allItems.filter((item) => item.itc_status === "itc_vendor_followup_required").length,
+    }),
+    [allItems, run],
+  );
+  const reviewDecisionSummary = useMemo(
+    () => ({
+      auto: allItems.filter((item) => item.review_decision === "auto").length,
+      claim_now: allItems.filter((item) => item.review_decision === "claim_now").length,
+      defer: allItems.filter((item) => item.review_decision === "defer").length,
+      blocked: allItems.filter((item) => item.review_decision === "blocked").length,
+      vendor_follow_up: allItems.filter((item) => item.review_decision === "vendor_follow_up").length,
+    }),
+    [allItems],
+  );
   const isPeriodLocked = Boolean(selectedPeriod?.is_locked);
   const hasRequiredData = (purchaseTransactionsQuery.data?.count ?? 0) > 0 && (portalTransactionsQuery.data?.count ?? 0) > 0;
   const unresolvedCount =
@@ -743,12 +1108,12 @@ export default function ReconciliationPage() {
       </SectionCard>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <StatCard label="Matched" value={String(run?.matched_count ?? 0)} detail="Transactions aligned exactly across books and 2B." tone="success" variant="soft" icon={SearchCheck} />
-        <StatCard label="Partial Match" value={String(run?.partial_match_count ?? 0)} detail="Within tolerance but still needs a quick review." tone="warning" variant="soft" icon={GitCompareArrows} />
-        <StatCard label="Missing in 2B" value={String(run?.missing_in_portal_count ?? 0)} detail="Present in books but missing from the 2B side." tone="danger" variant="soft" icon={AlertTriangle} />
-        <StatCard label="Missing in Books" value={String(run?.missing_in_books_count ?? 0)} detail="Present in 2B but not available in the purchase register." tone="primary" variant="soft" icon={Database} />
-        <StatCard label="Duplicates" value={String(run?.duplicate_count ?? 0)} detail="Potential duplicate invoices requiring cleanup before filing." tone="warning" variant="soft" icon={GitCompareArrows} />
-        <StatCard label="ITC at Risk" value={`Rs. ${formatMoney(run?.total_itc_at_risk)}`} detail="Tax exposure across unresolved mismatches." tone="danger" variant="soft" icon={CircleAlert} />
+        <StatCard label="ITC Ready" value={String(itcDecisionSummary.itc_ready)} detail="Rows that are aligned enough for ITC confidence." tone="success" variant="soft" icon={SearchCheck} />
+        <StatCard label="Pending in 2B" value={String(itcDecisionSummary.itc_pending_2b)} detail="Booked rows still waiting for GST-side reflection." tone="warning" variant="soft" icon={GitCompareArrows} />
+        <StatCard label="Timing Difference" value={String(itcDecisionSummary.itc_timing_difference)} detail="Cross-period cases that need timing review, not panic." tone="warning" variant="soft" icon={GitCompareArrows} />
+        <StatCard label="Vendor Follow-up" value={String(itcDecisionSummary.itc_vendor_followup_required)} detail="Supplier-side follow-up needed before ITC is comfortable." tone="danger" variant="soft" icon={AlertTriangle} />
+        <StatCard label="Pending Review" value={String(itcDecisionSummary.itc_pending_review)} detail="Rows needing amount or document review before ITC decisions." tone="primary" variant="soft" icon={Database} />
+        <StatCard label="ITC Blocked" value={String(itcDecisionSummary.itc_blocked)} detail={`Blocked rows with tax exposure of Rs. ${formatMoney(run?.total_itc_at_risk)}.`} tone="danger" variant="soft" icon={CircleAlert} />
       </div>
 
       <SectionCard title="Run history" description="Latest reconciliation runs for the selected working context.">
@@ -809,12 +1174,20 @@ export default function ReconciliationPage() {
         )}
       </SectionCard>
 
-      <SectionCard title="Reconciliation items" description="Filter mismatch rows, assign ownership, and update action status on each exception.">
+      <SectionCard title="Reconciliation issues" description="Work through supplier follow-ups, books corrections, timing differences, and value reviews from one place.">
         {!activeRunId ? (
           <EmptyState title="Select a reconciliation run" description="Choose a run from history to inspect matched, partial, missing, and duplicate items." />
         ) : (
           <div className="space-y-5">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <Select value={issueBucket} onValueChange={setIssueBucket}>
+                <SelectTrigger className="h-10 bg-slate-50"><SelectValue placeholder="Issue bucket" /></SelectTrigger>
+                <SelectContent>{issueBucketOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+              </Select>
+              <Select value={itcStatus} onValueChange={setItcStatus}>
+                <SelectTrigger className="h-10 bg-slate-50"><SelectValue placeholder="ITC decision" /></SelectTrigger>
+                <SelectContent>{itcStatusOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+              </Select>
               <Select value={matchStatus} onValueChange={setMatchStatus}>
                 <SelectTrigger className="h-10 bg-slate-50"><SelectValue placeholder="Match status" /></SelectTrigger>
                 <SelectContent>{matchStatusOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
@@ -827,7 +1200,22 @@ export default function ReconciliationPage() {
                 <SelectTrigger className="h-10 bg-slate-50"><SelectValue placeholder="Reason" /></SelectTrigger>
                 <SelectContent>{mismatchReasonOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
               </Select>
-              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search vendor, GSTIN, invoice" />
+            </div>
+            <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search vendor, GSTIN, invoice" />
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <StatCard label="Vendor follow-up" value={String(issueBucketSummary.vendor_follow_up)} detail="Books rows missing from GSTR-2B." tone="danger" variant="soft" icon={AlertTriangle} />
+              <StatCard label="Books correction" value={String(issueBucketSummary.books_correction)} detail="GSTR-2B rows missing from books." tone="primary" variant="soft" icon={Database} />
+              <StatCard label="Timing difference" value={String(issueBucketSummary.timing_difference)} detail="Cross-period or date-driven review cases." tone="warning" variant="soft" icon={GitCompareArrows} />
+              <StatCard label="Value review" value={String(issueBucketSummary.value_review + issueBucketSummary.document_review + issueBucketSummary.duplicate_cleanup)} detail="Rows needing amount, document, or duplicate review." tone="warning" variant="soft" icon={CircleAlert} />
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              <StatCard label="Auto decisions" value={String(reviewDecisionSummary.auto)} detail="Rows still following raw reconciliation logic." tone="primary" variant="soft" icon={SearchCheck} />
+              <StatCard label="Claim now" value={String(reviewDecisionSummary.claim_now)} detail="Manual CA overrides to include ITC now." tone="success" variant="soft" icon={SearchCheck} />
+              <StatCard label="Defer" value={String(reviewDecisionSummary.defer)} detail="Rows intentionally held back from this month." tone="warning" variant="soft" icon={CircleAlert} />
+              <StatCard label="Blocked" value={String(reviewDecisionSummary.blocked)} detail="Rows intentionally kept out of claim." tone="danger" variant="soft" icon={AlertTriangle} />
+              <StatCard label="Vendor follow-up" value={String(reviewDecisionSummary.vendor_follow_up)} detail="Rows parked for supplier clarification." tone="danger" variant="soft" icon={AlertTriangle} />
             </div>
 
             {itemsQuery.isLoading ? (
@@ -846,15 +1234,20 @@ export default function ReconciliationPage() {
                       <TableHead>Books Tax</TableHead>
                       <TableHead>2B Tax</TableHead>
                       <TableHead>Difference</TableHead>
-                      <TableHead>Match Status</TableHead>
-                      <TableHead>Reason</TableHead>
+                      <TableHead>Issue Bucket</TableHead>
+                      <TableHead>ITC Decision</TableHead>
+                      <TableHead>Recommended Next Step</TableHead>
                       <TableHead>Action</TableHead>
                       <TableHead>Assigned</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {items.map((item) => (
+                    {items.map((item) => {
+                      const issue = getIssueBucket(item);
+                      const itc = getItcDecision(item);
+                      const reviewDecision = getReviewDecision(item);
+                      return (
                       <TableRow key={item.id}>
                         <TableCell>{item.counterparty_name || "Unknown vendor"}</TableCell>
                         <TableCell>{item.counterparty_gstin || "Unavailable"}</TableCell>
@@ -863,8 +1256,20 @@ export default function ReconciliationPage() {
                         <TableCell>{item.books_tax ? `Rs. ${formatMoney(item.books_tax)}` : "-"}</TableCell>
                         <TableCell>{item.portal_tax ? `Rs. ${formatMoney(item.portal_tax)}` : "-"}</TableCell>
                         <TableCell>Rs. {formatMoney(item.tax_difference)}</TableCell>
-                        <TableCell><StatusBadge label={item.match_status.replace(/_/g, " ")} variant={itemStatusVariant(item.match_status)} /></TableCell>
-                        <TableCell>{item.mismatch_reason ? item.mismatch_reason.replace(/_/g, " ") : "—"}</TableCell>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <StatusBadge label={issue.label} variant={issue.variant} />
+                            <p className="text-xs text-slate-500">{issue.detail}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <StatusBadge label={itc.label} variant={itc.variant} />
+                            <p className="text-xs text-slate-500">{itc.detail}</p>
+                            <StatusBadge label={reviewDecision.label} variant={reviewDecision.variant} />
+                          </div>
+                        </TableCell>
+                        <TableCell>{issue.nextAction}</TableCell>
                         <TableCell><StatusBadge label={item.action_status} variant={actionStatusVariant(item.action_status)} /></TableCell>
                         <TableCell>{item.assigned_to_name ?? "Unassigned"}</TableCell>
                         <TableCell className="text-right">
@@ -873,7 +1278,7 @@ export default function ReconciliationPage() {
                           </Button>
                         </TableCell>
                       </TableRow>
-                    ))}
+                    )})}
                   </TableBody>
                 </Table>
               </div>
@@ -887,18 +1292,21 @@ export default function ReconciliationPage() {
       <Dialog open={Boolean(selectedItem)} onOpenChange={(open) => !open && setSelectedItem(null)}>
         <AppModalContent size="lg">
           <AppModalHeader
-            title="Reconciliation item action"
-            description="Assign ownership, record remarks, and move the exception through the review workflow."
+            title="Reconciliation issue action"
+            description="Assign ownership, record remarks, and move this issue toward resolution."
           />
 
           <AppModalBody className="space-y-6">
             {selectedItem ? (
               <>
-                <SectionCard title="Exception summary" description={selectedItem.counterparty_name || "Reconciliation item"}>
+                <SectionCard title="Issue summary" description={selectedItem.counterparty_name || "Reconciliation item"}>
                   <div className="grid gap-4 md:grid-cols-2 text-sm">
                     <div className="space-y-3">
                       <div><span className="text-slate-500">Books invoice:</span> <span className="font-medium text-slate-900">{selectedItem.books_invoice || "-"}</span></div>
                       <div><span className="text-slate-500">2B invoice:</span> <span className="font-medium text-slate-900">{selectedItem.portal_invoice || "-"}</span></div>
+                      <div><span className="text-slate-500">Issue bucket:</span> <span className="font-medium text-slate-900">{getIssueBucket(selectedItem).label}</span></div>
+                      <div><span className="text-slate-500">ITC decision:</span> <span className="font-medium text-slate-900">{getItcDecision(selectedItem).label}</span></div>
+                      <div><span className="text-slate-500">CA review decision:</span> <span className="font-medium text-slate-900">{getReviewDecision(selectedItem).label}</span></div>
                       <div><span className="text-slate-500">Reason:</span> <span className="font-medium text-slate-900">{selectedItem.mismatch_reason ? selectedItem.mismatch_reason.replace(/_/g, " ") : "—"}</span></div>
                     </div>
                     <div className="space-y-3">
@@ -907,10 +1315,319 @@ export default function ReconciliationPage() {
                       <div><span className="text-slate-500">Total difference:</span> <span className="font-medium text-slate-900">Rs. {formatMoney(selectedItem.total_difference)}</span></div>
                     </div>
                   </div>
+                  <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
+                    <p className="font-medium text-slate-900">Recommended next step</p>
+                    <p className="mt-1">{getIssueBucket(selectedItem).nextAction}</p>
+                    <p className="mt-2 text-slate-500">{getIssueBucket(selectedItem).detail}</p>
+                    <div className="mt-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                      <p className="font-medium text-slate-900">Current ITC position</p>
+                      <p className="mt-1">{getItcDecision(selectedItem).label}</p>
+                      <p className="mt-2 text-slate-500">{getItcDecision(selectedItem).detail}</p>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <StatusBadge label={getReviewDecision(selectedItem).label} variant={getReviewDecision(selectedItem).variant} />
+                        <p className="text-xs text-slate-500">{getReviewDecision(selectedItem).detail}</p>
+                      </div>
+                    </div>
+                  </div>
+                </SectionCard>
+
+                <SectionCard
+                  title="Correct books entry"
+                  description={
+                    selectedItem.books_transaction_snapshot
+                      ? "Apply a controlled books-side correction, capture the reason, and rerun reconciliation from the same working context."
+                      : "This row does not yet have a books transaction. Phase 1 supports correction only for existing books entries."
+                  }
+                >
+                  {selectedItem.books_transaction_snapshot ? (
+                    <div className="space-y-5">
+                      <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-900">
+                        <p className="font-medium">Audit-first correction flow</p>
+                        <p className="mt-1">
+                          The original imported values stay preserved. Your changes create an immutable correction record with before and after snapshots, then rerun reconciliation for this period.
+                        </p>
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Reason code</Label>
+                          <Select value={correctionForm.reason_code} onValueChange={(value) => setCorrectionForm((current) => ({ ...current, reason_code: value }))}>
+                            <SelectTrigger className="h-10 bg-slate-50"><SelectValue placeholder="Reason code" /></SelectTrigger>
+                            <SelectContent>
+                              {correctionReasonOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Transaction date</Label>
+                          <Input
+                            type="date"
+                            value={correctionForm.transaction_date}
+                            onChange={(event) => setCorrectionForm((current) => ({ ...current, transaction_date: event.target.value }))}
+                            className="bg-slate-50"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Reason note</Label>
+                        <Textarea
+                          value={correctionForm.reason_note}
+                          onChange={(event) => setCorrectionForm((current) => ({ ...current, reason_note: event.target.value }))}
+                          placeholder="Explain why this books-side value is being corrected and what evidence was used."
+                          className="min-h-24 bg-slate-50"
+                        />
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Books invoice number</Label>
+                          <Input
+                            value={correctionForm.reference_number}
+                            onChange={(event) => setCorrectionForm((current) => ({ ...current, reference_number: event.target.value }))}
+                            className="bg-slate-50"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Place of supply</Label>
+                          <Input
+                            value={correctionForm.place_of_supply}
+                            onChange={(event) => setCorrectionForm((current) => ({ ...current, place_of_supply: event.target.value }))}
+                            className="bg-slate-50"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Counterparty GSTIN</Label>
+                          <Input
+                            value={correctionForm.counterparty_gstin}
+                            onChange={(event) => setCorrectionForm((current) => ({ ...current, counterparty_gstin: event.target.value.toUpperCase() }))}
+                            className="bg-slate-50"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Counterparty name</Label>
+                          <Input
+                            value={correctionForm.counterparty_name}
+                            onChange={(event) => setCorrectionForm((current) => ({ ...current, counterparty_name: event.target.value }))}
+                            className="bg-slate-50"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                        <div className="space-y-2">
+                          <Label>Taxable value</Label>
+                          <Input value={correctionForm.taxable_value} onChange={(event) => setCorrectionForm((current) => ({ ...current, taxable_value: event.target.value }))} className="bg-slate-50" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>CGST</Label>
+                          <Input value={correctionForm.cgst_amount} onChange={(event) => setCorrectionForm((current) => ({ ...current, cgst_amount: event.target.value }))} className="bg-slate-50" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>SGST</Label>
+                          <Input value={correctionForm.sgst_amount} onChange={(event) => setCorrectionForm((current) => ({ ...current, sgst_amount: event.target.value }))} className="bg-slate-50" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>IGST</Label>
+                          <Input value={correctionForm.igst_amount} onChange={(event) => setCorrectionForm((current) => ({ ...current, igst_amount: event.target.value }))} className="bg-slate-50" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>CESS</Label>
+                          <Input value={correctionForm.cess_amount} onChange={(event) => setCorrectionForm((current) => ({ ...current, cess_amount: event.target.value }))} className="bg-slate-50" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Total amount</Label>
+                          <Input value={correctionForm.total_amount} onChange={(event) => setCorrectionForm((current) => ({ ...current, total_amount: event.target.value }))} className="bg-slate-50" />
+                        </div>
+                      </div>
+
+                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={correctionForm.reverse_charge}
+                          onChange={(event) => setCorrectionForm((current) => ({ ...current, reverse_charge: event.target.checked }))}
+                        />
+                        Reverse charge applies to this books row
+                      </label>
+
+                      <div className="flex justify-end">
+                        <Button onClick={handleSaveBooksCorrection} disabled={correctItemMutation.isPending}>
+                          {correctItemMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Save books correction"}
+                        </Button>
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-slate-900">Correction history</p>
+                            <p className="mt-1 text-sm text-slate-500">The newest correction for this books transaction appears first.</p>
+                          </div>
+                          <StatusBadge label={`${selectedItem.corrections_count} recorded`} variant="neutral" />
+                        </div>
+                        <div className="mt-4 space-y-3">
+                          {itemCorrectionsQuery.isLoading ? (
+                            <p className="text-sm text-slate-500">Loading corrections...</p>
+                          ) : itemCorrectionsQuery.data?.items.length ? (
+                            itemCorrectionsQuery.data.items.slice(0, 3).map((correction) => (
+                              <div key={correction.id} className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <StatusBadge label={formatCorrectionReason(correction.reason_code)} variant="primary" />
+                                  <span className="text-slate-500">{correction.applied_by_name ?? "Unknown user"}</span>
+                                  <span className="text-slate-400">•</span>
+                                  <span className="text-slate-500">{formatDateTime(correction.applied_at)}</span>
+                                </div>
+                                <p className="mt-2 text-slate-700">{correction.reason_note}</p>
+                                <p className="mt-2 text-xs text-slate-500">
+                                  Changed fields: {correction.changed_fields.length ? correction.changed_fields.join(", ") : "No field list recorded"}
+                                </p>
+                              </div>
+                            ))
+                          ) : (
+                            <p className="text-sm text-slate-500">No books corrections recorded for this transaction yet.</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-5">
+                      <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-900">
+                        <p className="font-medium">Create books entry from portal evidence</p>
+                        <p className="mt-1">
+                          This row exists in GSTR-2B but is missing in books. Use the portal details as your starting point, explain why the books entry is being created, and rerun reconciliation immediately after save.
+                        </p>
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Reason code</Label>
+                          <Select value={correctionForm.reason_code} onValueChange={(value) => setCorrectionForm((current) => ({ ...current, reason_code: value }))}>
+                            <SelectTrigger className="h-10 bg-slate-50"><SelectValue placeholder="Reason code" /></SelectTrigger>
+                            <SelectContent>
+                              {creationReasonOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Transaction date</Label>
+                          <Input
+                            type="date"
+                            value={correctionForm.transaction_date}
+                            onChange={(event) => setCorrectionForm((current) => ({ ...current, transaction_date: event.target.value }))}
+                            className="bg-slate-50"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Reason note</Label>
+                        <Textarea
+                          value={correctionForm.reason_note}
+                          onChange={(event) => setCorrectionForm((current) => ({ ...current, reason_note: event.target.value }))}
+                          placeholder="Explain why the books entry is being created and what evidence was checked."
+                          className="min-h-24 bg-slate-50"
+                        />
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Books invoice number</Label>
+                          <Input
+                            value={correctionForm.reference_number}
+                            onChange={(event) => setCorrectionForm((current) => ({ ...current, reference_number: event.target.value }))}
+                            className="bg-slate-50"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Place of supply</Label>
+                          <Input
+                            value={correctionForm.place_of_supply}
+                            onChange={(event) => setCorrectionForm((current) => ({ ...current, place_of_supply: event.target.value }))}
+                            className="bg-slate-50"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Counterparty GSTIN</Label>
+                          <Input
+                            value={correctionForm.counterparty_gstin}
+                            onChange={(event) => setCorrectionForm((current) => ({ ...current, counterparty_gstin: event.target.value.toUpperCase() }))}
+                            className="bg-slate-50"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Counterparty name</Label>
+                          <Input
+                            value={correctionForm.counterparty_name}
+                            onChange={(event) => setCorrectionForm((current) => ({ ...current, counterparty_name: event.target.value }))}
+                            className="bg-slate-50"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                        <div className="space-y-2">
+                          <Label>Taxable value</Label>
+                          <Input value={correctionForm.taxable_value} onChange={(event) => setCorrectionForm((current) => ({ ...current, taxable_value: event.target.value }))} className="bg-slate-50" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>CGST</Label>
+                          <Input value={correctionForm.cgst_amount} onChange={(event) => setCorrectionForm((current) => ({ ...current, cgst_amount: event.target.value }))} className="bg-slate-50" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>SGST</Label>
+                          <Input value={correctionForm.sgst_amount} onChange={(event) => setCorrectionForm((current) => ({ ...current, sgst_amount: event.target.value }))} className="bg-slate-50" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>IGST</Label>
+                          <Input value={correctionForm.igst_amount} onChange={(event) => setCorrectionForm((current) => ({ ...current, igst_amount: event.target.value }))} className="bg-slate-50" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>CESS</Label>
+                          <Input value={correctionForm.cess_amount} onChange={(event) => setCorrectionForm((current) => ({ ...current, cess_amount: event.target.value }))} className="bg-slate-50" />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Total amount</Label>
+                          <Input value={correctionForm.total_amount} onChange={(event) => setCorrectionForm((current) => ({ ...current, total_amount: event.target.value }))} className="bg-slate-50" />
+                        </div>
+                      </div>
+
+                      <label className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={correctionForm.reverse_charge}
+                          onChange={(event) => setCorrectionForm((current) => ({ ...current, reverse_charge: event.target.checked }))}
+                        />
+                        Reverse charge applies to this books row
+                      </label>
+
+                      <div className="flex justify-end">
+                        <Button onClick={handleCreateBooksEntry} disabled={createBooksEntryMutation.isPending}>
+                          {createBooksEntryMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Create books entry"}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </SectionCard>
 
                 <SectionCard title="Update action" description="Assignee selection is currently limited to the signed-in user for this build.">
                   <div className="space-y-4">
+                    <Select
+                      value={actionForm.review_decision}
+                      onValueChange={(value) =>
+                        setActionForm((current) => ({ ...current, review_decision: value as ReconciliationItemRecord["review_decision"] }))
+                      }
+                    >
+                      <SelectTrigger className="h-10 bg-slate-50"><SelectValue placeholder="CA review decision" /></SelectTrigger>
+                      <SelectContent>
+                        {reviewDecisionOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+
                     <Select value={actionForm.assigned_to} onValueChange={(value) => setActionForm((current) => ({ ...current, assigned_to: value }))}>
                       <SelectTrigger className="h-10 bg-slate-50"><SelectValue placeholder="Assigned to" /></SelectTrigger>
                       <SelectContent>

@@ -6,6 +6,7 @@ from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.db import connection
 from django.test.utils import CaptureQueriesContext, override_settings
+from django.utils import timezone
 from openpyxl import load_workbook
 from rest_framework.test import APIClient
 
@@ -761,6 +762,108 @@ def test_full_gstr1_workbook_export(dashboard_authenticated_client, dashboard_co
         compliance_period=dashboard_context["compliance_period"],
         transaction_type="sales",
         document_type="invoice",
+        reference_number="EXP-001",
+        transaction_date="2026-04-11",
+        counterparty_gstin="",
+        counterparty_name="Overseas Buyer",
+        taxable_value=Decimal("25000.00"),
+        igst_amount=Decimal("4500.00"),
+        tax_amount=Decimal("4500.00"),
+        total_amount=Decimal("29500.00"),
+        place_of_supply="96",
+        metadata={"special_supply_type": "export_wpay", "port_code": "INBLR4", "shipping_bill_number": "SB-001", "shipping_bill_date": "2026-04-11", "line_items": [{"taxable_value": "25000.00", "igst_amount": "4500.00", "rate": "18.00", "total_amount": "29500.00"}]},
+        created_by=dashboard_context["user"],
+        updated_by=dashboard_context["user"],
+    )
+    GSTTransaction.objects.create(
+        workspace=dashboard_context["workspace"],
+        client=dashboard_context["client"],
+        gstin=dashboard_context["gstin"],
+        compliance_period=dashboard_context["compliance_period"],
+        transaction_type="sales",
+        document_type="invoice",
+        reference_number="ECOM-001",
+        transaction_date="2026-04-13",
+        counterparty_gstin="",
+        counterparty_name="Marketplace Customer",
+        taxable_value=Decimal("8000.00"),
+        cgst_amount=Decimal("720.00"),
+        sgst_amount=Decimal("720.00"),
+        tax_amount=Decimal("1440.00"),
+        total_amount=Decimal("9440.00"),
+        place_of_supply="29",
+        metadata={"ecommerce_gstin": "29ECOM1234F1Z5", "ecommerce_section": "table_14"},
+        created_by=dashboard_context["user"],
+        updated_by=dashboard_context["user"],
+    )
+    GSTTransaction.objects.create(
+        workspace=dashboard_context["workspace"],
+        client=dashboard_context["client"],
+        gstin=dashboard_context["gstin"],
+        compliance_period=dashboard_context["compliance_period"],
+        transaction_type="sales",
+        document_type="invoice",
+        reference_number="AMD-001",
+        transaction_date="2026-04-17",
+        counterparty_gstin="29ABCDE9999F1Z5",
+        counterparty_name="North Retail Pvt Ltd",
+        taxable_value=Decimal("6000.00"),
+        cgst_amount=Decimal("540.00"),
+        sgst_amount=Decimal("540.00"),
+        tax_amount=Decimal("1080.00"),
+        total_amount=Decimal("7080.00"),
+        place_of_supply="29",
+        metadata={"is_amendment": True, "original_document_number": "S-0001", "original_document_date": "2026-03-31", "original_period": "2026-03", "original_counterparty_gstin": "29ABCDE9999F1Z5"},
+        created_by=dashboard_context["user"],
+        updated_by=dashboard_context["user"],
+    )
+    GSTTransaction.objects.create(
+        workspace=dashboard_context["workspace"],
+        client=dashboard_context["client"],
+        gstin=dashboard_context["gstin"],
+        compliance_period=dashboard_context["compliance_period"],
+        transaction_type="advance_received",
+        document_type="receipt_voucher",
+        reference_number="AR-001",
+        transaction_date="2026-04-15",
+        counterparty_gstin="",
+        counterparty_name="Advance Customer",
+        taxable_value=Decimal("10000.00"),
+        igst_amount=Decimal("1800.00"),
+        tax_amount=Decimal("1800.00"),
+        total_amount=Decimal("11800.00"),
+        place_of_supply="27",
+        metadata={"advance_reference": "RV-001", "line_items": [{"taxable_value": "10000.00", "igst_amount": "1800.00", "rate": "18.00", "total_amount": "11800.00"}]},
+        created_by=dashboard_context["user"],
+        updated_by=dashboard_context["user"],
+    )
+    GSTTransaction.objects.create(
+        workspace=dashboard_context["workspace"],
+        client=dashboard_context["client"],
+        gstin=dashboard_context["gstin"],
+        compliance_period=dashboard_context["compliance_period"],
+        transaction_type="advance_adjusted",
+        document_type="advance_adjustment",
+        reference_number="AA-001",
+        transaction_date="2026-04-16",
+        counterparty_gstin="",
+        counterparty_name="Advance Customer",
+        taxable_value=Decimal("4000.00"),
+        igst_amount=Decimal("720.00"),
+        tax_amount=Decimal("720.00"),
+        total_amount=Decimal("4720.00"),
+        place_of_supply="27",
+        metadata={"advance_reference": "AR-001", "line_items": [{"taxable_value": "4000.00", "igst_amount": "720.00", "rate": "18.00", "total_amount": "4720.00"}]},
+        created_by=dashboard_context["user"],
+        updated_by=dashboard_context["user"],
+    )
+    GSTTransaction.objects.create(
+        workspace=dashboard_context["workspace"],
+        client=dashboard_context["client"],
+        gstin=dashboard_context["gstin"],
+        compliance_period=dashboard_context["compliance_period"],
+        transaction_type="sales",
+        document_type="invoice",
         reference_number="S-002",
         transaction_date="2026-04-12",
         counterparty_gstin="",
@@ -799,6 +902,7 @@ def test_full_gstr1_workbook_export(dashboard_authenticated_client, dashboard_co
         return_type=ReturnPreparation.ReturnType.GSTR1,
         status=ReturnPreparation.PreparationStatus.APPROVED,
         summary_snapshot={
+            "summary_version": "gstr1.sectioned.v1",
             "outward_supplies": {
                 "b2b_taxable_value": "100000.00",
                 "b2b_tax_amount": "18000.00",
@@ -808,10 +912,35 @@ def test_full_gstr1_workbook_export(dashboard_authenticated_client, dashboard_co
                 "credit_note_tax_amount": "180.00",
                 "debit_note_taxable_value": "0.00",
                 "debit_note_tax_amount": "0.00",
-                "total_taxable_value": "126000.00",
-                "total_tax_amount": "22680.00",
-                "document_count": 3,
-            }
+                "advance_received_taxable_value": "10000.00",
+                "advance_received_tax_amount": "1800.00",
+                "advance_adjusted_taxable_value": "4000.00",
+                "advance_adjusted_tax_amount": "720.00",
+                "export_taxable_value": "25000.00",
+                "export_tax_amount": "4500.00",
+                "amendment_taxable_value": "6000.00",
+                "amendment_tax_amount": "1080.00",
+                "ecommerce_taxable_value": "8000.00",
+                "ecommerce_tax_amount": "1440.00",
+                "total_taxable_value": "179000.00",
+                "total_tax_amount": "32220.00",
+                "document_count": 8,
+            },
+            "sections": {
+                "b2b": {"document_count": 1, "taxable_value": "100000.00", "cgst_amount": "9000.00", "sgst_amount": "9000.00", "igst_amount": "0.00", "cess_amount": "0.00", "tax_amount": "18000.00", "total_amount": "118000.00", "transaction_ids": []},
+                "b2cl": {"document_count": 0, "taxable_value": "0.00", "cgst_amount": "0.00", "sgst_amount": "0.00", "igst_amount": "0.00", "cess_amount": "0.00", "tax_amount": "0.00", "total_amount": "0.00", "transaction_ids": []},
+                "b2cs": {"document_count": 1, "taxable_value": "25000.00", "cgst_amount": "2250.00", "sgst_amount": "2250.00", "igst_amount": "0.00", "cess_amount": "0.00", "tax_amount": "4500.00", "total_amount": "29500.00", "transaction_ids": []},
+                "cdnr": {"document_count": 1, "taxable_value": "1000.00", "cgst_amount": "90.00", "sgst_amount": "90.00", "igst_amount": "0.00", "cess_amount": "0.00", "tax_amount": "180.00", "total_amount": "1180.00", "transaction_ids": []},
+                "cdnur": {"document_count": 0, "taxable_value": "0.00", "cgst_amount": "0.00", "sgst_amount": "0.00", "igst_amount": "0.00", "cess_amount": "0.00", "tax_amount": "0.00", "total_amount": "0.00", "transaction_ids": []},
+                "advances_received": {"row_count": 1, "taxable_value": "10000.00", "cgst_amount": "0.00", "sgst_amount": "0.00", "igst_amount": "1800.00", "cess_amount": "0.00", "tax_amount": "1800.00", "total_amount": "11800.00", "transaction_ids": [], "rows": [{"place_of_supply": "27", "supply_type": "INTER", "rate": "18.00", "taxable_value": "10000.00", "cgst_amount": "0.00", "sgst_amount": "0.00", "igst_amount": "1800.00", "cess_amount": "0.00", "tax_amount": "1800.00", "total_amount": "11800.00", "document_count": 1, "transaction_ids": []}]},
+                "advances_adjusted": {"row_count": 1, "taxable_value": "4000.00", "cgst_amount": "0.00", "sgst_amount": "0.00", "igst_amount": "720.00", "cess_amount": "0.00", "tax_amount": "720.00", "total_amount": "4720.00", "transaction_ids": [], "rows": [{"place_of_supply": "27", "supply_type": "INTER", "rate": "18.00", "taxable_value": "4000.00", "cgst_amount": "0.00", "sgst_amount": "0.00", "igst_amount": "720.00", "cess_amount": "0.00", "tax_amount": "720.00", "total_amount": "4720.00", "document_count": 1, "transaction_ids": []}]},
+                "exports": {"row_count": 1, "taxable_value": "25000.00", "cgst_amount": "0.00", "sgst_amount": "0.00", "igst_amount": "4500.00", "cess_amount": "0.00", "tax_amount": "4500.00", "total_amount": "29500.00", "transaction_ids": [], "rows": [{"special_supply_type": "export_wpay", "rate": "18.00", "taxable_value": "25000.00", "cgst_amount": "0.00", "sgst_amount": "0.00", "igst_amount": "4500.00", "cess_amount": "0.00", "tax_amount": "4500.00", "total_amount": "29500.00", "document_count": 1, "transaction_ids": []}]},
+                "amendments": {"row_count": 1, "taxable_value": "6000.00", "cgst_amount": "540.00", "sgst_amount": "540.00", "igst_amount": "0.00", "cess_amount": "0.00", "tax_amount": "1080.00", "total_amount": "7080.00", "transaction_ids": [], "rows": [{"target_section": "b2b", "original_period": "2026-03", "document_count": 1, "taxable_value": "6000.00", "cgst_amount": "540.00", "sgst_amount": "540.00", "igst_amount": "0.00", "cess_amount": "0.00", "tax_amount": "1080.00", "total_amount": "7080.00", "documents": [{"transaction_id": "x", "transaction_type": "sales", "document_type": "invoice", "document_number": "AMD-001", "document_date": "2026-04-17", "original_document_number": "S-0001", "original_document_date": "2026-03-31", "original_period": "2026-03", "original_counterparty_gstin": "29ABCDE9999F1Z5", "target_section": "b2b", "ecommerce_gstin": "", "special_supply_type": "", "taxable_value": "6000.00", "tax_amount": "1080.00"}]}]},
+                "ecommerce": {"row_count": 1, "taxable_value": "8000.00", "cgst_amount": "720.00", "sgst_amount": "720.00", "igst_amount": "0.00", "cess_amount": "0.00", "tax_amount": "1440.00", "total_amount": "9440.00", "transaction_ids": [], "rows": [{"ecommerce_gstin": "29ECOM1234F1Z5", "section_code": "table_14", "place_of_supply": "29", "rate": "18.00", "document_count": 1, "taxable_value": "8000.00", "cgst_amount": "720.00", "sgst_amount": "720.00", "igst_amount": "0.00", "cess_amount": "0.00", "tax_amount": "1440.00", "total_amount": "9440.00"}]},
+                "nil_exempt_non_gst": {"rows": [], "total_taxable_value": "0.00"},
+                "hsn_summary": {"row_count": 0, "rows": []},
+                "documents_issued": {"row_count": 0, "rows": []},
+            },
         },
         prepared_by=dashboard_context["user"],
         approved_by=dashboard_context["user"],
@@ -861,7 +990,7 @@ def test_full_gstr1_workbook_export(dashboard_authenticated_client, dashboard_co
     assert summary_sheet["B2"].value == 1
     hsn_review_sheet = workbook["HSN Summary"]
     assert hsn_review_sheet["A2"].value == "UNSPECIFIED"
-    assert hsn_review_sheet["J2"].value == 3
+    assert hsn_review_sheet["J2"].value == 6
     document_review_sheet = workbook["Document Summary"]
     assert document_review_sheet["B2"].value == "SINV"
     assert document_review_sheet["C2"].value == 1
@@ -882,10 +1011,29 @@ def test_full_gstr1_workbook_export(dashboard_authenticated_client, dashboard_co
     b2cl_sheet = workbook["5 5 B2CL (Large)"]
     assert b2cl_sheet["A1"].value == "Info"
     assert b2cl_sheet["A2"].value == "No rows for selected scope."
+    export_sheet = workbook["6 6 Exports Deemed Exports SEZ"]
+    assert export_sheet["A2"].value == "EXP-001"
+    assert export_sheet["E2"].value == "Export with payment"
+    assert export_sheet["G2"].value == "INBLR4"
+    amendment_sheet = workbook["9 9 Amendments (4 5 6)"]
+    assert amendment_sheet["A2"].value == "b2b"
+    assert amendment_sheet["D2"].value == "S-0001"
+    advances_summary_sheet = workbook["11 11 Advances and Adjustments"]
+    assert advances_summary_sheet["A2"].value == "Advances Received"
+    advances_received_sheet = workbook["11A Advances"]
+    assert advances_received_sheet["A2"].value == "27"
+    assert advances_received_sheet["D2"].value == 10000
+    advances_adjusted_sheet = workbook["11B Advances"]
+    assert advances_adjusted_sheet["A2"].value == "27"
+    assert advances_adjusted_sheet["D2"].value == 4000
+    eco_sheet = workbook["14 14 Supplier ECO GSTIN-wise S"]
+    assert eco_sheet["A2"].value == "29ECOM1234F1Z5"
+    assert eco_sheet["F2"].value == 8000
     hsn_sheet = workbook["12 12 HSN Summary"]
     assert hsn_sheet["A2"].value == "UNSPECIFIED"
     docs_sheet = workbook["13 13 Documents Issued"]
-    assert docs_sheet["B2"].value == "Credit Note"
+    document_labels = {docs_sheet[f"B{row}"].value for row in range(2, 6)}
+    assert {"Advance Adjustment", "Receipt Voucher", "Credit Note", "Tax Invoice"}.issubset(document_labels)
     validations_sheet = workbook["Validations"]
     assert validations_sheet["A2"].value == "HSN_MISSING"
 
@@ -1038,6 +1186,159 @@ def test_full_gstr3b_workbook_export(dashboard_authenticated_client, dashboard_c
     assert payment_sheet["F4"].value == "720.00"
     recon_sheet = workbook["Reconciliation Impact"]
     assert recon_sheet["B2"].value == str(run.id)
+
+
+@pytest.mark.django_db
+def test_full_gstr9_workbook_export(dashboard_authenticated_client, dashboard_context):
+    may_period = CompliancePeriod.objects.create(
+        gstin=dashboard_context["gstin"],
+        period="2026-05",
+        return_type="GSTR-3B",
+        created_by=dashboard_context["user"],
+        updated_by=dashboard_context["user"],
+    )
+    april_gstr1 = ReturnPreparation.objects.create(
+        compliance_period=dashboard_context["compliance_period"],
+        return_type=ReturnPreparation.ReturnType.GSTR1,
+        status=ReturnPreparation.PreparationStatus.READY_FOR_REVIEW,
+        summary_snapshot={"outward_supplies": {"total_taxable_value": "1000.00", "total_tax_amount": "180.00"}},
+        prepared_by=dashboard_context["user"],
+        created_by=dashboard_context["user"],
+        updated_by=dashboard_context["user"],
+    )
+    may_gstr3b = ReturnPreparation.objects.create(
+        compliance_period=may_period,
+        return_type=ReturnPreparation.ReturnType.GSTR3B,
+        status=ReturnPreparation.PreparationStatus.FILED,
+        summary_snapshot={
+            "outward_supplies": {"outward_taxable_value": "1000.00", "outward_tax_liability": "180.00"},
+            "itc_summary": {"claim_ready_itc": "240.00", "itc_at_risk": "40.00", "net_tax_payable": "120.00"},
+        },
+        prepared_by=dashboard_context["user"],
+        approved_by=dashboard_context["user"],
+        filed_by=dashboard_context["user"],
+        filed_at=timezone.now(),
+        arn="ARN-G9-SRC-001",
+        created_by=dashboard_context["user"],
+        updated_by=dashboard_context["user"],
+    )
+    ReturnPreparation.objects.create(
+        compliance_period=dashboard_context["compliance_period"],
+        return_type=ReturnPreparation.ReturnType.GSTR9,
+        status=ReturnPreparation.PreparationStatus.READY_FOR_REVIEW,
+        summary_snapshot={
+            "return_type": "gstr9",
+            "summary_version": "gstr9.annual.v1",
+            "financial_year": "2026-27",
+            "anchor_period": "2026-04",
+            "outward_summary": {
+                "gstr1_taxable_value": "1000.00",
+                "gstr1_tax_amount": "180.00",
+                "gstr3b_outward_taxable_value": "1000.00",
+                "gstr3b_outward_tax_liability": "180.00",
+                "annual_taxable_value": "1000.00",
+                "annual_tax_liability": "180.00",
+            },
+            "itc_summary": {
+                "books_itc": "300.00",
+                "reflected_itc": "280.00",
+                "claim_ready_itc": "240.00",
+                "pending_2b_itc": "20.00",
+                "pending_review_itc": "10.00",
+                "blocked_itc": "10.00",
+                "timing_difference_itc": "0.00",
+                "vendor_followup_required_itc": "10.00",
+                "itc_at_risk": "40.00",
+            },
+            "liability_summary": {
+                "net_tax_payable": "120.00",
+                "annual_tax_liability": "180.00",
+                "annual_claim_ready_itc": "240.00",
+            },
+            "annual_sections": {
+                "notes_and_amendments": {"amendment_document_count": 1},
+                "source_exceptions": {
+                    "period_exception_count": 0,
+                    "missing_month_count": 10,
+                    "blocked_source_count": 0,
+                    "failed_source_count": 0,
+                    "unresolved_mismatch_count": 1,
+                    "manual_review_decision_count": 0,
+                },
+            },
+            "source_months": {
+                "expected_periods": ["2026-04", "2026-05"],
+                "available_periods": ["2026-04", "2026-05"],
+                "missing_periods": [],
+                "gstr1_prepared_periods": ["2026-04"],
+                "gstr3b_prepared_periods": ["2026-05"],
+                "blocked_source_periods": [],
+                "failed_source_periods": [],
+                "filed_source_periods": ["2026-05"],
+            },
+            "warnings_summary": {
+                "warning_count": 1,
+                "items": [
+                    {
+                        "code": "annual_anchor_not_year_end",
+                        "severity": "warning",
+                        "title": "Annual review is anchored before year-end",
+                        "detail": "This GSTR-9 view is being prepared from a non-March period.",
+                    }
+                ],
+            },
+            "source_trace": {
+                "gstr1_return_ids": [str(april_gstr1.id)],
+                "gstr3b_return_ids": [str(may_gstr3b.id)],
+            },
+        },
+        prepared_by=dashboard_context["user"],
+        created_by=dashboard_context["user"],
+        updated_by=dashboard_context["user"],
+    )
+
+    response = dashboard_authenticated_client.get(
+        "/api/v1/exports/return-summary/",
+        {
+            "workspace": str(dashboard_context["workspace"].id),
+            "client": str(dashboard_context["client"].id),
+            "gstin": str(dashboard_context["gstin"].id),
+            "compliance_period": str(dashboard_context["compliance_period"].id),
+            "return_type": "gstr9",
+            "export_mode": "full_gstr9",
+        },
+    )
+    assert response.status_code == 200
+    workbook = load_workbook(BytesIO(response_bytes(response)))
+    assert workbook.sheetnames == [
+        "Summary",
+        "Annual Outward",
+        "Annual ITC",
+        "Source Months",
+        "Linked Source Returns",
+        "Warnings",
+        "Source Exceptions",
+    ]
+    summary_sheet = workbook["Summary"]
+    assert summary_sheet["B1"].value == "Value"
+    assert summary_sheet["B2"].value == "GSTR-9"
+    assert summary_sheet["B8"].value == "ready_for_review"
+    assert summary_sheet["B14"].value == "1000.00"
+    assert summary_sheet["B16"].value == "240.00"
+    outward_sheet = workbook["Annual Outward"]
+    assert outward_sheet["A2"].value == "GSTR-1 Taxable Value"
+    assert outward_sheet["B2"].value == "1000.00"
+    itc_sheet = workbook["Annual ITC"]
+    assert itc_sheet["A2"].value == "Books ITC"
+    assert itc_sheet["B4"].value == "240.00"
+    source_returns_sheet = workbook["Linked Source Returns"]
+    assert source_returns_sheet["A2"].value == "2026-04"
+    assert source_returns_sheet["B3"].value == "GSTR3B"
+    warnings_sheet = workbook["Warnings"]
+    assert warnings_sheet["A2"].value == "annual_anchor_not_year_end"
+    exceptions_sheet = workbook["Source Exceptions"]
+    assert exceptions_sheet["A2"].value == "Period Exception Count"
+    assert exceptions_sheet["B6"].value == 1
 
 
 @pytest.mark.django_db

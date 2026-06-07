@@ -13,6 +13,7 @@ import { LoadingState } from "@/components/common/loading-state";
 import { PageHeader } from "@/components/common/page-header";
 import { ActionLabel } from "@/components/common/action-label";
 import { AppModalBody, AppModalContent, AppModalFooter, AppModalHeader } from "@/components/common/app-modal";
+import { ReturnSectionSummary } from "@/components/common/return-section-summary";
 import { SectionCard } from "@/components/common/section-card";
 import { StatCard } from "@/components/common/stat-card";
 import { StatusBadge } from "@/components/status/status-badge";
@@ -30,6 +31,7 @@ import {
   useFilingEventsQuery,
   useFilingsQuery,
   useProviderAuthSessionsQuery,
+  useRefreshProviderAuthSessionMutation,
   useRequestProviderOTPMutation,
   useRequeueAfterReviewMutation,
   useResyncFilingMutation,
@@ -317,7 +319,7 @@ function getPrimaryTaxAmount(preparedReturn?: ReturnPreparationRecord) {
 function getItcAmount(preparedReturn?: ReturnPreparationRecord) {
   const summary = preparedReturn?.summary_snapshot ?? {};
   const itcSummary = (summary.itc_summary as Record<string, unknown> | undefined) ?? {};
-  return String(itcSummary.eligible_itc ?? "0.00");
+  return String(itcSummary.claim_ready_itc ?? itcSummary.eligible_itc ?? "0.00");
 }
 
 function getNetPayable(preparedReturn?: ReturnPreparationRecord) {
@@ -355,6 +357,20 @@ function formatSummaryKey(key: string) {
     document_count: "Document count",
     outward_taxable_value: "Outward taxable value",
     outward_tax_liability: "Outward tax liability",
+    books_itc: "Books ITC",
+    reflected_itc: "2B reflected ITC",
+    claim_ready_itc: "Claim-ready ITC",
+    pending_2b_itc: "Pending in 2B ITC",
+    pending_review_itc: "Pending review ITC",
+    blocked_itc: "Blocked ITC",
+    timing_difference_itc: "Timing-difference ITC",
+    vendor_followup_required_itc: "Vendor follow-up ITC",
+    claim_ready_count: "Claim-ready rows",
+    pending_2b_count: "Pending in 2B rows",
+    pending_review_count: "Pending review rows",
+    blocked_count: "Blocked rows",
+    timing_difference_count: "Timing-difference rows",
+    vendor_followup_required_count: "Vendor follow-up rows",
     eligible_itc: "Eligible ITC",
     itc_at_risk: "ITC at risk",
     deferred_blocked_itc: "Deferred / blocked ITC",
@@ -366,6 +382,12 @@ function formatSummaryKey(key: string) {
     missing_in_books_count: "Missing in books count",
     missing_in_portal_count: "Missing in 2B count",
     duplicate_count: "Duplicate count",
+    itc_ready_count: "ITC ready rows",
+    itc_pending_2b_count: "Pending in 2B rows",
+    itc_pending_review_count: "Pending review rows",
+    itc_blocked_count: "Blocked ITC rows",
+    itc_timing_difference_count: "Timing-difference rows",
+    itc_vendor_followup_required_count: "Vendor follow-up rows",
   };
   return labels[key] ?? key.replace(/_/g, " ");
 }
@@ -391,6 +413,71 @@ function getPeriodExceptionCountFromSummary(summary: Record<string, unknown> | n
   }
   const count = (raw as Record<string, unknown>).count;
   return typeof count === "number" ? count : 0;
+}
+
+function chooseGstr3bReviewTab(preparedReturn?: ReturnPreparationRecord | null) {
+  const summary = preparedReturn?.summary_snapshot ?? {};
+  const periodExceptionCount = getPeriodExceptionCountFromSummary(summary);
+  const reconciliationSummary = (summary.reconciliation as Record<string, unknown> | undefined) ?? {};
+  const itcSummary = (summary.itc_summary as Record<string, unknown> | undefined) ?? {};
+
+  if (preparedReturn?.is_blocked_by_stale_reconciliation || periodExceptionCount > 0) return "exceptions";
+  if (
+    Number(reconciliationSummary.manual_review_decision_count ?? 0) > 0 ||
+    Number(reconciliationSummary.prior_period_deferred_count ?? 0) > 0
+  ) {
+    return "decisions";
+  }
+  if (
+    Number(itcSummary.unresolved_mismatch_count ?? 0) > 0 ||
+    Number(reconciliationSummary.partial_match_count ?? 0) > 0 ||
+    Number(reconciliationSummary.missing_in_books_count ?? 0) > 0 ||
+    Number(reconciliationSummary.missing_in_portal_count ?? 0) > 0 ||
+    Number(reconciliationSummary.duplicate_count ?? 0) > 0
+  ) {
+    return "reconciliation";
+  }
+  if (
+    Number(itcSummary.pending_2b_count ?? 0) > 0 ||
+    Number(itcSummary.pending_review_count ?? 0) > 0 ||
+    Number(itcSummary.blocked_count ?? 0) > 0 ||
+    Number(itcSummary.timing_difference_count ?? 0) > 0 ||
+    Number(itcSummary.vendor_followup_required_count ?? 0) > 0
+  ) {
+    return "itc";
+  }
+  return "overview";
+}
+
+function chooseGstr9ReviewTab(preparedReturn?: ReturnPreparationRecord | null) {
+  const summary = (preparedReturn?.summary_snapshot as Record<string, unknown> | undefined) ?? {};
+  const sourceMonths = (summary.source_months as Record<string, unknown> | undefined) ?? {};
+  const warningsSummary = (summary.warnings_summary as Record<string, unknown> | undefined) ?? {};
+
+  if (preparedReturn?.is_blocked_by_stale_reconciliation) return "exceptions";
+  if (Number(sourceMonths.blocked_source_periods ? (sourceMonths.blocked_source_periods as unknown[]).length : 0) > 0) return "exceptions";
+  if (Number(warningsSummary.warning_count ?? 0) > 0) return "source-months";
+  return "overview";
+}
+
+function chooseGstr9cReviewTab(preparedReturn?: ReturnPreparationRecord | null) {
+  const summary = (preparedReturn?.summary_snapshot as Record<string, unknown> | undefined) ?? {};
+  const warningsSummary = (summary.warnings_summary as Record<string, unknown> | undefined) ?? {};
+  const comparisonSummary = (summary.comparison_summary as Record<string, unknown> | undefined) ?? {};
+  const sourceTrace = (summary.source_trace as Record<string, unknown> | undefined) ?? {};
+
+  if (preparedReturn?.is_blocked_by_stale_reconciliation) return "exceptions";
+  if (!sourceTrace.gstr9_return_id) return "exceptions";
+  if (
+    Number(comparisonSummary.outward_taxable_variance_absolute ?? 0) > 0 ||
+    Number(comparisonSummary.outward_tax_variance_absolute ?? 0) > 0 ||
+    Number(comparisonSummary.books_itc_variance_absolute ?? 0) > 0 ||
+    Number(comparisonSummary.claim_ready_itc_variance_absolute ?? 0) > 0
+  ) {
+    return "comparison";
+  }
+  if (Number(warningsSummary.warning_count ?? 0) > 0) return "exceptions";
+  return "overview";
 }
 
 function getFirstBlockingMessage(messages: Array<string | null | false | undefined>) {
@@ -600,6 +687,12 @@ export default function ReturnsPage() {
     gstin: selectedGstinId ?? undefined,
     provider: "whitebooks",
   });
+  const refreshWhiteBooksAuthSessionMutation = useRefreshProviderAuthSessionMutation({
+    workspace: selectedWorkspaceId ?? undefined,
+    client: selectedClientId ?? undefined,
+    gstin: selectedGstinId ?? undefined,
+    provider: "whitebooks",
+  });
   const createApprovalMutation = useCreateApprovalMutation({
     workspace: selectedWorkspaceId ?? undefined,
     client: selectedClientId ?? undefined,
@@ -620,6 +713,8 @@ export default function ReturnsPage() {
   const filingEventsQuery = useFilingEventsQuery(activeFiling?.id);
   const gstr1Return = returnsQuery.data?.items.find((item) => item.return_type === "gstr1");
   const gstr3bReturn = returnsQuery.data?.items.find((item) => item.return_type === "gstr3b");
+  const gstr9Return = returnsQuery.data?.items.find((item) => item.return_type === "gstr9");
+  const gstr9cReturn = returnsQuery.data?.items.find((item) => item.return_type === "gstr9c");
   const latestRun = reconciliationRunsQuery.data?.items[0];
   const activeApproval = (approvalsQuery.data?.items ?? []).find((item) => item.entity_id === activeReturn?.id) ?? null;
   const unresolvedMismatchCount =
@@ -689,26 +784,47 @@ export default function ReturnsPage() {
     activeFiling?.status === "arn_received";
 
   const isPeriodLocked = Boolean(selectedPeriod?.is_locked);
+  const isManualAnnualFiling = activeReturn?.return_type === "gstr9" || activeReturn?.return_type === "gstr9c";
   const canPrepare = Boolean(selectedWorkspaceId && selectedClientId && selectedGstinId && selectedPeriodId && !isPeriodLocked);
-  const exportReturnType = activeReturn?.return_type ?? (gstr1Return ? "gstr1" : gstr3bReturn ? "gstr3b" : null);
+  const exportReturnType =
+    activeReturn?.return_type ??
+    (gstr1Return ? "gstr1" : gstr3bReturn ? "gstr3b" : gstr9Return ? "gstr9" : gstr9cReturn ? "gstr9c" : null);
   const activeReadiness =
-    exportReturnType === "gstr1" ? readiness?.gstr1 : exportReturnType === "gstr3b" ? readiness?.gstr3b : null;
+    exportReturnType === "gstr1"
+      ? readiness?.gstr1
+      : exportReturnType === "gstr3b"
+        ? readiness?.gstr3b
+        : exportReturnType === "gstr9"
+          ? readiness?.gstr9
+          : exportReturnType === "gstr9c"
+            ? readiness?.gstr9c
+          : null;
   const isReturnFlowBlockedByStaleSource = Boolean(activeReturn?.is_blocked_by_stale_reconciliation || isReconciliationStale);
-  const canRequestOtp = Boolean(selectedWorkspaceId && selectedClientId) && !requestWhiteBooksOTPMutation.isPending;
+  const canRequestOtp = !isManualAnnualFiling && Boolean(selectedWorkspaceId && selectedClientId) && !requestWhiteBooksOTPMutation.isPending;
   const canVerifyOtp =
+    !isManualAnnualFiling &&
     Boolean(activeWhiteBooksAuthSession) &&
     Boolean(whiteBooksOtp.trim()) &&
     !verifyWhiteBooksOTPMutation.isPending;
+  const canRefreshOtpSession =
+    !isManualAnnualFiling &&
+    Boolean(activeWhiteBooksAuthSession?.id) &&
+    Boolean((whiteBooksTxn.trim() || activeWhiteBooksAuthSession?.txn || "").trim()) &&
+    filingAuthOtpVerified &&
+    !refreshWhiteBooksAuthSessionMutation.isPending;
   const startFilingDisabledReason = getFirstBlockingMessage([
     activeReturn?.status !== "approved" ? "Approve this return before starting filing." : null,
     isReturnFlowBlockedByStaleSource ? "Re-run reconciliation and refresh the return draft before filing." : null,
-    !activeWhiteBooksAuthSession ? "Request OTP first to create a filing access session." : null,
-    !filingAuthOtpVerified ? "Verify OTP successfully before starting filing." : null,
-    !liveFilingConfirmed ? "Finish OTP verification for this GSTIN before live filing can start." : null,
-    !filingAuthFresh ? activeWhiteBooksAuthFreshness?.stale_reason || "The filing access session is stale. Request OTP again." : null,
+    isManualAnnualFiling && activeFiling ? "A manual annual filing record already exists for this return." : null,
+    isManualAnnualFiling || activeFiling ? null : !activeWhiteBooksAuthSession ? "Request OTP first to create a filing access session." : null,
+    isManualAnnualFiling ? null : !filingAuthOtpVerified ? "Verify OTP successfully before starting filing." : null,
+    isManualAnnualFiling ? null : !liveFilingConfirmed ? "Finish OTP verification for this GSTIN before live filing can start." : null,
+    isManualAnnualFiling ? null : !filingAuthFresh ? activeWhiteBooksAuthFreshness?.stale_reason || "The filing access session is stale. Request OTP again." : null,
+    isManualAnnualFiling ? null :
     filingNeedsFreshOtpRestart
       ? "An earlier filing attempt was queued before OTP verification finished. Request a fresh OTP for this GSTIN, verify it, then use Resume filing. The verified session stays active for up to 6 hours."
       : null,
+    isManualAnnualFiling ? null :
     filingAlreadyInFlight ? `A filing run is already ${activeFiling?.status?.replace(/_/g, " ") || "in progress"} for this return.` : null,
   ]);
   const retryFilingDisabledReason = getFirstBlockingMessage([
@@ -737,6 +853,18 @@ export default function ReturnsPage() {
             description: "Source data changed after reconciliation, so the return draft must be refreshed first.",
             tone: "danger" as const,
           }
+        : isManualAnnualFiling && !activeFiling
+          ? {
+              title: "Open the annual filing record",
+              description: "Create the operational filing record first, then complete the annual filing manually and capture the ARN here.",
+              tone: "primary" as const,
+            }
+          : isManualAnnualFiling
+            ? {
+                title: "Capture annual filing proof",
+                description: "This annual return uses a manual filing flow. Complete the filing outside the gateway, then mark the return filed with ARN here.",
+                tone: "success" as const,
+              }
         : !activeWhiteBooksAuthSession
           ? {
               title: "Request OTP",
@@ -791,7 +919,13 @@ export default function ReturnsPage() {
         title: "Choose the correct filing context first",
         description: "Select the workspace and client before requesting OTP, so the session is created for the right GSTIN and client.",
       }
-    : filingNeedsFreshOtpRestart
+      : isManualAnnualFiling
+        ? {
+            tone: "success" as const,
+            title: "Manual annual filing flow",
+            description: "This annual return does not require an OTP filing session here. Open the filing record, complete the annual filing manually, then capture ARN.",
+          }
+      : filingNeedsFreshOtpRestart
       ? {
           tone: "warning" as const,
           title: "Fresh OTP needed for this GSTIN",
@@ -844,17 +978,13 @@ export default function ReturnsPage() {
     return () => window.clearTimeout(timer);
   }, [activeReturn, selectedFocusFromQuery, selectedReturnFromQuery, selectedReturnId]);
 
-  useEffect(() => {
-    setFilingActionFeedback(null);
-  }, [selectedReturnId]);
-
   const getFilingActionErrorMessage = (error: unknown) =>
     getPrimaryFieldError(error, "provider_auth") ||
     getPrimaryFieldError(error, "prepared_return") ||
     getPrimaryFieldError(error, "approval_request") ||
     getErrorMessage(error);
 
-  const handlePrepare = async (returnType: "gstr1" | "gstr3b") => {
+  const handlePrepare = async (returnType: "gstr1" | "gstr3b" | "gstr9" | "gstr9c") => {
     if (!selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId) {
       toast.error("Select workspace, client, GSTIN, and compliance period before preparing a return.");
       return;
@@ -863,7 +993,14 @@ export default function ReturnsPage() {
       toast.error("This compliance period is locked. Unlock it before preparing returns.");
       return;
     }
-    const targetReadiness = returnType === "gstr1" ? readiness?.gstr1 : readiness?.gstr3b;
+    const targetReadiness =
+      returnType === "gstr1"
+        ? readiness?.gstr1
+        : returnType === "gstr3b"
+          ? readiness?.gstr3b
+          : returnType === "gstr9"
+            ? readiness?.gstr9
+            : readiness?.gstr9c;
     if (targetReadiness?.status === "blocked") {
       toast.error(targetReadiness.issues[0]?.detail ?? `Resolve ${returnType.toUpperCase()} blockers before preparation.`);
       return;
@@ -877,6 +1014,7 @@ export default function ReturnsPage() {
         compliance_period: selectedPeriodId,
         return_type: returnType,
       });
+      setFilingActionFeedback(null);
       setManualSelectedReturnId(preparedReturn.id);
       setDismissedQueryReturnId(null);
       toast.success(`${returnType.toUpperCase()} draft prepared.`);
@@ -890,6 +1028,21 @@ export default function ReturnsPage() {
       toast.error("A reviewer and active return context are required before creating an approval request.");
       return;
     }
+    const summary = activeReturn.summary_snapshot ?? {};
+    const itcSummary = (summary.itc_summary as Record<string, unknown> | undefined) ?? {};
+    const gstr3bApprovalNotes =
+      activeReturn.return_type === "gstr3b"
+        ? [
+            `Claim-ready ITC: Rs. ${formatMoney(String(itcSummary.claim_ready_itc ?? itcSummary.eligible_itc ?? "0.00"))}`,
+            `Pending in 2B: ${String(itcSummary.pending_2b_count ?? 0)} row(s)`,
+            `Pending review: ${String(itcSummary.pending_review_count ?? 0)} row(s)`,
+            `Blocked ITC: ${String(itcSummary.blocked_count ?? 0)} row(s)`,
+            `Timing differences: ${String(itcSummary.timing_difference_count ?? 0)} row(s)`,
+            `Vendor follow-up: ${String(itcSummary.vendor_followup_required_count ?? 0)} row(s)`,
+          ]
+        : [];
+    const periodExceptionNote =
+      returnPeriodExceptionCount > 0 ? [`Source period exceptions: ${returnPeriodExceptionCount} row(s)`] : [];
     try {
       await createApprovalMutation.mutateAsync({
         workspace: selectedWorkspaceId,
@@ -900,10 +1053,11 @@ export default function ReturnsPage() {
         entity_id: activeReturn.id,
         requested_to: user.id,
         status: "pending",
-        comments:
-          returnPeriodExceptionCount > 0
-            ? `Please review this return draft. Note: ${returnPeriodExceptionCount} source transaction(s) were accepted under a period exception.`
-            : "Please review this return draft.",
+        comments: [
+          `Please review this ${activeReturn.return_type.toUpperCase()} draft.`,
+          ...gstr3bApprovalNotes,
+          ...periodExceptionNote,
+        ].join(" "),
       });
       toast.success("Approval request created.");
     } catch (error) {
@@ -1076,22 +1230,66 @@ export default function ReturnsPage() {
     }
   };
 
+  const handleRefreshWhiteBooksSession = async () => {
+    if (!activeWhiteBooksAuthSession) {
+      toast.error("Request and verify OTP first.");
+      return;
+    }
+    const txn = whiteBooksTxn.trim() || activeWhiteBooksAuthSession.txn || "";
+    if (!txn) {
+      toast.error("Session reference is required before refresh.");
+      return;
+    }
+    try {
+      setFilingActionFeedback(null);
+      const session = await refreshWhiteBooksAuthSessionMutation.mutateAsync({
+        sessionId: activeWhiteBooksAuthSession.id,
+        txn,
+      });
+      setWhiteBooksTxn(session.txn || "");
+      setFilingActionFeedback({
+        tone: "success",
+        message: "Provider session refreshed. This GSTIN session has a fresh verification window now.",
+      });
+      toast.success("Provider session refreshed.");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
+  };
+
   const summary = (activeReturn?.summary_snapshot ?? {}) as Record<string, unknown>;
   const outwardSupplies = (summary.outward_supplies as Record<string, unknown> | undefined) ?? {};
   const itcSummary = (summary.itc_summary as Record<string, unknown> | undefined) ?? {};
   const reconciliationSummary = (summary.reconciliation as Record<string, unknown> | undefined) ?? {};
+  const manualReviewDecisionCount = Number(reconciliationSummary.manual_review_decision_count ?? 0);
+  const manualReviewDecisionSummary = {
+    claimNow: Number(reconciliationSummary.manual_claim_now_count ?? 0),
+    defer: Number(reconciliationSummary.manual_defer_count ?? 0),
+    blocked: Number(reconciliationSummary.manual_blocked_count ?? 0),
+    vendorFollowUp: Number(reconciliationSummary.manual_vendor_followup_count ?? 0),
+  };
+  const priorPeriodDeferredPeriod = typeof reconciliationSummary.prior_period_deferred_period === "string" ? reconciliationSummary.prior_period_deferred_period : "";
+  const priorPeriodDeferredCount = Number(reconciliationSummary.prior_period_deferred_count ?? 0);
+  const priorPeriodDeferredItc = String(reconciliationSummary.prior_period_deferred_itc ?? "0.00");
+  const reconciliationImpactEntries = Object.entries(reconciliationSummary).filter(
+    ([key]) => !key.startsWith("manual_") && !key.startsWith("prior_period_"),
+  );
   const returnPeriodExceptionCount = getPeriodExceptionCountFromSummary(summary);
 
-  const handleExport = async () => {
+  const handleExport = async (returnType: "gstr1" | "gstr3b" | "gstr9") => {
     if (!selectedWorkspaceId || !selectedClientId || !selectedPeriodId) {
       toast.error("Select workspace, client, and period before exporting return summaries.");
       return;
     }
-    if (activeReadiness?.status === "blocked") {
-      toast.error(activeReadiness.issues[0]?.detail ?? "Resolve filing blockers before exporting this return workbook.");
+    const targetReturn = returnType === "gstr1" ? gstr1Return : returnType === "gstr3b" ? gstr3bReturn : gstr9Return;
+    if (!targetReturn) {
+      toast.error(`Prepare ${returnType.toUpperCase()} before exporting its workbook.`);
       return;
     }
-    if (activeReadiness?.status === "ready_with_warnings") {
+    const targetReadiness = returnType === "gstr1" ? readiness?.gstr1 : returnType === "gstr3b" ? readiness?.gstr3b : readiness?.gstr9;
+    if (targetReadiness?.status === "blocked") {
+      toast.warning(targetReadiness.issues[0]?.detail ?? "Exporting a prepared return that still has readiness blockers.");
+    } else if (targetReadiness?.status === "ready_with_warnings") {
       toast.warning("Exporting with warnings. Review readiness issues before sharing the workbook.");
     }
     try {
@@ -1099,23 +1297,25 @@ export default function ReturnsPage() {
         workspace: selectedWorkspaceId,
         client: selectedClientId,
         compliance_period: selectedPeriodId,
+        return_type: returnType,
       };
       if (selectedGstinId) {
         exportParams.gstin = selectedGstinId;
       }
       let filename = "return-summary.xlsx";
       let successMessage = "Return summary export downloaded.";
-      const exportReturnType = activeReturn?.return_type ?? (gstr1Return ? "gstr1" : gstr3bReturn ? "gstr3b" : null);
-      if (exportReturnType === "gstr1") {
-        exportParams.return_type = "gstr1";
+      if (returnType === "gstr1") {
         exportParams.export_mode = "full_gstr1";
         filename = `gstr1-${selectedPeriod?.period ?? "export"}.xlsx`;
         successMessage = "Full GSTR-1 workbook downloaded.";
-      } else if (exportReturnType === "gstr3b") {
-        exportParams.return_type = "gstr3b";
+      } else if (returnType === "gstr3b") {
         exportParams.export_mode = "full_gstr3b";
         filename = `gstr3b-${selectedPeriod?.period ?? "export"}.xlsx`;
         successMessage = "Full GSTR-3B workbook downloaded.";
+      } else {
+        exportParams.export_mode = "full_gstr9";
+        filename = `gstr9-${selectedPeriod?.period ?? "export"}.xlsx`;
+        successMessage = "First-pass GSTR-9 workbook downloaded.";
       }
       await downloadFile("/exports/return-summary/", exportParams, filename);
       toast.success(successMessage);
@@ -1124,12 +1324,118 @@ export default function ReturnsPage() {
     }
   };
 
+  const gstr1ReviewHref = useMemo(() => {
+    if (!gstr1Return || !selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId) {
+      return null;
+    }
+    const params = new URLSearchParams({
+      workspace: selectedWorkspaceId,
+      client: selectedClientId,
+      gstin: selectedGstinId,
+      period: selectedPeriodId,
+      returnId: gstr1Return.id,
+    });
+    return `/returns/gstr1-review?${params.toString()}`;
+  }, [gstr1Return, selectedWorkspaceId, selectedClientId, selectedGstinId, selectedPeriodId]);
+  const gstr3bReviewHref = useMemo(() => {
+    if (!gstr3bReturn || !selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId) {
+      return null;
+    }
+    const params = new URLSearchParams({
+      workspace: selectedWorkspaceId,
+      client: selectedClientId,
+      gstin: selectedGstinId,
+      period: selectedPeriodId,
+      returnId: gstr3bReturn.id,
+    });
+    params.set("tab", chooseGstr3bReviewTab(gstr3bReturn));
+    return `/returns/gstr3b-review?${params.toString()}`;
+  }, [gstr3bReturn, selectedWorkspaceId, selectedClientId, selectedGstinId, selectedPeriodId]);
+  const gstr9ReviewHref = useMemo(() => {
+    if (!gstr9Return || !selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId) {
+      return null;
+    }
+    const params = new URLSearchParams({
+      workspace: selectedWorkspaceId,
+      client: selectedClientId,
+      gstin: selectedGstinId,
+      period: selectedPeriodId,
+      returnId: gstr9Return.id,
+    });
+    params.set("tab", chooseGstr9ReviewTab(gstr9Return));
+    return `/returns/gstr9-review?${params.toString()}`;
+  }, [gstr9Return, selectedWorkspaceId, selectedClientId, selectedGstinId, selectedPeriodId]);
+  const gstr9cReviewHref = useMemo(() => {
+    if (!gstr9cReturn || !selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId) {
+      return null;
+    }
+    const params = new URLSearchParams({
+      workspace: selectedWorkspaceId,
+      client: selectedClientId,
+      gstin: selectedGstinId,
+      period: selectedPeriodId,
+      returnId: gstr9cReturn.id,
+    });
+    params.set("tab", chooseGstr9cReviewTab(gstr9cReturn));
+    return `/returns/gstr9c-review?${params.toString()}`;
+  }, [gstr9cReturn, selectedWorkspaceId, selectedClientId, selectedGstinId, selectedPeriodId]);
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Returns"
-        description="Prepare draft GSTR-1 and GSTR-3B summaries from imported transactions and reconciliation outcomes before approval and manual filing."
-        actions={[{ label: activeReturn?.return_type === "gstr3b" ? "Export GSTR-3B XLSX" : activeReturn?.return_type === "gstr1" || gstr1Return ? "Export GSTR-1 XLSX" : gstr3bReturn ? "Export GSTR-3B XLSX" : "Export XLSX", onClick: handleExport, disabled: !selectedWorkspaceId || !selectedClientId || !selectedPeriodId || activeReadiness?.status === "blocked" }]}
+        description="Prepare draft GSTR-1, GSTR-3B, GSTR-9, and GSTR-9C summaries from imported transactions and reconciliation outcomes before approval and manual filing."
+        actions={[
+          ...(gstr1ReviewHref
+            ? [{
+                label: "Open GSTR-1 Review",
+                href: gstr1ReviewHref,
+                disabled: !gstr1Return,
+              }]
+            : []),
+          ...(gstr3bReviewHref
+            ? [{
+                label: "Open GSTR-3B Review",
+                href: gstr3bReviewHref,
+                disabled: !gstr3bReturn,
+              }]
+            : []),
+          ...(gstr9ReviewHref
+            ? [{
+                label: "Open GSTR-9 Review",
+                href: gstr9ReviewHref,
+                disabled: !gstr9Return,
+              }]
+            : []),
+          ...(gstr9cReviewHref
+            ? [{
+                label: "Open GSTR-9C Review",
+                href: gstr9cReviewHref,
+                disabled: !gstr9cReturn,
+              }]
+            : []),
+          ...(gstr1Return
+            ? [{
+                label: "Export GSTR-1 XLSX",
+                onClick: () => handleExport("gstr1"),
+                disabled: !selectedWorkspaceId || !selectedClientId || !selectedPeriodId,
+              }]
+            : []),
+          ...(gstr3bReturn
+            ? [{
+                label: "Export GSTR-3B XLSX",
+                onClick: () => handleExport("gstr3b"),
+                disabled: !selectedWorkspaceId || !selectedClientId || !selectedPeriodId,
+              }]
+            : []),
+          ...(gstr9Return
+            ? [{
+                label: "Export GSTR-9 XLSX",
+                onClick: () => handleExport("gstr9"),
+                disabled: !selectedWorkspaceId || !selectedClientId || !selectedPeriodId,
+              }]
+            : []),
+        ]}
       />
 
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
@@ -1244,6 +1550,12 @@ export default function ReturnsPage() {
             <Button size="sm" onClick={() => handlePrepare("gstr3b")} disabled={!canPrepare || prepareReturnMutation.isPending}>
               {prepareReturnMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Prepare GSTR-3B"}
             </Button>
+            <Button size="sm" variant="outline" onClick={() => handlePrepare("gstr9")} disabled={!canPrepare || prepareReturnMutation.isPending}>
+              {prepareReturnMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Prepare GSTR-9"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => handlePrepare("gstr9c")} disabled={!canPrepare || prepareReturnMutation.isPending}>
+              {prepareReturnMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Prepare GSTR-9C"}
+            </Button>
           </div>
         }
       >
@@ -1320,15 +1632,15 @@ export default function ReturnsPage() {
         variant="soft"
       >
         {!selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId ? (
-          <EmptyState title="Readiness checks need a full context" description="Select workspace, client, GSTIN, and period to evaluate GSTR-1 and GSTR-3B readiness." />
+          <EmptyState title="Readiness checks need a full context" description="Select workspace, client, GSTIN, and period to evaluate GSTR-1, GSTR-3B, GSTR-9, and GSTR-9C readiness." />
         ) : readinessQuery.isLoading ? (
           <LoadingState message="Evaluating filing readiness..." />
         ) : readinessQuery.isError ? (
           <ErrorState title="We couldn’t evaluate readiness" description={getErrorMessage(readinessQuery.error)} />
         ) : readiness ? (
           <div className="space-y-4">
-            <div className="grid gap-4 lg:grid-cols-2">
-              {[readiness.gstr1, readiness.gstr3b].map((item) => (
+            <div className="grid gap-4 xl:grid-cols-3">
+              {[readiness.gstr1, readiness.gstr3b, readiness.gstr9, readiness.gstr9c].map((item) => (
                 <div key={item.return_type} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -1403,10 +1715,10 @@ export default function ReturnsPage() {
               <p className="font-medium text-slate-900">Overall filing signal</p>
               <p className="mt-1">
                 {readiness.overall_status === "blocked"
-                  ? "At least one return has hard blockers. Exports are disabled until the issues are resolved."
+                  ? "At least one return has hard blockers. Resolve those issues before trusting preparation or export decisions."
                   : readiness.overall_status === "ready_with_warnings"
-                    ? "Returns can be prepared and exported, but warnings should be reviewed before sharing workbooks."
-                    : "Both returns are currently ready for preparation and export in this period."}
+                    ? "Returns can be prepared and exported where supported, but warnings should be reviewed before sharing or filing."
+                    : "The current return set is ready for preparation and supported export actions in this period."}
               </p>
             </div>
           </div>
@@ -1505,6 +1817,7 @@ export default function ReturnsPage() {
                         variant="outline"
                         size="sm"
                         onClick={() => {
+                          setFilingActionFeedback(null);
                           setManualSelectedReturnId(preparedReturn.id);
                           setDismissedQueryReturnId(null);
                         }}
@@ -1531,6 +1844,7 @@ export default function ReturnsPage() {
           if (open) {
             return;
           }
+          setFilingActionFeedback(null);
           setManualSelectedReturnId(null);
           if (querySelectedReturnId) {
             setDismissedQueryReturnId(querySelectedReturnId);
@@ -1650,6 +1964,12 @@ export default function ReturnsPage() {
                   </div>
                 </SectionCard>
 
+                <ReturnSectionSummary
+                  returnType={activeReturn.return_type}
+                  summarySnapshot={activeReturn.summary_snapshot}
+                  variant="full"
+                />
+
                 <SectionCard title="ITC summary" description="Relevant for GSTR-3B drafts where reconciliation impacts input tax credit.">
                   {Object.keys(itcSummary).length > 0 ? (
                     <div className="grid gap-3 md:grid-cols-2">
@@ -1667,10 +1987,58 @@ export default function ReturnsPage() {
                   )}
                 </SectionCard>
 
+                {manualReviewDecisionCount > 0 ? (
+                  <SectionCard
+                    title="Manual review decisions"
+                    description="These rows were intentionally overridden by a CA reviewer instead of following raw reconciliation status."
+                  >
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="rounded-2xl bg-slate-50 p-4">
+                        <p className="text-sm text-slate-500">Claim now</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">{manualReviewDecisionSummary.claimNow}</p>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 p-4">
+                        <p className="text-sm text-slate-500">Defer</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">{manualReviewDecisionSummary.defer}</p>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 p-4">
+                        <p className="text-sm text-slate-500">Blocked</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">{manualReviewDecisionSummary.blocked}</p>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 p-4">
+                        <p className="text-sm text-slate-500">Vendor follow-up</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">{manualReviewDecisionSummary.vendorFollowUp}</p>
+                      </div>
+                    </div>
+                  </SectionCard>
+                ) : null}
+
+                {priorPeriodDeferredCount > 0 ? (
+                  <SectionCard
+                    title="Deferred from prior review"
+                    description="These rows were intentionally held back in the previous period and should be checked again before finalizing this month."
+                  >
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="rounded-2xl bg-slate-50 p-4">
+                        <p className="text-sm text-slate-500">Prior period</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">{priorPeriodDeferredPeriod || "Earlier period"}</p>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 p-4">
+                        <p className="text-sm text-slate-500">Deferred rows</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">{priorPeriodDeferredCount}</p>
+                      </div>
+                      <div className="rounded-2xl bg-slate-50 p-4">
+                        <p className="text-sm text-slate-500">Deferred ITC to revisit</p>
+                        <p className="mt-2 text-lg font-semibold text-slate-900">Rs. {formatMoney(priorPeriodDeferredItc)}</p>
+                      </div>
+                    </div>
+                  </SectionCard>
+                ) : null}
+
                 <SectionCard title="Mismatch impact" description="Latest reconciliation context captured during GSTR-3B preparation.">
-                  {Object.keys(reconciliationSummary).length > 0 ? (
+                  {reconciliationImpactEntries.length > 0 ? (
                     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                      {Object.entries(reconciliationSummary).map(([key, value]) => (
+                      {reconciliationImpactEntries.map(([key, value]) => (
                         <div key={key} className="rounded-2xl bg-slate-50 p-4">
                           <p className="text-sm text-slate-500">{formatSummaryKey(key)}</p>
                           <p className="mt-2 text-lg font-semibold text-slate-900">{String(value ?? "—")}</p>
@@ -1684,7 +2052,11 @@ export default function ReturnsPage() {
 
                 <SectionCard
                   title="Filing flow"
-                  description="Follow this simple sequence: approve the draft, complete OTP verification, then start live filing."
+          description={
+            activeReturn.return_type === "gstr9" || activeReturn.return_type === "gstr9c"
+              ? "Follow this simple sequence: approve the annual draft, open the filing record, complete the annual filing manually, then capture the ARN."
+              : "Follow this simple sequence: approve the draft, complete OTP verification, then start live filing."
+          }
                 >
                   {primaryFilingGuidance ? (
                     <div
@@ -1719,14 +2091,14 @@ export default function ReturnsPage() {
                       <p className="font-medium">1. Approval</p>
                       <p className="mt-1">{activeReturn.status === "approved" ? "Approved and ready for the OTP step." : "Approve the return before live filing can begin."}</p>
                     </div>
-                    <div className={`rounded-2xl border px-4 py-3 text-sm ${filingAuthOtpVerified ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
-                      <p className="font-medium">2. OTP verification</p>
-                      <p className="mt-1">{filingAuthOtpVerified ? "OTP accepted for this filing session." : "Request OTP, then verify it in the section below."}</p>
+                    <div className={`rounded-2xl border px-4 py-3 text-sm ${isManualAnnualFiling ? "border-sky-200 bg-sky-50 text-sky-900" : filingAuthOtpVerified ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+                      <p className="font-medium">2. {isManualAnnualFiling ? "Create filing record" : "OTP verification"}</p>
+                      <p className="mt-1">{isManualAnnualFiling ? (activeFiling ? "The annual filing record is open for manual tracking." : "Create the filing record to start operational tracking for this annual return.") : filingAuthOtpVerified ? "OTP accepted for this filing session." : "Request OTP, then verify it in the section below."}</p>
                     </div>
                     <div className={`rounded-2xl border px-4 py-3 text-sm ${!startFilingDisabledReason ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
-                      <p className="font-medium">3. Live filing</p>
+                      <p className="font-medium">3. {isManualAnnualFiling ? "Manual filing & ARN" : "Live filing"}</p>
                       <p className="mt-1">
-                        {startFilingDisabledReason ?? (filingRestartReady ? "Fresh OTP verified. You can now resume the earlier filing run." : "Live filing can start now.")}
+                        {startFilingDisabledReason ?? (isManualAnnualFiling ? "Use Mark filed after the annual filing is completed and ARN is available." : filingRestartReady ? "Fresh OTP verified. You can now resume the earlier filing run." : "Live filing can start now.")}
                       </p>
                     </div>
                   </div>
@@ -1751,30 +2123,36 @@ export default function ReturnsPage() {
                       }
                     >
                       {startFilingMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
-                      <span className="ml-2">{filingRestartReady ? "Resume filing" : "Start filing"}</span>
+                      <span className="ml-2">
+                        {isManualAnnualFiling ? (activeFiling ? "Filing record opened" : "Open filing record") : filingRestartReady ? "Resume filing" : "Start filing"}
+                      </span>
                     </Button>
-                    <Button
-                      variant="outline"
-                      onClick={handleRetryFiling}
-                      disabled={Boolean(retryFilingDisabledReason) || retryFilingMutation.isPending}
-                    >
-                      {retryFilingMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <RefreshCcw className="size-4" />}
-                      <span className="ml-2">Retry filing</span>
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={handleResyncFiling}
-                      disabled={Boolean(resyncDisabledReason) || resyncFilingMutation.isPending}
-                    >
-                      {resyncFilingMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Refresh status"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={handleRequeueAfterReview}
-                      disabled={Boolean(requeueDisabledReason) || requeueAfterReviewMutation.isPending}
-                    >
-                      {requeueAfterReviewMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Requeue after review"}
-                    </Button>
+                    {!isManualAnnualFiling ? (
+                      <>
+                        <Button
+                          variant="outline"
+                          onClick={handleRetryFiling}
+                          disabled={Boolean(retryFilingDisabledReason) || retryFilingMutation.isPending}
+                        >
+                          {retryFilingMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <RefreshCcw className="size-4" />}
+                          <span className="ml-2">Retry filing</span>
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={handleResyncFiling}
+                          disabled={Boolean(resyncDisabledReason) || resyncFilingMutation.isPending}
+                        >
+                          {resyncFilingMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Refresh status"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={handleRequeueAfterReview}
+                          disabled={Boolean(requeueDisabledReason) || requeueAfterReviewMutation.isPending}
+                        >
+                          {requeueAfterReviewMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Requeue after review"}
+                        </Button>
+                      </>
+                    ) : null}
                     <Button
                       variant="outline"
                       onClick={() => setIsMarkFiledOpen(true)}
@@ -1786,11 +2164,15 @@ export default function ReturnsPage() {
                   <div className="mt-4 rounded-2xl bg-slate-50 p-4 text-sm text-slate-700">
                     <p className="font-medium text-slate-900">When other actions unlock</p>
                     <p className="mt-1">
-                      <span className="font-medium text-slate-900">Retry filing</span> becomes useful only after a real filing run fails.
-                      {" "}
-                      <span className="font-medium text-slate-900">Refresh status</span> becomes useful after a filing run has reached the gateway.
-                      {" "}
-                      <span className="font-medium text-slate-900">Requeue after review</span> is reserved for controlled recovery after support review.
+                      {isManualAnnualFiling
+                        ? "Annual returns use a manual filing flow here. Open the filing record for operational tracking, then use Mark filed after external filing is complete and ARN is available."
+                        : <>
+                            <span className="font-medium text-slate-900">Retry filing</span> becomes useful only after a real filing run fails.
+                            {" "}
+                            <span className="font-medium text-slate-900">Refresh status</span> becomes useful after a filing run has reached the gateway.
+                            {" "}
+                            <span className="font-medium text-slate-900">Requeue after review</span> is reserved for controlled recovery after support review.
+                          </>}
                     </p>
                   </div>
                   {activeApproval ? (
@@ -1820,6 +2202,26 @@ export default function ReturnsPage() {
                   }
                 >
                   <div className="space-y-5">
+                    {isManualAnnualFiling ? (
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">Manual annual filing status</p>
+                            <p className="mt-1 text-sm text-slate-600">
+                              This annual return is tracked operationally in the app, but the final filing is completed manually outside the live gateway flow.
+                            </p>
+                          </div>
+                          <StatusBadge label={activeFiling ? activeFiling.status.replace(/_/g, " ") : "not started"} variant={activeFiling ? getFilingStatusVariant(activeFiling.status) : "primary"} />
+                        </div>
+
+                        <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-4 text-sm text-sky-900">
+                          <p className="font-medium">Annual filing guidance</p>
+                          <p className="mt-1">
+                            Use <span className="font-medium">Open filing record</span> after approval to create the operational filing entry. After the annual filing is completed externally, use <span className="font-medium">Mark filed</span> to capture ARN and close the return in both backend and UI.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
                     <div className="rounded-2xl border border-slate-200 bg-white p-4">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
@@ -1860,7 +2262,7 @@ export default function ReturnsPage() {
                           <Label htmlFor="whitebooks-txn">Session reference</Label>
                           <Input
                             id="whitebooks-txn"
-                            value={whiteBooksTxn}
+                            value={whiteBooksTxn || activeWhiteBooksAuthSession?.txn || ""}
                             onChange={(event) => setWhiteBooksTxn(event.target.value)}
                             placeholder={activeWhiteBooksAuthSession?.txn || "Auto-captured when returned by the gateway"}
                             className="h-11 bg-slate-50"
@@ -1892,6 +2294,13 @@ export default function ReturnsPage() {
                           disabled={!canVerifyOtp}
                         >
                           {verifyWhiteBooksOTPMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Verify OTP"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={handleRefreshWhiteBooksSession}
+                          disabled={!canRefreshOtpSession}
+                        >
+                          {refreshWhiteBooksAuthSessionMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Refresh session"}
                         </Button>
                       </div>
 
@@ -1942,6 +2351,7 @@ export default function ReturnsPage() {
                         </div>
                       ) : null}
                     </div>
+                    )}
 
                     {!activeFiling ? (
                       <EmptyState

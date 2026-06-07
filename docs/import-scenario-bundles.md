@@ -127,6 +127,47 @@ Includes:
 - debit note register
 - Excel copies of sales and purchase files
 
+### `10_gstr1_extended_sections_uat/`
+
+Use for:
+
+- focused GSTR-1 UAT of the newly implemented sections
+- B2CL, advances, exports, amendments, and e-commerce review
+- returns, approvals, operations, workbook, and filing-payload consistency checks
+
+Includes:
+
+- extended-section sales register
+- amendment sales register
+- advance received register
+- advance adjusted register
+- registered credit note register
+- registered amendment credit note register
+- registered debit note register
+
+Important note:
+
+- this bundle currently exists as a source folder
+- if you want a zip copy, regenerate bundles or package this folder directly for UAT handoff
+
+### `11_gstr3b_itc_reconciliation_uat/`
+
+Use for:
+
+- GSTR-3B UAT after the extended GSTR-1 pack is already loaded
+- purchase vs GSTR-2B reconciliation bucket validation
+- ITC readiness, pending review, pending 2B, vendor follow-up, and blocked ITC checks
+
+Includes:
+
+- purchase register for GSTR-3B ITC testing
+- GSTR-2B register for matching and mismatch testing
+
+Important note:
+
+- this bundle is intended to run on top of the same period already used for `10_gstr1_extended_sections_uat`
+- it currently exists as a source folder
+
 ## Regenerating Bundles
 
 If you add or change scenario files, rebuild the generated `.xlsx` copies and zip bundles:

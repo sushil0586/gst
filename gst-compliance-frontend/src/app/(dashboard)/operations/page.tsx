@@ -12,6 +12,7 @@ import { ErrorState } from "@/components/common/error-state";
 import { LoadingState } from "@/components/common/loading-state";
 import { PageHeader } from "@/components/common/page-header";
 import { ActionLabel } from "@/components/common/action-label";
+import { ReturnSectionSummary } from "@/components/common/return-section-summary";
 import { SectionCard } from "@/components/common/section-card";
 import { StatCard } from "@/components/common/stat-card";
 import { StatusBadge } from "@/components/status/status-badge";
@@ -21,9 +22,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useEscalateFilingAlertsMutation, useFilingOperationsQuery, useRequeueAfterReviewMutation, useResyncFilingMutation, useRetryFilingMutation } from "@/features/filings";
+import { useReturnQuery } from "@/features/returns";
 import { getErrorMessage } from "@/lib/api/error-handler";
 import { useWorkspaceContext } from "@/store/workspace-context";
-import type { ReturnFilingOperationsRecord } from "@/types/api";
+import type { ReturnFilingOperationsRecord, ReturnPreparationRecord } from "@/types/api";
 
 const statusOptions = ["all", "submitted", "needs_retry", "failed", "queued_for_filing"] as const;
 const returnTypeOptions = ["all", "gstr1", "gstr3b"] as const;
@@ -72,6 +74,193 @@ function getEvidenceLabels(filing: ReturnFilingOperationsRecord) {
     .join(", ");
 }
 
+function formatMoney(value?: string | number | null) {
+  return Number(value || 0).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function getPrimaryTaxableValue(preparedReturn?: ReturnPreparationRecord | null) {
+  const summary = preparedReturn?.summary_snapshot ?? {};
+  const outwardSupplies = (summary.outward_supplies as Record<string, unknown> | undefined) ?? {};
+  return String(outwardSupplies.total_taxable_value ?? outwardSupplies.outward_taxable_value ?? "0.00");
+}
+
+function getPrimaryTaxAmount(preparedReturn?: ReturnPreparationRecord | null) {
+  const summary = preparedReturn?.summary_snapshot ?? {};
+  const outwardSupplies = (summary.outward_supplies as Record<string, unknown> | undefined) ?? {};
+  return String(outwardSupplies.total_tax_amount ?? outwardSupplies.outward_tax_liability ?? "0.00");
+}
+
+function getItcAmount(preparedReturn?: ReturnPreparationRecord | null) {
+  const summary = preparedReturn?.summary_snapshot ?? {};
+  const itcSummary = (summary.itc_summary as Record<string, unknown> | undefined) ?? {};
+  return String(itcSummary.claim_ready_itc ?? itcSummary.eligible_itc ?? "0.00");
+}
+
+function getNetPayable(preparedReturn?: ReturnPreparationRecord | null) {
+  const summary = preparedReturn?.summary_snapshot ?? {};
+  const itcSummary = (summary.itc_summary as Record<string, unknown> | undefined) ?? {};
+  return String(itcSummary.net_tax_payable ?? "0.00");
+}
+
+function getPeriodExceptionCountFromSummary(summary: Record<string, unknown> | null | undefined) {
+  if (!summary || typeof summary !== "object") {
+    return 0;
+  }
+  const raw = summary.period_exceptions;
+  if (!raw || typeof raw !== "object") {
+    return 0;
+  }
+  const count = (raw as Record<string, unknown>).count;
+  return typeof count === "number" ? count : 0;
+}
+
+function buildGstr1ReviewHref(options: {
+  workspaceId?: string | null;
+  clientId?: string | null;
+  gstinId?: string | null;
+  periodId?: string | null;
+  returnId?: string | null;
+  returnType?: string | null;
+  tab?: string | null;
+}) {
+  if (
+    options.returnType !== "gstr1" ||
+    !options.workspaceId ||
+    !options.clientId ||
+    !options.gstinId ||
+    !options.periodId ||
+    !options.returnId
+  ) {
+    return null;
+  }
+
+  const params = new URLSearchParams({
+    workspace: options.workspaceId,
+    client: options.clientId,
+    gstin: options.gstinId,
+    period: options.periodId,
+    returnId: options.returnId,
+  });
+  if (options.tab) {
+    params.set("tab", options.tab);
+  }
+  return `/returns/gstr1-review?${params.toString()}`;
+}
+
+function buildGstr3bReviewHref(options: {
+  workspaceId?: string | null;
+  clientId?: string | null;
+  gstinId?: string | null;
+  periodId?: string | null;
+  returnId?: string | null;
+  returnType?: string | null;
+  tab?: string | null;
+}) {
+  if (
+    options.returnType !== "gstr3b" ||
+    !options.workspaceId ||
+    !options.clientId ||
+    !options.gstinId ||
+    !options.periodId ||
+    !options.returnId
+  ) {
+    return null;
+  }
+
+  const params = new URLSearchParams({
+    workspace: options.workspaceId,
+    client: options.clientId,
+    gstin: options.gstinId,
+    period: options.periodId,
+    returnId: options.returnId,
+  });
+  if (options.tab) {
+    params.set("tab", options.tab);
+  }
+  return `/returns/gstr3b-review?${params.toString()}`;
+}
+
+function buildGstr9ReviewHref(options: {
+  workspaceId?: string | null;
+  clientId?: string | null;
+  gstinId?: string | null;
+  periodId?: string | null;
+  returnId?: string | null;
+  returnType?: string | null;
+  tab?: string | null;
+}) {
+  if (
+    (options.returnType !== "gstr9" && options.returnType !== "gstr9c") ||
+    !options.workspaceId ||
+    !options.clientId ||
+    !options.gstinId ||
+    !options.periodId ||
+    !options.returnId
+  ) {
+    return null;
+  }
+
+  const params = new URLSearchParams({
+    workspace: options.workspaceId,
+    client: options.clientId,
+    gstin: options.gstinId,
+    period: options.periodId,
+    returnId: options.returnId,
+  });
+  if (options.tab) {
+    params.set("tab", options.tab);
+  }
+  return options.returnType === "gstr9c" ? `/returns/gstr9c-review?${params.toString()}` : `/returns/gstr9-review?${params.toString()}`;
+}
+
+function chooseGstr3bReviewTab(preparedReturn?: ReturnPreparationRecord | null) {
+  const summary = preparedReturn?.summary_snapshot ?? {};
+  const periodExceptionCount = getPeriodExceptionCountFromSummary(summary);
+  const reconciliationSummary = (summary.reconciliation as Record<string, unknown> | undefined) ?? {};
+  const itcSummary = (summary.itc_summary as Record<string, unknown> | undefined) ?? {};
+
+  if (preparedReturn?.is_blocked_by_stale_reconciliation || periodExceptionCount > 0) return "exceptions";
+  if (
+    Number(reconciliationSummary.manual_review_decision_count ?? 0) > 0 ||
+    Number(reconciliationSummary.prior_period_deferred_count ?? 0) > 0
+  ) {
+    return "decisions";
+  }
+  if (
+    Number(itcSummary.unresolved_mismatch_count ?? 0) > 0 ||
+    Number(reconciliationSummary.partial_match_count ?? 0) > 0 ||
+    Number(reconciliationSummary.missing_in_books_count ?? 0) > 0 ||
+    Number(reconciliationSummary.missing_in_portal_count ?? 0) > 0 ||
+    Number(reconciliationSummary.duplicate_count ?? 0) > 0
+  ) {
+    return "reconciliation";
+  }
+  if (
+    Number(itcSummary.pending_2b_count ?? 0) > 0 ||
+    Number(itcSummary.pending_review_count ?? 0) > 0 ||
+    Number(itcSummary.blocked_count ?? 0) > 0 ||
+    Number(itcSummary.timing_difference_count ?? 0) > 0 ||
+    Number(itcSummary.vendor_followup_required_count ?? 0) > 0
+  ) {
+    return "itc";
+  }
+  return "overview";
+}
+
+function chooseGstr9ReviewTab(preparedReturn?: ReturnPreparationRecord | null) {
+  const summary = (preparedReturn?.summary_snapshot as Record<string, unknown> | undefined) ?? {};
+  const sourceMonths = (summary.source_months as Record<string, unknown> | undefined) ?? {};
+  const warningsSummary = (summary.warnings_summary as Record<string, unknown> | undefined) ?? {};
+
+  if (preparedReturn?.is_blocked_by_stale_reconciliation) return "exceptions";
+  if (Array.isArray(sourceMonths.blocked_source_periods) && sourceMonths.blocked_source_periods.length > 0) return "exceptions";
+  if (Number(warningsSummary.warning_count ?? 0) > 0) return "source-months";
+  return "overview";
+}
+
 export default function OperationsPage() {
   const { selectedWorkspaceId, selectedClientId, selectedGstinId, selectedPeriodId } = useWorkspaceContext();
   const [status, setStatus] = useState<string>("all");
@@ -80,6 +269,7 @@ export default function OperationsPage() {
   const [selectedRequeueFiling, setSelectedRequeueFiling] = useState<ReturnFilingOperationsRecord | null>(null);
   const [requeueComments, setRequeueComments] = useState("");
   const [expandedFilingId, setExpandedFilingId] = useState<string | null>(null);
+  const [previewReturnId, setPreviewReturnId] = useState<string | null>(null);
 
   const filters = useMemo(
     () => ({
@@ -96,6 +286,7 @@ export default function OperationsPage() {
   );
 
   const operationsQuery = useFilingOperationsQuery(filters);
+  const previewReturnQuery = useReturnQuery(previewReturnId ?? undefined);
   const retryFilingMutation = useRetryFilingMutation(filters);
   const resyncFilingMutation = useResyncFilingMutation(filters);
   const requeueAfterReviewMutation = useRequeueAfterReviewMutation(filters);
@@ -104,6 +295,43 @@ export default function OperationsPage() {
     () => operationsQuery.data?.items ?? [],
     [operationsQuery.data?.items],
   );
+  const previewReviewHref = useMemo(() => {
+    return (
+      buildGstr1ReviewHref({
+        workspaceId: selectedWorkspaceId,
+        clientId: selectedClientId,
+        gstinId: selectedGstinId,
+        periodId: selectedPeriodId,
+        returnId: previewReturnQuery.data?.id,
+        returnType: previewReturnQuery.data?.return_type,
+        tab: "overview",
+      }) ||
+      buildGstr3bReviewHref({
+        workspaceId: selectedWorkspaceId,
+        clientId: selectedClientId,
+        gstinId: selectedGstinId,
+        periodId: selectedPeriodId,
+        returnId: previewReturnQuery.data?.id,
+        returnType: previewReturnQuery.data?.return_type,
+        tab: chooseGstr3bReviewTab(previewReturnQuery.data),
+      }) ||
+      buildGstr9ReviewHref({
+        workspaceId: selectedWorkspaceId,
+        clientId: selectedClientId,
+        gstinId: selectedGstinId,
+        periodId: selectedPeriodId,
+        returnId: previewReturnQuery.data?.id,
+        returnType: previewReturnQuery.data?.return_type,
+        tab: chooseGstr9ReviewTab(previewReturnQuery.data),
+      })
+    );
+  }, [
+    previewReturnQuery.data,
+    selectedClientId,
+    selectedGstinId,
+    selectedPeriodId,
+    selectedWorkspaceId,
+  ]);
 
   const stats = useMemo(() => {
     const needsRetry = operations.filter((item) => item.support_status_summary.recommended_action === "retry_filing").length;
@@ -307,7 +535,34 @@ export default function OperationsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {operations.map((filing) => (
+                {operations.map((filing) => {
+                  const directReviewHref = buildGstr1ReviewHref({
+                    workspaceId: selectedWorkspaceId,
+                    clientId: selectedClientId,
+                    gstinId: selectedGstinId,
+                    periodId: selectedPeriodId,
+                    returnId: filing.prepared_return,
+                    returnType: filing.return_type,
+                    tab: "overview",
+                  }) || buildGstr3bReviewHref({
+                    workspaceId: selectedWorkspaceId,
+                    clientId: selectedClientId,
+                    gstinId: selectedGstinId,
+                    periodId: selectedPeriodId,
+                    returnId: filing.prepared_return,
+                    returnType: filing.return_type,
+                    tab: "overview",
+                  }) || buildGstr9ReviewHref({
+                    workspaceId: selectedWorkspaceId,
+                    clientId: selectedClientId,
+                    gstinId: selectedGstinId,
+                    periodId: selectedPeriodId,
+                    returnId: filing.prepared_return,
+                    returnType: filing.return_type,
+                    tab: "overview",
+                  });
+
+                  return (
                   <Fragment key={filing.id}>
                     <TableRow>
                       <TableCell>
@@ -379,11 +634,17 @@ export default function OperationsPage() {
                           >
                             {requeueAfterReviewMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Requeue"}
                           </Button>
-                        <Button asChild size="sm" variant="ghost">
-                          <Link href={`/returns?returnId=${filing.prepared_return}&focus=filing_lifecycle`}>
-                            <ActionLabel kind="open" label="Open Returns" />
-                          </Link>
-                        </Button>
+                          {directReviewHref ? (
+                            <Button size="sm" variant="ghost" asChild>
+                              <Link href={directReviewHref}>
+                                <ActionLabel kind="view" label="View return" />
+                              </Link>
+                            </Button>
+                          ) : (
+                            <Button size="sm" variant="ghost" onClick={() => setPreviewReturnId(filing.prepared_return)}>
+                              <ActionLabel kind="view" label="View return" />
+                            </Button>
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -591,7 +852,8 @@ export default function OperationsPage() {
                       </TableRow>
                     ) : null}
                   </Fragment>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           </div>
@@ -602,6 +864,128 @@ export default function OperationsPage() {
           />
           )}
       </SectionCard>
+
+      <Dialog open={Boolean(previewReturnId)} onOpenChange={(open) => !open && setPreviewReturnId(null)}>
+        <AppModalContent size="lg">
+          <AppModalHeader
+            title={previewReturnQuery.data ? `${previewReturnQuery.data.return_type.toUpperCase()} return preview` : "Return preview"}
+            description={
+              previewReturnQuery.data
+                ? `${previewReturnQuery.data.client_name ?? "Client"} • ${previewReturnQuery.data.gstin_value ?? ""} • ${previewReturnQuery.data.compliance_period_label ?? ""}`
+                : "Review the prepared return summary without leaving filing operations."
+            }
+          />
+          <AppModalBody className="space-y-6">
+            {previewReturnQuery.isLoading ? (
+              <LoadingState message="Loading return preview..." />
+            ) : previewReturnQuery.isError ? (
+              <ErrorState description={getErrorMessage(previewReturnQuery.error)} />
+            ) : previewReturnQuery.data ? (
+              <>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-sm text-slate-500">Status</p>
+                    <div className="mt-2">
+                      <StatusBadge
+                        label={previewReturnQuery.data.status.replace(/_/g, " ")}
+                        variant={
+                          previewReturnQuery.data.status === "approved" || previewReturnQuery.data.status === "filed"
+                            ? "success"
+                            : previewReturnQuery.data.status === "ready_for_review"
+                              ? "warning"
+                              : "primary"
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-sm text-slate-500">Taxable value</p>
+                    <p className="mt-2 text-lg font-semibold text-slate-900">Rs. {formatMoney(getPrimaryTaxableValue(previewReturnQuery.data))}</p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-sm text-slate-500">Tax amount</p>
+                    <p className="mt-2 text-lg font-semibold text-slate-900">Rs. {formatMoney(getPrimaryTaxAmount(previewReturnQuery.data))}</p>
+                  </div>
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <p className="text-sm text-slate-500">{previewReturnQuery.data.return_type === "gstr3b" ? "Net payable" : previewReturnQuery.data.return_type === "gstr9" || previewReturnQuery.data.return_type === "gstr9c" ? "Annual net payable" : "ITC impact"}</p>
+                    <p className="mt-2 text-lg font-semibold text-slate-900">
+                      Rs. {formatMoney(previewReturnQuery.data.return_type === "gstr3b" ? getNetPayable(previewReturnQuery.data) : previewReturnQuery.data.return_type === "gstr9" || previewReturnQuery.data.return_type === "gstr9c" ? getNetPayable(previewReturnQuery.data) : getItcAmount(previewReturnQuery.data))}
+                    </p>
+                  </div>
+                </div>
+
+                <SectionCard title="Review context" description="Key ownership, timing, and exception indicators for this draft.">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="rounded-2xl bg-slate-50 p-4">
+                      <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">Prepared by</p>
+                      <p className="mt-2 text-sm font-semibold text-slate-900">{previewReturnQuery.data.prepared_by_name ?? "System"}</p>
+                      <p className="mt-1 text-sm text-slate-600">{formatDateTime(previewReturnQuery.data.updated_at)}</p>
+                    </div>
+                    <div className="rounded-2xl bg-slate-50 p-4">
+                      <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">Period exceptions</p>
+                      <p className="mt-2 text-sm font-semibold text-slate-900">{getPeriodExceptionCountFromSummary(previewReturnQuery.data.summary_snapshot)} linked row(s)</p>
+                      <p className="mt-1 text-sm text-slate-600">Review accepted out-of-period source items before approval.</p>
+                    </div>
+                    {previewReturnQuery.data.is_blocked_by_stale_reconciliation ? (
+                      <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 md:col-span-2">
+                        <p className="text-sm font-semibold text-rose-900">Blocked by stale reconciliation</p>
+                        <p className="mt-1 text-sm leading-6 text-rose-800">
+                          {previewReturnQuery.data.blocking_reason || "Source imports changed after the last reconciliation run."}
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                </SectionCard>
+
+                <ReturnSectionSummary
+                  returnType={previewReturnQuery.data.return_type}
+                  summarySnapshot={previewReturnQuery.data.summary_snapshot}
+                  variant="compact"
+                />
+
+                {previewReviewHref ? (
+                  <SectionCard
+                    title={
+                      previewReturnQuery.data?.return_type === "gstr3b"
+                        ? "Full GSTR-3B review"
+                        : previewReturnQuery.data?.return_type === "gstr9" || previewReturnQuery.data?.return_type === "gstr9c"
+                          ? "Full GSTR-9 review"
+                          : "Full GSTR-1 review"
+                    }
+                    description="Open the complete tabbed review workspace for section-wise validation, warnings, and exceptions."
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-4">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">Continue review in the dedicated workspace</p>
+                        <p className="mt-1 text-sm text-slate-600">
+                          {previewReturnQuery.data?.return_type === "gstr3b"
+                            ? "Use the in-app GSTR-3B tabs to inspect output tax, ITC posture, reconciliation rows, CA decisions, and source purchase / 2B details."
+                            : previewReturnQuery.data?.return_type === "gstr9" || previewReturnQuery.data?.return_type === "gstr9c"
+                              ? "Use the annual review tabs to inspect totals, linked annual source context, comparison posture, and warning signals."
+                              : "Use the in-app GSTR-1 tabs to inspect B2B, B2CL, B2CS, exports, advances, amendments, e-commerce, and HSN details."}
+                        </p>
+                      </div>
+                      <Button asChild variant="outline">
+                        <Link href={previewReviewHref}>
+                          {previewReturnQuery.data?.return_type === "gstr3b" ? "Open GSTR-3B review" : previewReturnQuery.data?.return_type === "gstr9c" ? "Open GSTR-9C review" : previewReturnQuery.data?.return_type === "gstr9" ? "Open GSTR-9 review" : "Open GSTR-1 review"}
+                        </Link>
+                      </Button>
+                    </div>
+                  </SectionCard>
+                ) : null}
+
+                <SectionCard title="Raw summary snapshot" description="The prepared return summary payload captured for review.">
+                  <pre className="overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs leading-6 text-slate-100">
+                    {JSON.stringify(previewReturnQuery.data.summary_snapshot ?? {}, null, 2)}
+                  </pre>
+                </SectionCard>
+              </>
+            ) : (
+              <EmptyState title="Return preview unavailable" description="We couldn't find the selected return draft." />
+            )}
+          </AppModalBody>
+        </AppModalContent>
+      </Dialog>
 
       <Dialog open={Boolean(selectedRequeueFiling)} onOpenChange={(open) => !open && (setSelectedRequeueFiling(null), setRequeueComments(""))}>
         <AppModalContent size="md">

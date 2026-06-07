@@ -1,0 +1,5 @@
+invoice_no,invoice_date,supplier_gstin,supplier_name,taxable_value,cgst,sgst,igst,cess,total_amount,place_of_supply,reverse_charge,document_type,hsn_code,description,uqc,quantity,is_service,supply_category
+P3B-9101,2026-05-05,29BBBBB9101B1Z5,Vendor One Components,30000,2700,2700,0,0,35400,29,FALSE,invoice,8536,Control switch inventory,PCS,50,FALSE,taxable
+P3B-9102,2026-05-08,29CCCCC9102C1Z5,Vendor Two Fabrication,20000,1800,1800,0,0,23600,29,FALSE,invoice,7308,Fabricated support frames,PCS,10,FALSE,taxable
+P3B-9103,2026-05-11,29DDDDD9103D1Z5,Vendor Three Services,10000,900,900,0,0,11800,29,FALSE,invoice,9987,Project support services,HRS,8,TRUE,taxable
+P3B-9104,2026-05-14,29EEEEE9104E1Z5,Vendor Four Packaging,15000,1350,1350,0,0,17700,29,FALSE,invoice,4819,Packaging material,PCS,200,FALSE,taxable

@@ -34,6 +34,12 @@ class ReconciliationRun(BaseModel):
     duplicate_count = models.PositiveIntegerField(default=0)
     total_tax_difference = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     total_itc_at_risk = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    itc_ready_count = models.PositiveIntegerField(default=0)
+    itc_pending_2b_count = models.PositiveIntegerField(default=0)
+    itc_pending_review_count = models.PositiveIntegerField(default=0)
+    itc_blocked_count = models.PositiveIntegerField(default=0)
+    itc_timing_difference_count = models.PositiveIntegerField(default=0)
+    itc_vendor_followup_required_count = models.PositiveIntegerField(default=0)
     processed_at = models.DateTimeField(null=True, blank=True)
     error_summary = models.JSONField(default=dict, blank=True)
     is_stale = models.BooleanField(default=False)
@@ -86,6 +92,37 @@ class ReconciliationItem(BaseModel):
         DEFERRED = "deferred", "Deferred"
         IGNORED = "ignored", "Ignored"
 
+    class IssueBucket(models.TextChoices):
+        READY = "ready", "Ready / Matched"
+        TIMING_DIFFERENCE = "timing_difference", "Timing Difference"
+        VENDOR_FOLLOW_UP = "vendor_follow_up", "Vendor Follow-up"
+        BOOKS_CORRECTION = "books_correction", "Books Correction"
+        VALUE_REVIEW = "value_review", "Value Review"
+        DOCUMENT_REVIEW = "document_review", "Document Review"
+        DUPLICATE_CLEANUP = "duplicate_cleanup", "Duplicate Cleanup"
+        ISSUE_REVIEW = "issue_review", "General Review"
+
+    class PeriodRelationship(models.TextChoices):
+        SAME_PERIOD = "same_period", "Same Period"
+        PRIOR_PERIOD = "prior_period", "Prior Period"
+        NEXT_PERIOD = "next_period", "Next Period"
+        UNKNOWN = "unknown", "Unknown"
+
+    class ITCStatus(models.TextChoices):
+        ITC_READY = "itc_ready", "ITC Ready"
+        ITC_PENDING_2B = "itc_pending_2b", "ITC Pending 2B"
+        ITC_PENDING_REVIEW = "itc_pending_review", "ITC Pending Review"
+        ITC_BLOCKED = "itc_blocked", "ITC Blocked"
+        ITC_TIMING_DIFFERENCE = "itc_timing_difference", "ITC Timing Difference"
+        ITC_VENDOR_FOLLOWUP_REQUIRED = "itc_vendor_followup_required", "ITC Vendor Follow-up Required"
+
+    class ReviewDecision(models.TextChoices):
+        AUTO = "auto", "Auto"
+        CLAIM_NOW = "claim_now", "Claim Now"
+        DEFER = "defer", "Defer"
+        BLOCKED = "blocked", "Blocked"
+        VENDOR_FOLLOW_UP = "vendor_follow_up", "Vendor Follow-up"
+
     reconciliation_run = models.ForeignKey(ReconciliationRun, on_delete=models.CASCADE, related_name="items")
     books_transaction = models.ForeignKey(
         GSTTransaction,
@@ -107,6 +144,11 @@ class ReconciliationItem(BaseModel):
     taxable_difference = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     total_difference = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     action_status = models.CharField(max_length=32, choices=ActionStatus.choices, default=ActionStatus.OPEN)
+    issue_bucket = models.CharField(max_length=32, choices=IssueBucket.choices, default=IssueBucket.ISSUE_REVIEW)
+    recommended_next_action = models.CharField(max_length=96, blank=True)
+    period_relationship = models.CharField(max_length=24, choices=PeriodRelationship.choices, default=PeriodRelationship.UNKNOWN)
+    itc_status = models.CharField(max_length=40, choices=ITCStatus.choices, default=ITCStatus.ITC_PENDING_REVIEW)
+    review_decision = models.CharField(max_length=24, choices=ReviewDecision.choices, default=ReviewDecision.AUTO)
     assigned_to = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -124,6 +166,9 @@ class ReconciliationItem(BaseModel):
         indexes = [
             models.Index(fields=["reconciliation_run", "match_status"]),
             models.Index(fields=["reconciliation_run", "action_status"]),
+            models.Index(fields=["reconciliation_run", "issue_bucket"]),
+            models.Index(fields=["reconciliation_run", "itc_status"]),
+            models.Index(fields=["reconciliation_run", "review_decision"]),
             models.Index(fields=["assigned_to"]),
             models.Index(fields=["mismatch_reason"]),
         ]

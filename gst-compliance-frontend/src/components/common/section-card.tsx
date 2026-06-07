@@ -24,12 +24,12 @@ export function SectionCard({
   return (
     <Card className={cn(cardClassName, "py-0", className)}>
       <CardHeader className="border-b border-slate-100 px-6 py-[1.125rem] lg:px-6 lg:py-5">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1">
             <CardTitle className={typography.sectionTitle}>{title}</CardTitle>
             {description ? <CardDescription className={cn("mt-1", typography.bodyCompact)}>{description}</CardDescription> : null}
           </div>
-          {action ? <div className="shrink-0">{action}</div> : null}
+          {action ? <div className="min-w-0 sm:shrink-0">{action}</div> : null}
         </div>
       </CardHeader>
       <CardContent className="px-6 py-5 lg:py-[1.375rem]">{children}</CardContent>

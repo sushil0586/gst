@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import F
 from django.utils.text import slugify
 from django.utils import timezone
 from rest_framework import serializers
@@ -10,7 +11,11 @@ from apps.compliance_periods.services.compliance_periods import ensure_period_mo
 from apps.filings.models import ProviderAuthSession, ReturnFiling
 from apps.gstins.models import GSTIN
 from apps.imports.models import ImportBatch, ImportTemplate
-from apps.imports.services.correction_policy import evaluate_import_correction_policy, get_import_correction_policy
+from apps.imports.services.correction_policy import (
+    evaluate_import_correction_policy,
+    get_import_correction_policy,
+    get_relevant_return_types_for_import,
+)
 from apps.imports.services.parsers import PARSER_REGISTRY
 from apps.common.security import sanitize_json
 from apps.integrations.whitebooks.client import WhiteBooksClient
@@ -660,7 +665,10 @@ def _get_latest_provider_auth_session(*, workspace_id, client_id, gstin_id, prov
                 ProviderAuthSession.SessionStatus.SESSION_ACTIVE,
             ],
         )
-        .order_by("-verified_at", "-created_at")
+        .order_by(
+            F("verified_at").desc(nulls_last=True),
+            "-created_at",
+        )
         .first()
     )
     if auth_session is None:
@@ -834,6 +842,7 @@ def _to_decimal_string_part(value):
 
 def invalidate_downstream_after_import_correction(*, import_batch, actor, reason):
     policy = evaluate_import_correction_policy(batch=import_batch, user=actor)
+    relevant_return_types = get_relevant_return_types_for_import(import_type=import_batch.import_type)
     now = timezone.now()
     counts = {
         "reconciliation_runs": 0,
@@ -867,6 +876,7 @@ def invalidate_downstream_after_import_correction(*, import_batch, actor, reason
         return_qs = ReturnPreparation.objects.filter(
             compliance_period_id=import_batch.compliance_period_id,
             is_active=True,
+            return_type__in=relevant_return_types,
         ).exclude(status=ReturnPreparation.PreparationStatus.FILED)
         counts["return_preparations"] = return_qs.update(
             is_blocked_by_stale_reconciliation=True,

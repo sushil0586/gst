@@ -42,6 +42,17 @@ COLUMN_ALIASES = {
     "is_service": ["is_service", "service", "is_service_item"],
     "supply_category": ["supply_category", "taxability", "supply_type", "gst_supply_type"],
     "ecommerce_gstin": ["ecommerce_gstin", "e_commerce_gstin", "eco_gstin", "operator_gstin"],
+    "rate": ["rate", "gst_rate", "tax_rate"],
+    "advance_reference": ["advance_reference", "original_advance_reference", "receipt_voucher_number", "receipt_voucher_no", "receipt_voucher"],
+    "special_supply_type": ["special_supply_type", "export_type", "supply_subtype", "zero_rated_type"],
+    "shipping_bill_number": ["shipping_bill_number", "shipping_bill_no", "sbnum", "bill_of_export_number"],
+    "shipping_bill_date": ["shipping_bill_date", "sbdt", "bill_of_export_date"],
+    "port_code": ["port_code", "shipping_bill_port_code", "sbpcode"],
+    "ecommerce_section": ["ecommerce_section", "eco_section", "ecom_section"],
+    "original_document_number": ["original_document_number", "original_invoice_number", "original_doc_number", "oinum"],
+    "original_document_date": ["original_document_date", "original_invoice_date", "original_doc_date", "oidt"],
+    "original_period": ["original_period", "original_return_period", "ofp"],
+    "original_counterparty_gstin": ["original_counterparty_gstin", "original_recipient_gstin", "octin"],
 }
 
 
@@ -226,9 +237,22 @@ class BaseImportParser:
         is_service = self._parse_boolean(self._pick_value(normalized, "is_service"))
         supply_category = self._normalize_supply_category(self._pick_value(normalized, "supply_category"))
         ecommerce_gstin = self._coerce_string(self._pick_value(normalized, "ecommerce_gstin")).upper()
+        rate = self._parse_decimal(self._pick_value(normalized, "rate"), default=Decimal("0.00"))
+        advance_reference = self._coerce_string(self._pick_value(normalized, "advance_reference"))
+        special_supply_type = self._normalize_special_supply_type(self._pick_value(normalized, "special_supply_type"))
+        shipping_bill_number = self._coerce_string(self._pick_value(normalized, "shipping_bill_number"))
+        shipping_bill_date = self._parse_date(self._pick_value(normalized, "shipping_bill_date"))
+        port_code = self._coerce_string(self._pick_value(normalized, "port_code")).upper()
+        ecommerce_section = self._normalize_ecommerce_section(self._pick_value(normalized, "ecommerce_section"))
+        original_document_number = self._coerce_string(self._pick_value(normalized, "original_document_number"))
+        original_document_date = self._parse_date(self._pick_value(normalized, "original_document_date"))
+        original_period = self._coerce_string(self._pick_value(normalized, "original_period"))
+        original_counterparty_gstin = self._coerce_string(self._pick_value(normalized, "original_counterparty_gstin")).upper()
         tax_amount = None
         if None not in {cgst_amount, sgst_amount, igst_amount, cess_amount}:
             tax_amount = cgst_amount + sgst_amount + igst_amount + cess_amount
+        if rate == Decimal("0.00") and taxable_value not in (None, Decimal("0.00")) and tax_amount not in (None, Decimal("0.00")):
+            rate = (tax_amount / taxable_value) * Decimal("100.00")
 
         metadata = {
             "raw_columns": normalized,
@@ -241,6 +265,7 @@ class BaseImportParser:
                     "is_service": is_service,
                     "supply_category": supply_category,
                     "ecommerce_gstin": ecommerce_gstin,
+                    "rate": str(rate) if rate is not None else None,
                     "taxable_value": str(taxable_value) if taxable_value is not None else None,
                     "cgst_amount": str(cgst_amount) if cgst_amount is not None else None,
                     "sgst_amount": str(sgst_amount) if sgst_amount is not None else None,
@@ -266,6 +291,30 @@ class BaseImportParser:
             metadata["supply_category"] = supply_category
         if ecommerce_gstin:
             metadata["ecommerce_gstin"] = ecommerce_gstin
+        if rate not in (None, Decimal("0.00")):
+            metadata["rate"] = str(rate)
+        if advance_reference:
+            metadata["advance_reference"] = advance_reference
+        if special_supply_type:
+            metadata["special_supply_type"] = special_supply_type
+        if shipping_bill_number:
+            metadata["shipping_bill_number"] = shipping_bill_number
+        if shipping_bill_date is not None:
+            metadata["shipping_bill_date"] = shipping_bill_date.isoformat()
+        if port_code:
+            metadata["port_code"] = port_code
+        if ecommerce_section:
+            metadata["ecommerce_section"] = ecommerce_section
+        if original_document_number:
+            metadata["original_document_number"] = original_document_number
+        if original_document_date is not None:
+            metadata["original_document_date"] = original_document_date.isoformat()
+        if original_period:
+            metadata["original_period"] = original_period
+        if original_counterparty_gstin:
+            metadata["original_counterparty_gstin"] = original_counterparty_gstin
+        if original_document_number or original_document_date is not None or original_period:
+            metadata["is_amendment"] = True
         period_exception = self._extract_period_exception(row)
         if period_exception["allowed"]:
             metadata["period_exception"] = {
@@ -507,6 +556,43 @@ class BaseImportParser:
             return normalized
         return normalized or ""
 
+    def _normalize_special_supply_type(self, value):
+        normalized = self._normalize_key(value)
+        aliases = {
+            "export": "export_wpay",
+            "export_wpay": "export_wpay",
+            "wpay": "export_wpay",
+            "export_with_payment": "export_wpay",
+            "export_taxable": "export_wpay",
+            "export_wopay": "export_wopay",
+            "wopay": "export_wopay",
+            "export_without_payment": "export_wopay",
+            "export_exempt": "export_wopay",
+            "sez_wpay": "sez_wpay",
+            "sewp": "sez_wpay",
+            "sez_with_payment": "sez_wpay",
+            "sez_taxable": "sez_wpay",
+            "sez_wopay": "sez_wopay",
+            "sewop": "sez_wopay",
+            "sez_without_payment": "sez_wopay",
+            "deemed_export": "deemed_export",
+            "deemed_exports": "deemed_export",
+            "de": "deemed_export",
+        }
+        return aliases.get(normalized, normalized or "")
+
+    def _normalize_ecommerce_section(self, value):
+        normalized = self._normalize_key(value)
+        aliases = {
+            "table_14": "table_14",
+            "14": "table_14",
+            "supplier": "table_14",
+            "table_15": "table_15",
+            "15": "table_15",
+            "operator": "table_15",
+        }
+        return aliases.get(normalized, normalized or "")
+
     def _issue(self, row_number, field_name, error_code, error_message, raw_row, severity=ImportRowError.Severity.ERROR):
         return {
             "row_number": row_number,
@@ -550,6 +636,8 @@ class BaseImportParser:
             line_item.get("is_service"),
             line_item.get("supply_category"),
             line_item.get("ecommerce_gstin"),
+            line_item.get("rate"),
+            metadata.get("advance_reference"),
         )
 
     def _initialize_transaction_group(self, normalized_row, row_number):
@@ -580,7 +668,7 @@ class BaseImportParser:
         base_metadata.setdefault("source_rows", []).append(row_number)
         base_metadata["aggregated_line_count"] = len(base_metadata["line_items"])
 
-        for key in ("hsn_code", "description", "uqc", "quantity", "is_service", "supply_category", "ecommerce_gstin"):
+        for key in ("hsn_code", "description", "uqc", "quantity", "is_service", "supply_category", "ecommerce_gstin", "rate", "advance_reference"):
             existing_value = base_metadata.get(key)
             incoming_value = normalized_row["metadata"].get(key)
             if not incoming_value:

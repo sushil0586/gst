@@ -14,6 +14,18 @@ METADATA_SUMMARY_FIELDS = (
     "is_service",
     "supply_category",
     "ecommerce_gstin",
+    "rate",
+    "advance_reference",
+    "special_supply_type",
+    "shipping_bill_number",
+    "shipping_bill_date",
+    "port_code",
+    "ecommerce_section",
+    "original_document_number",
+    "original_document_date",
+    "original_period",
+    "original_counterparty_gstin",
+    "is_amendment",
 )
 LINE_ITEM_FIELDS = (
     "hsn_code",
@@ -23,6 +35,7 @@ LINE_ITEM_FIELDS = (
     "is_service",
     "supply_category",
     "ecommerce_gstin",
+    "rate",
     "taxable_value",
     "cgst_amount",
     "sgst_amount",
@@ -39,6 +52,18 @@ EDITABLE_BULK_METADATA_FIELDS = {
     "is_service",
     "supply_category",
     "ecommerce_gstin",
+    "rate",
+    "advance_reference",
+    "special_supply_type",
+    "shipping_bill_number",
+    "shipping_bill_date",
+    "port_code",
+    "ecommerce_section",
+    "original_document_number",
+    "original_document_date",
+    "original_period",
+    "original_counterparty_gstin",
+    "is_amendment",
 }
 
 
@@ -179,7 +204,7 @@ def _normalize_line_item(item):
     raw_item = item or {}
     for field_name in LINE_ITEM_FIELDS:
         value = raw_item.get(field_name)
-        if field_name in {"quantity", "taxable_value", "cgst_amount", "sgst_amount", "igst_amount", "cess_amount", "total_amount"}:
+        if field_name in {"quantity", "rate", "taxable_value", "cgst_amount", "sgst_amount", "igst_amount", "cess_amount", "total_amount"}:
             normalized[field_name] = _normalize_decimal_string(value)
         elif field_name == "is_service":
             normalized[field_name] = bool(value)
@@ -195,16 +220,26 @@ def _normalize_line_item(item):
 
 
 def _normalize_scalar_metadata(field_name, value):
-    if field_name == "quantity":
+    if field_name in {"quantity", "rate"}:
         return _normalize_decimal_string(value)
     if field_name == "is_service":
         return bool(value)
     if field_name == "supply_category":
         return _normalize_supply_category(value)
+    if field_name == "special_supply_type":
+        return _normalize_special_supply_type(value)
+    if field_name == "ecommerce_section":
+        return _normalize_ecommerce_section(value)
     if field_name == "uqc":
         return _normalize_string(value).upper()
     if field_name == "ecommerce_gstin":
         return _normalize_string(value).upper()
+    if field_name == "port_code":
+        return _normalize_string(value).upper()
+    if field_name == "original_counterparty_gstin":
+        return _normalize_string(value).upper()
+    if field_name == "is_amendment":
+        return bool(value)
     return _normalize_string(value)
 
 
@@ -213,7 +248,7 @@ def validate_metadata_payload(metadata):
         quantity = item.get("quantity")
         if quantity not in (None, ""):
             _require_decimal(quantity, "quantity")
-        for amount_field in ("taxable_value", "cgst_amount", "sgst_amount", "igst_amount", "cess_amount", "total_amount"):
+        for amount_field in ("rate", "taxable_value", "cgst_amount", "sgst_amount", "igst_amount", "cess_amount", "total_amount"):
             amount_value = item.get(amount_field)
             if amount_value not in (None, ""):
                 _require_decimal(amount_value, amount_field)
@@ -222,6 +257,12 @@ def validate_metadata_payload(metadata):
             raise serializers.ValidationError(
                 {"metadata": { "line_items": f"Supply category must be one of {', '.join(sorted(ALLOWED_SUPPLY_CATEGORIES))}."}}
             )
+    special_supply_type = metadata.get("special_supply_type")
+    if special_supply_type and special_supply_type not in {"export_wpay", "export_wopay", "sez_wpay", "sez_wopay", "deemed_export"}:
+        raise serializers.ValidationError({"metadata": {"special_supply_type": "Unsupported special supply type."}})
+    ecommerce_section = metadata.get("ecommerce_section")
+    if ecommerce_section and ecommerce_section not in {"table_14", "table_15"}:
+        raise serializers.ValidationError({"metadata": {"ecommerce_section": "Unsupported ecommerce section."}})
     return metadata
 
 
@@ -233,7 +274,7 @@ def validate_bulk_update_payload(payload):
             {"metadata_updates": f"Unsupported metadata fields: {', '.join(sorted(invalid_metadata_fields))}."}
         )
     for field_name, value in metadata_updates.items():
-        if field_name in {"quantity"} and value not in (None, ""):
+        if field_name in {"quantity", "rate"} and value not in (None, ""):
             _require_decimal(value, field_name)
         if field_name == "supply_category" and value not in (None, ""):
             normalized = _normalize_supply_category(value)
@@ -242,10 +283,20 @@ def validate_bulk_update_payload(payload):
                     {"metadata_updates": f"Supply category must be one of {', '.join(sorted(ALLOWED_SUPPLY_CATEGORIES))}."}
                 )
             metadata_updates[field_name] = normalized
+        elif field_name == "special_supply_type":
+            metadata_updates[field_name] = _normalize_special_supply_type(value)
+        elif field_name == "ecommerce_section":
+            metadata_updates[field_name] = _normalize_ecommerce_section(value)
         elif field_name == "uqc":
             metadata_updates[field_name] = _normalize_string(value).upper()
         elif field_name == "ecommerce_gstin":
             metadata_updates[field_name] = _normalize_string(value).upper()
+        elif field_name == "port_code":
+            metadata_updates[field_name] = _normalize_string(value).upper()
+        elif field_name == "original_counterparty_gstin":
+            metadata_updates[field_name] = _normalize_string(value).upper()
+        elif field_name == "is_amendment":
+            metadata_updates[field_name] = bool(value)
         elif field_name == "is_service":
             metadata_updates[field_name] = bool(value)
         else:
@@ -285,6 +336,45 @@ def _normalize_supply_category(value):
         "nongst": "non_gst",
         "non_gst_supply": "non_gst",
         "exempted": "exempt",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _normalize_special_supply_type(value):
+    normalized = _normalize_string(value).lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "export": "export_wpay",
+        "export_wpay": "export_wpay",
+        "wpay": "export_wpay",
+        "export_with_payment": "export_wpay",
+        "export_taxable": "export_wpay",
+        "export_wopay": "export_wopay",
+        "wopay": "export_wopay",
+        "export_without_payment": "export_wopay",
+        "export_exempt": "export_wopay",
+        "sez_wpay": "sez_wpay",
+        "sewp": "sez_wpay",
+        "sez_with_payment": "sez_wpay",
+        "sez_taxable": "sez_wpay",
+        "sez_wopay": "sez_wopay",
+        "sewop": "sez_wopay",
+        "sez_without_payment": "sez_wopay",
+        "deemed_export": "deemed_export",
+        "deemed_exports": "deemed_export",
+        "de": "deemed_export",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _normalize_ecommerce_section(value):
+    normalized = _normalize_string(value).lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "14": "table_14",
+        "table_14": "table_14",
+        "supplier": "table_14",
+        "15": "table_15",
+        "table_15": "table_15",
+        "operator": "table_15",
     }
     return aliases.get(normalized, normalized)
 

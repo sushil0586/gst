@@ -62,6 +62,83 @@ class GSTTransaction(BaseModel):
         ]
 
 
+class TransactionCorrection(BaseModel):
+    class CorrectionScope(models.TextChoices):
+        RECONCILIATION_BOOKS = "reconciliation_books", "Reconciliation Books Correction"
+        RECONCILIATION_BOOKS_CREATE = "reconciliation_books_create", "Reconciliation Books Entry Creation"
+
+    class CorrectionStatus(models.TextChoices):
+        APPLIED = "applied", "Applied"
+        REVERTED = "reverted", "Reverted"
+
+    workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name="transaction_corrections")
+    client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name="transaction_corrections")
+    gstin = models.ForeignKey(
+        GSTIN,
+        on_delete=models.SET_NULL,
+        related_name="transaction_corrections",
+        null=True,
+        blank=True,
+    )
+    compliance_period = models.ForeignKey(
+        CompliancePeriod,
+        on_delete=models.CASCADE,
+        related_name="transaction_corrections",
+    )
+    transaction = models.ForeignKey(
+        GSTTransaction,
+        on_delete=models.CASCADE,
+        related_name="corrections",
+    )
+    reconciliation_item = models.ForeignKey(
+        "reconciliation.ReconciliationItem",
+        on_delete=models.SET_NULL,
+        related_name="transaction_corrections",
+        null=True,
+        blank=True,
+    )
+    correction_scope = models.CharField(
+        max_length=48,
+        choices=CorrectionScope.choices,
+        default=CorrectionScope.RECONCILIATION_BOOKS,
+    )
+    status = models.CharField(max_length=24, choices=CorrectionStatus.choices, default=CorrectionStatus.APPLIED)
+    reason_code = models.CharField(max_length=64)
+    reason_note = models.TextField(blank=True)
+    changed_fields = models.JSONField(default=list, blank=True)
+    before_snapshot = models.JSONField(default=dict, blank=True)
+    after_snapshot = models.JSONField(default=dict, blank=True)
+    applied_at = models.DateTimeField()
+    applied_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="transaction_corrections_applied",
+        null=True,
+        blank=True,
+    )
+    reverted_at = models.DateTimeField(null=True, blank=True)
+    reverted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="transaction_corrections_reverted",
+        null=True,
+        blank=True,
+    )
+    revert_reason = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "transaction_corrections"
+        ordering = ["-applied_at", "-created_at"]
+        indexes = [
+            models.Index(fields=["workspace", "client", "applied_at"]),
+            models.Index(fields=["compliance_period", "applied_at"]),
+            models.Index(fields=["transaction", "applied_at"]),
+            models.Index(fields=["reconciliation_item", "applied_at"]),
+            models.Index(fields=["status"]),
+            models.Index(fields=["reason_code"]),
+        ]
+
+
 class TransactionReviewSnapshot(BaseModel):
     workspace = models.ForeignKey(Workspace, on_delete=models.CASCADE, related_name="transaction_review_snapshots")
     client = models.ForeignKey(Client, on_delete=models.CASCADE, related_name="transaction_review_snapshots")

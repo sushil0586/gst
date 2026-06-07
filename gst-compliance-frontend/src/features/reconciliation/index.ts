@@ -1,5 +1,8 @@
 export {
+  useCreateReconciliationBooksEntryMutation,
+  useCorrectReconciliationItemMutation,
   useCreateReconciliationRunMutation,
+  useReconciliationItemCorrectionsQuery,
   useReconciliationRunItemsQuery,
   useReconciliationRunQuery,
   useReconciliationRunsQuery,

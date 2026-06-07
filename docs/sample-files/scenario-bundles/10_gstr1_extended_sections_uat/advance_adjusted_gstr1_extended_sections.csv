@@ -1,0 +1,2 @@
+document_number,document_date,counterparty_name,taxable_value,igst_amount,total_amount,place_of_supply,rate,advance_reference,description
+AA-3001,2026-05-25,Advance Customer One,4000,720,4720,27,18,AR-3001,Advance adjusted against final invoice

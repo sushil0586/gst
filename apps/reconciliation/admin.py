@@ -34,6 +34,9 @@ class ReconciliationRunAdmin(BaseTenantAdminMixin, admin.ModelAdmin):
         "missing_in_portal_count",
         "duplicate_count",
         "total_itc_at_risk",
+        "itc_ready_count",
+        "itc_pending_review_count",
+        "itc_blocked_count",
         "processed_at",
     )
     list_filter = ("status", "run_type", "workspace", "client")
@@ -51,6 +54,12 @@ class ReconciliationRunAdmin(BaseTenantAdminMixin, admin.ModelAdmin):
         "duplicate_count",
         "total_tax_difference",
         "total_itc_at_risk",
+        "itc_ready_count",
+        "itc_pending_2b_count",
+        "itc_pending_review_count",
+        "itc_blocked_count",
+        "itc_timing_difference_count",
+        "itc_vendor_followup_required_count",
         "processed_at",
         "error_summary",
         "error_summary_pretty",
@@ -70,6 +79,12 @@ class ReconciliationRunAdmin(BaseTenantAdminMixin, admin.ModelAdmin):
                     "duplicate_count",
                     "total_tax_difference",
                     "total_itc_at_risk",
+                    "itc_ready_count",
+                    "itc_pending_2b_count",
+                    "itc_pending_review_count",
+                    "itc_blocked_count",
+                    "itc_timing_difference_count",
+                    "itc_vendor_followup_required_count",
                     "processed_at",
                 )
             },
@@ -93,6 +108,7 @@ class ReconciliationItemAdmin(BaseTenantAdminMixin, admin.ModelAdmin):
         "match_status",
         "mismatch_reason",
         "action_status",
+        "itc_status",
         "assigned_to",
         "counterparty_name",
         "counterparty_gstin",
@@ -100,7 +116,7 @@ class ReconciliationItemAdmin(BaseTenantAdminMixin, admin.ModelAdmin):
         "portal_reference",
         "tax_difference",
     )
-    list_filter = ("match_status", "action_status", "mismatch_reason", "assigned_to")
+    list_filter = ("match_status", "action_status", "mismatch_reason", "itc_status", "assigned_to")
     search_fields = (
         "books_transaction__reference_number",
         "portal_transaction__reference_number",
@@ -122,6 +138,7 @@ class ReconciliationItemAdmin(BaseTenantAdminMixin, admin.ModelAdmin):
         "tax_difference",
         "taxable_difference",
         "total_difference",
+        "itc_status",
         "metadata",
         "metadata_pretty",
         "counterparty_name",
@@ -138,6 +155,7 @@ class ReconciliationItemAdmin(BaseTenantAdminMixin, admin.ModelAdmin):
                     "match_status",
                     "mismatch_reason",
                     "action_status",
+                    "itc_status",
                     "assigned_to",
                     "remarks",
                 )

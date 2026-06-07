@@ -30,13 +30,13 @@ export function AppModalContent({
   return (
     <DialogContent
       className={cn(
-        "max-h-[90vh] overflow-hidden rounded-[30px] border border-white/75 bg-[linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,250,252,0.96))] p-0 shadow-[0_38px_110px_-42px_rgba(15,23,42,0.28)]",
+        "max-h-[calc(100vh-2rem)] overflow-hidden rounded-[30px] border border-white/75 bg-[linear-gradient(180deg,rgba(255,255,255,0.99),rgba(248,250,252,0.96))] p-0 shadow-[0_38px_110px_-42px_rgba(15,23,42,0.28)]",
         sizeClasses[size],
         className,
       )}
       {...props}
     >
-      <div className="flex max-h-[90vh] flex-col">{children}</div>
+      <div className="flex min-h-0 max-h-[calc(100vh-2rem)] flex-col">{children}</div>
     </DialogContent>
   );
 }
@@ -83,7 +83,7 @@ export function AppModalHeader({
 }
 
 export function AppModalBody({ className, children }: React.ComponentProps<"div">) {
-  return <div className={cn("flex-1 overflow-y-auto px-8 py-6", className)}>{children}</div>;
+  return <div className={cn("min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-8 py-6", className)}>{children}</div>;
 }
 
 export function AppModalFooter({ className, children }: React.ComponentProps<typeof DialogFooter>) {

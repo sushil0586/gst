@@ -11,11 +11,19 @@ from apps.reconciliation.selectors.reconciliation import (
     get_reconciliation_run_queryset,
 )
 from apps.reconciliation.serializers import (
+    ReconciliationItemBooksCreateSerializer,
+    ReconciliationItemBooksCorrectionSerializer,
     ReconciliationItemActionSerializer,
     ReconciliationItemSerializer,
     ReconciliationRunSerializer,
+    TransactionCorrectionSerializer,
 )
-from apps.reconciliation.services.reconciliation import create_reconciliation_run, update_reconciliation_item
+from apps.reconciliation.services.reconciliation import (
+    apply_reconciliation_item_books_correction,
+    create_reconciliation_item_books_entry,
+    create_reconciliation_run,
+    update_reconciliation_item,
+)
 from rest_framework.decorators import action
 from rest_framework.mixins import CreateModelMixin, ListModelMixin, RetrieveModelMixin, UpdateModelMixin
 from rest_framework.response import Response
@@ -88,6 +96,12 @@ class ReconciliationRunViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMi
         action_status = request.query_params.get("action_status")
         if action_status:
             queryset = queryset.filter(action_status=action_status)
+        issue_bucket = request.query_params.get("issue_bucket")
+        if issue_bucket:
+            queryset = queryset.filter(issue_bucket=issue_bucket)
+        itc_status = request.query_params.get("itc_status")
+        if itc_status:
+            queryset = queryset.filter(itc_status=itc_status)
         assigned_to = request.query_params.get("assigned_to")
         if assigned_to:
             queryset = queryset.filter(assigned_to_id=assigned_to)
@@ -117,7 +131,16 @@ class ReconciliationRunViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMi
 class ReconciliationItemViewSet(ListModelMixin, RetrieveModelMixin, UpdateModelMixin, GenericViewSet):
     permission_classes = [WorkspaceRBACPermission]
     success_message = "Success"
-    filterset_fields = ["reconciliation_run", "match_status", "action_status", "assigned_to", "mismatch_reason"]
+    filterset_fields = [
+        "reconciliation_run",
+        "match_status",
+        "action_status",
+        "assigned_to",
+        "mismatch_reason",
+        "issue_bucket",
+        "period_relationship",
+        "itc_status",
+    ]
     search_fields = [
         "books_transaction__counterparty_name",
         "books_transaction__counterparty_gstin",
@@ -173,6 +196,55 @@ class ReconciliationItemViewSet(ListModelMixin, RetrieveModelMixin, UpdateModelM
 
     def perform_update(self, serializer):
         return update_reconciliation_item(serializer=serializer, user=self.request.user)
+
+    @action(detail=True, methods=["post"], url_path="correct-books-entry")
+    def correct_books_entry(self, request, pk=None):
+        item = self.get_object()
+        serializer = ReconciliationItemBooksCorrectionSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        correction = apply_reconciliation_item_books_correction(
+            item=item,
+            validated_data=serializer.validated_data,
+            user=request.user,
+        )
+        output = TransactionCorrectionSerializer(correction, context={"request": request})
+        return Response(
+            api_response(
+                data=output.data,
+                message="Books correction saved and reconciliation rerun queued.",
+            )
+        )
+
+    @action(detail=True, methods=["post"], url_path="create-books-entry")
+    def create_books_entry(self, request, pk=None):
+        item = self.get_object()
+        serializer = ReconciliationItemBooksCreateSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        correction = create_reconciliation_item_books_entry(
+            item=item,
+            validated_data=serializer.validated_data,
+            user=request.user,
+        )
+        output = TransactionCorrectionSerializer(correction, context={"request": request})
+        return Response(
+            api_response(
+                data=output.data,
+                message="Books entry created and reconciliation rerun queued.",
+            )
+        )
+
+    @action(detail=True, methods=["get"], url_path="corrections")
+    def corrections(self, request, pk=None):
+        item = self.get_object()
+        if item.books_transaction_id is None:
+            queryset = []
+        else:
+            queryset = item.books_transaction.corrections.select_related("applied_by").all()
+        page = self.paginate_queryset(queryset)
+        serializer = TransactionCorrectionSerializer(page or queryset, many=True, context={"request": request})
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(api_response(data=serializer.data, message=self.success_message))
 
     @property
     def basename_title(self):

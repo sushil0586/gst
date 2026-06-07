@@ -670,6 +670,12 @@ export type ReconciliationRunRecord = {
   duplicate_count: number;
   total_tax_difference: string;
   total_itc_at_risk: string;
+  itc_ready_count: number;
+  itc_pending_2b_count: number;
+  itc_pending_review_count: number;
+  itc_blocked_count: number;
+  itc_timing_difference_count: number;
+  itc_vendor_followup_required_count: number;
   processed_at: string | null;
   error_summary: Record<string, unknown>;
   is_stale: boolean;
@@ -679,6 +685,46 @@ export type ReconciliationRunRecord = {
   invalidation_reason: string;
   created_at: string;
   updated_at: string;
+};
+
+export type ReconciliationTransactionSnapshotRecord = {
+  id: string;
+  transaction_type: string;
+  document_type: string;
+  reference_number: string;
+  transaction_date: string | null;
+  counterparty_gstin: string;
+  counterparty_name: string;
+  taxable_value: string;
+  cgst_amount: string;
+  sgst_amount: string;
+  igst_amount: string;
+  cess_amount: string;
+  tax_amount: string;
+  total_amount: string;
+  place_of_supply: string;
+  reverse_charge: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type ReconciliationItemCorrectionRecord = {
+  id: string;
+  transaction: string;
+  reconciliation_item: string | null;
+  correction_scope: string;
+  status: "applied" | "reverted";
+  reason_code: string;
+  reason_note: string;
+  changed_fields: string[];
+  before_snapshot: Record<string, unknown>;
+  after_snapshot: Record<string, unknown>;
+  applied_at: string | null;
+  applied_by: number | null;
+  applied_by_name?: string | null;
+  created_at: string | null;
+  updated_at: string | null;
 };
 
 export type ReconciliationItemRecord = {
@@ -694,6 +740,8 @@ export type ReconciliationItemRecord = {
   portal_tax: string | null;
   counterparty_name: string;
   counterparty_gstin: string;
+  books_transaction_snapshot: ReconciliationTransactionSnapshotRecord | null;
+  portal_transaction_snapshot: ReconciliationTransactionSnapshotRecord | null;
   match_status:
     | "matched"
     | "partial_match"
@@ -716,10 +764,31 @@ export type ReconciliationItemRecord = {
   tax_difference: string;
   taxable_difference: string;
   total_difference: string;
+  issue_bucket:
+    | "ready"
+    | "timing_difference"
+    | "vendor_follow_up"
+    | "books_correction"
+    | "value_review"
+    | "document_review"
+    | "duplicate_cleanup"
+    | "issue_review";
+  recommended_next_action: string;
+  period_relationship: "same_period" | "prior_period" | "next_period" | "unknown";
+  itc_status:
+    | "itc_ready"
+    | "itc_pending_2b"
+    | "itc_pending_review"
+    | "itc_blocked"
+    | "itc_timing_difference"
+    | "itc_vendor_followup_required";
+  review_decision: "auto" | "claim_now" | "defer" | "blocked" | "vendor_follow_up";
   action_status: "open" | "assigned" | "resolved" | "deferred" | "ignored";
   assigned_to: number | null;
   assigned_to_name?: string | null;
   remarks: string;
+  latest_correction: ReconciliationItemCorrectionRecord | null;
+  corrections_count: number;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -735,7 +804,7 @@ export type ReturnPreparationRecord = {
   gstin_value?: string;
   compliance_period: string;
   compliance_period_label?: string;
-  return_type: "gstr1" | "gstr3b";
+  return_type: "gstr1" | "gstr3b" | "gstr9" | "gstr9c";
   status: "draft" | "validating" | "ready_for_review" | "blocked_by_stale_reconciliation" | "approved" | "filed" | "failed";
   summary_snapshot: Record<string, unknown>;
   prepared_by: number | null;
@@ -769,7 +838,7 @@ export type ReturnReadinessIssue = {
 };
 
 export type ReturnReadinessResult = {
-  return_type: "gstr1" | "gstr3b";
+  return_type: "gstr1" | "gstr3b" | "gstr9" | "gstr9c";
   status: "ready" | "ready_with_warnings" | "blocked";
   can_prepare: boolean;
   can_export: boolean;
@@ -798,6 +867,8 @@ export type ReturnReadinessPayload = {
   };
   gstr1: ReturnReadinessResult;
   gstr3b: ReturnReadinessResult;
+  gstr9: ReturnReadinessResult;
+  gstr9c: ReturnReadinessResult;
   overall_status: "ready" | "ready_with_warnings" | "blocked";
 };
 
@@ -956,7 +1027,7 @@ export type ReturnFilingRecord = {
   approval_request: string | null;
   approval_request_status?: string;
   provider: "whitebooks";
-  return_type: "gstr1" | "gstr3b";
+  return_type: "gstr1" | "gstr3b" | "gstr9" | "gstr9c";
   status: "draft" | "ready_for_review" | "approved" | "queued_for_filing" | "submitted" | "arn_received" | "filed" | "failed" | "needs_retry" | "cancelled";
   provider_reference_id: string;
   provider_acknowledgement_id: string;
@@ -995,7 +1066,7 @@ export type ReturnFilingRolloutPolicySummary = {
   policy_present: boolean;
   policy_scope: string[];
   provider: "whitebooks";
-  return_type: "gstr1" | "gstr3b";
+  return_type: "gstr1" | "gstr3b" | "gstr9" | "gstr9c";
   enable_live_submission: boolean;
   enable_live_status_sync: boolean;
   live_submission_allowed: boolean;

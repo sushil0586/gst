@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api/client";
 import { unwrapApiData, unwrapPaginatedData } from "@/lib/api/helpers";
 import { queryKeys } from "@/lib/query/query-keys";
-import type { ReconciliationItemRecord, ReconciliationRunRecord } from "@/types/api";
+import type { ReconciliationItemCorrectionRecord, ReconciliationItemRecord, ReconciliationRunRecord } from "@/types/api";
 
 type RunFilters = {
   workspace?: string;
@@ -15,6 +15,8 @@ type RunFilters = {
 type RunItemFilters = {
   run?: string;
   match_status?: string;
+  issue_bucket?: string;
+  itc_status?: string;
   action_status?: string;
   mismatch_reason?: string;
   counterparty_gstin?: string;
@@ -78,6 +80,17 @@ export function useCreateReconciliationRunMutation(filtersToInvalidate?: RunFilt
   });
 }
 
+export function useReconciliationItemCorrectionsQuery(itemId?: string) {
+  return useQuery({
+    queryKey: itemId ? queryKeys.reconciliation.corrections(itemId) : ["reconciliation", "item", "missing", "corrections"],
+    enabled: Boolean(itemId),
+    queryFn: async () => {
+      const response = await apiClient.get(`/reconciliation/items/${itemId}/corrections/`);
+      return unwrapPaginatedData<ReconciliationItemCorrectionRecord>(response);
+    },
+  });
+}
+
 export function useUpdateReconciliationItemMutation(runId?: string, filtersToInvalidate?: RunItemFilters) {
   const queryClient = useQueryClient();
 
@@ -85,11 +98,13 @@ export function useUpdateReconciliationItemMutation(runId?: string, filtersToInv
     mutationFn: async (payload: {
       itemId: string;
       action_status: ReconciliationItemRecord["action_status"];
+      review_decision?: ReconciliationItemRecord["review_decision"];
       assigned_to?: number | null;
       remarks?: string;
     }) => {
       const response = await apiClient.patch(`/reconciliation/items/${payload.itemId}/`, {
         action_status: payload.action_status,
+        review_decision: payload.review_decision ?? "auto",
         assigned_to: payload.assigned_to ?? null,
         remarks: payload.remarks ?? "",
       });
@@ -101,6 +116,80 @@ export function useUpdateReconciliationItemMutation(runId?: string, filtersToInv
         queryClient.invalidateQueries({ queryKey: queryKeys.reconciliation.run(runId) });
       }
       queryClient.invalidateQueries({ queryKey: queryKeys.reconciliation.item(item.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.reconciliation.runs({}) });
+    },
+  });
+}
+
+export function useCorrectReconciliationItemMutation(runId?: string, filtersToInvalidate?: RunItemFilters) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: {
+      itemId: string;
+      reason_code: string;
+      reason_note: string;
+      reference_number?: string;
+      transaction_date?: string;
+      counterparty_gstin?: string;
+      counterparty_name?: string;
+      taxable_value?: string;
+      cgst_amount?: string;
+      sgst_amount?: string;
+      igst_amount?: string;
+      cess_amount?: string;
+      total_amount?: string;
+      place_of_supply?: string;
+      reverse_charge?: boolean;
+    }) => {
+      const response = await apiClient.post(`/reconciliation/items/${payload.itemId}/correct-books-entry/`, payload);
+      return unwrapApiData<ReconciliationItemCorrectionRecord>(response);
+    },
+    onSuccess: (_correction, variables) => {
+      if (runId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.reconciliation.items(runId, filtersToInvalidate) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.reconciliation.run(runId) });
+      }
+      queryClient.invalidateQueries({ queryKey: queryKeys.reconciliation.item(variables.itemId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.reconciliation.corrections(variables.itemId) });
+      queryClient.invalidateQueries({ queryKey: ["gst-transactions"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.reconciliation.runs({}) });
+    },
+  });
+}
+
+export function useCreateReconciliationBooksEntryMutation(runId?: string, filtersToInvalidate?: RunItemFilters) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: {
+      itemId: string;
+      reason_code: string;
+      reason_note: string;
+      reference_number?: string;
+      transaction_date?: string;
+      counterparty_gstin?: string;
+      counterparty_name?: string;
+      taxable_value?: string;
+      cgst_amount?: string;
+      sgst_amount?: string;
+      igst_amount?: string;
+      cess_amount?: string;
+      total_amount?: string;
+      place_of_supply?: string;
+      reverse_charge?: boolean;
+    }) => {
+      const response = await apiClient.post(`/reconciliation/items/${payload.itemId}/create-books-entry/`, payload);
+      return unwrapApiData<ReconciliationItemCorrectionRecord>(response);
+    },
+    onSuccess: (_correction, variables) => {
+      if (runId) {
+        queryClient.invalidateQueries({ queryKey: queryKeys.reconciliation.items(runId, filtersToInvalidate) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.reconciliation.run(runId) });
+      }
+      queryClient.invalidateQueries({ queryKey: queryKeys.reconciliation.item(variables.itemId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.reconciliation.corrections(variables.itemId) });
+      queryClient.invalidateQueries({ queryKey: ["gst-transactions"] });
       queryClient.invalidateQueries({ queryKey: queryKeys.reconciliation.runs({}) });
     },
   });

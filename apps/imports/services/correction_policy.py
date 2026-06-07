@@ -19,6 +19,37 @@ ELEVATED_CORRECTION_ROLES = {
     WorkspaceRole.SENIOR_CA,
 }
 
+IMPORT_RETURN_TYPE_MAP = {
+    ImportBatch.ImportType.SALES: {
+        ReturnPreparation.ReturnType.GSTR1,
+        ReturnPreparation.ReturnType.GSTR3B,
+    },
+    ImportBatch.ImportType.PURCHASE: {
+        ReturnPreparation.ReturnType.GSTR3B,
+    },
+    ImportBatch.ImportType.GSTR_2B: {
+        ReturnPreparation.ReturnType.GSTR3B,
+    },
+    # Note imports can affect outward reporting or ITC depending on business use,
+    # so keep them conservative until the note workflow is split further.
+    ImportBatch.ImportType.CREDIT_NOTE: {
+        ReturnPreparation.ReturnType.GSTR1,
+        ReturnPreparation.ReturnType.GSTR3B,
+    },
+    ImportBatch.ImportType.DEBIT_NOTE: {
+        ReturnPreparation.ReturnType.GSTR1,
+        ReturnPreparation.ReturnType.GSTR3B,
+    },
+    ImportBatch.ImportType.ADVANCE_RECEIVED: {
+        ReturnPreparation.ReturnType.GSTR1,
+        ReturnPreparation.ReturnType.GSTR3B,
+    },
+    ImportBatch.ImportType.ADVANCE_ADJUSTED: {
+        ReturnPreparation.ReturnType.GSTR1,
+        ReturnPreparation.ReturnType.GSTR3B,
+    },
+}
+
 
 @dataclass
 class ImportCorrectionPolicyResult:
@@ -128,8 +159,21 @@ def get_import_correction_policy() -> dict[str, object]:
     }
 
 
+def get_relevant_return_types_for_import(*, import_type: str) -> set[str]:
+    return set(
+        IMPORT_RETURN_TYPE_MAP.get(
+            import_type,
+            {
+                ReturnPreparation.ReturnType.GSTR1,
+                ReturnPreparation.ReturnType.GSTR3B,
+            },
+        )
+    )
+
+
 def evaluate_import_correction_policy(*, batch: ImportBatch, user=None) -> ImportCorrectionPolicyResult:
     policy = get_import_correction_policy()
+    relevant_return_types = get_relevant_return_types_for_import(import_type=batch.import_type)
     reconciliation_qs = ReconciliationRun.objects.filter(
         compliance_period_id=batch.compliance_period_id,
         is_active=True,
@@ -137,10 +181,12 @@ def evaluate_import_correction_policy(*, batch: ImportBatch, user=None) -> Impor
     return_prep_qs = ReturnPreparation.objects.filter(
         compliance_period_id=batch.compliance_period_id,
         is_active=True,
+        return_type__in=relevant_return_types,
     )
     filing_qs = ReturnFiling.objects.filter(
         compliance_period_id=batch.compliance_period_id,
         is_active=True,
+        return_type__in=relevant_return_types,
     )
 
     has_reconciliation = reconciliation_qs.exists()
@@ -198,9 +244,17 @@ def evaluate_import_correction_policy(*, batch: ImportBatch, user=None) -> Impor
     warning_message = ""
     next_required_action = ""
     invalidation_reason = ""
+    impacted_returns_label = " / ".join(
+        sorted(return_type.replace("gstr", "GSTR-").upper() for return_type in relevant_return_types)
+    )
     if is_locked_by_filing:
-        warning_message = "This import is locked because filing has already started or completed for the compliance period."
-        next_required_action = "Use a corrective adjustment workflow instead of modifying the original import."
+        warning_message = (
+            f"This import is locked because a linked {impacted_returns_label} filing has already started or completed "
+            "for the compliance period."
+        )
+        next_required_action = (
+            f"Use a corrective adjustment workflow for {impacted_returns_label} instead of modifying the original import."
+        )
         invalidation_reason = "filing_in_progress_or_completed"
     elif requires_elevated_role and not user_has_elevated_role:
         warning_message = "This import affects an approved return. An elevated workspace role is required to continue."

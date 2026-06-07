@@ -1,0 +1,2 @@
+invoice_no,invoice_date,recipient_gstin,recipient_name,taxable_value,cgst,sgst,igst,cess,total_amount,place_of_supply,document_type
+DN-5001,2026-05-24,29AAACB1001A1Z5,Core B2B Buyer,1500,135,135,0,0,1770,29,debit_note

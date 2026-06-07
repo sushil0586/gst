@@ -88,6 +88,21 @@ class WhiteBooksProvider(FilingProvider):
             gst_username=gst_username,
         )
 
+    def refresh_auth_session(
+        self,
+        *,
+        email: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> WhiteBooksSession:
+        return self.client.refresh_session(
+            email=email,
+            txn=txn,
+            state_code=state_code,
+            gst_username=gst_username,
+        )
+
     def get_capabilities(self, filing=None, payload=None) -> ProviderCapabilitySet:
         operations = {}
         readiness = {}
@@ -786,8 +801,24 @@ class WhiteBooksProvider(FilingProvider):
         )
         sanitized_status_response = self.client.sanitize_response_payload(status_response)
         sanitized_track_response = self.client.sanitize_response_payload(track_response)
+        public_track_response = None
+        sanitized_public_track_response = {}
         arn = self._extract_arn(sanitized_status_response) or self._extract_arn(sanitized_track_response) or filing.arn
         terminal_state = self._infer_terminal_submission_state(sanitized_status_response, sanitized_track_response)
+        if not arn and not terminal_state:
+            public_track_response = self.client.track_return_public(
+                email=auth_session.email,
+                gstin=filing.gstin.gstin if filing.gstin else "",
+                fy=self._get_financial_year_code(filing),
+                return_type=return_type or "GSTR3B",
+            )
+            sanitized_public_track_response = self.client.sanitize_response_payload(public_track_response)
+            arn = self._extract_arn(sanitized_public_track_response) or filing.arn
+            terminal_state = self._infer_terminal_submission_state(
+                sanitized_status_response,
+                sanitized_track_response,
+                sanitized_public_track_response,
+            )
         return {
             "provider_reference_id": filing.provider_reference_id,
             "submission_state": terminal_state or filing.status,
@@ -806,11 +837,23 @@ class WhiteBooksProvider(FilingProvider):
                 "next_action": "review_provider_failure" if terminal_state == "failed" else (next_action or "resync_for_arn_or_status"),
                 "status_response": sanitized_status_response,
                 "track_response": sanitized_track_response,
+                "public_track_response": sanitized_public_track_response,
             },
         }
 
     def _get_return_period_code(self, filing: ReturnFiling) -> str:
         return filing.compliance_period.period.replace("-", "")[-6:]
+
+    def _get_financial_year_code(self, filing: ReturnFiling) -> str:
+        period = str(filing.compliance_period.period or "").strip()
+        try:
+            year = int(period[:4])
+            month = int(period[5:7])
+        except (TypeError, ValueError):
+            return ""
+        start_year = year if month >= 4 else year - 1
+        end_year = (start_year + 1) % 100
+        return f"{start_year}-{end_year:02d}"
 
     def _get_latest_auth_session(self, filing: ReturnFiling, *, required: bool = True) -> ProviderAuthSession | None:
         auth_sessions = ProviderAuthSession.objects.filter(

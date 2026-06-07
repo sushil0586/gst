@@ -28,6 +28,7 @@ from apps.filings.serializers import (
     ReturnFilingRecoverySerializer,
     ReturnFilingSerializer,
     ReturnFilingStartSerializer,
+    ProviderAuthRefreshSerializer,
     ProviderAuthSessionSerializer,
     ProviderOTPRequestSerializer,
     ProviderOTPVerifySerializer,
@@ -42,6 +43,7 @@ from apps.filings.services.filings import (
     sync_return_filing_status,
 )
 from apps.filings.services.provider_auth import request_provider_otp_session, verify_provider_otp_session
+from apps.filings.services.provider_auth import refresh_provider_auth_session
 from apps.workspaces.models import Workspace
 
 
@@ -158,7 +160,14 @@ class ReturnFilingViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
         serializer.is_valid(raise_exception=True)
         filing, created = create_return_filing(validated_data=serializer.validated_data, user=request.user)
         output = ReturnFilingSerializer(filing, context=self.get_serializer_context())
-        message = "Filing queued" if created else "Active filing already exists for this prepared return"
+        if not created:
+            message = "Active filing already exists for this prepared return"
+        elif filing.return_type == "gstr9":
+            message = "Manual GSTR-9 filing record opened"
+        elif filing.return_type == "gstr9c":
+            message = "Manual GSTR-9C filing record opened"
+        else:
+            message = "Filing queued"
         return Response(api_response(data=output.data, message=message))
 
     @action(detail=True, methods=["get"], url_path="attempts")
@@ -276,10 +285,12 @@ class ProviderAuthSessionViewSet(ListModelMixin, RetrieveModelMixin, GenericView
             return ProviderOTPRequestSerializer
         if self.action == "verify_otp":
             return ProviderOTPVerifySerializer
+        if self.action == "refresh_token":
+            return ProviderAuthRefreshSerializer
         return ProviderAuthSessionSerializer
 
     def get_permission_code(self, request):
-        if self.action in {"request_otp", "verify_otp"}:
+        if self.action in {"request_otp", "verify_otp", "refresh_token"}:
             return "file_return"
         return "view_client"
 
@@ -343,6 +354,18 @@ class ProviderAuthSessionViewSet(ListModelMixin, RetrieveModelMixin, GenericView
         )
         output = ProviderAuthSessionSerializer(auth_session, context=self.get_serializer_context())
         return Response(api_response(data=output.data, message="Provider auth token exchange completed"))
+
+    @action(detail=True, methods=["post"], url_path="refresh-token")
+    def refresh_token(self, request, pk=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        auth_session = refresh_provider_auth_session(
+            auth_session=self.get_object(),
+            txn=serializer.validated_data.get("txn", ""),
+            user=request.user,
+        )
+        output = ProviderAuthSessionSerializer(auth_session, context=self.get_serializer_context())
+        return Response(api_response(data=output.data, message="Provider auth session refreshed"))
 
 
 class WhiteBooksAuthSessionViewSet(ProviderAuthSessionViewSet):

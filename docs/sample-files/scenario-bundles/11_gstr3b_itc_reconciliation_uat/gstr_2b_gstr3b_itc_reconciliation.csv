@@ -1,0 +1,5 @@
+invoice_no,invoice_date,supplier_gstin,supplier_name,taxable_value,cgst,sgst,igst,cess,total_amount
+P3B-9101,2026-05-05,29BBBBB9101B1Z5,Vendor One Components,30000,2700,2700,0,0,35400
+P3B-9102,2026-05-08,29CCCCC9102C1Z5,Vendor Two Fabrication,20000,1710,1710,0,0,23420
+PX-9104,2026-05-14,29EEEEE9104E1Z5,Vendor Four Packaging,15000,1350,1350,0,0,17700
+P3B-9199,2026-05-21,29FFFFF9199F1Z5,Portal Only Vendor,8000,720,720,0,0,9440

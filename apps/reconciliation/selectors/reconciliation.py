@@ -1,3 +1,6 @@
+from django.db.models import Prefetch
+
+from apps.gst_transactions.models import TransactionCorrection
 from apps.reconciliation.models import ReconciliationItem, ReconciliationRun
 
 
@@ -14,6 +17,7 @@ def get_reconciliation_run_queryset():
 
 
 def get_reconciliation_item_queryset():
+    correction_queryset = TransactionCorrection.objects.select_related("applied_by").order_by("-applied_at", "-created_at")
     return ReconciliationItem.objects.filter(is_active=True).select_related(
         "reconciliation_run",
         "reconciliation_run__workspace",
@@ -21,4 +25,6 @@ def get_reconciliation_item_queryset():
         "books_transaction",
         "portal_transaction",
         "assigned_to",
+    ).prefetch_related(
+        Prefetch("books_transaction__corrections", queryset=correction_queryset)
     )
