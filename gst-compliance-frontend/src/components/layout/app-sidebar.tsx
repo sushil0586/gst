@@ -72,14 +72,16 @@ export function AppSidebar({
             <p className="text-xs text-slate-500">Operations Console</p>
           </div>
         </Link>
-        <button
-          type="button"
-          className={cn("sidebar-button flex size-10 shrink-0 items-center justify-center rounded-2xl", collapsed && "hidden")}
-          onClick={onToggleCollapse}
-          aria-label={pinned ? "Collapse sidebar" : "Pin sidebar open"}
-        >
-          <ToggleIcon className="size-4" />
-        </button>
+        {onToggleCollapse ? (
+          <button
+            type="button"
+            className={cn("sidebar-button flex size-10 shrink-0 items-center justify-center rounded-2xl", collapsed && "hidden")}
+            onClick={onToggleCollapse}
+            aria-label={pinned ? "Collapse sidebar" : "Pin sidebar open"}
+          >
+            <ToggleIcon className="size-4" />
+          </button>
+        ) : null}
       </div>
 
       <nav className="flex flex-1 flex-col gap-5">
@@ -131,18 +133,20 @@ export function AppSidebar({
         </p>
       </div>
 
-      <div className="group relative">
-        <button
-          type="button"
-          className={cn("sidebar-button mt-3 flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium", collapsed && "px-0")}
-          onClick={onToggleCollapse}
-          aria-label={pinned ? "Collapse sidebar" : "Pin sidebar open"}
-        >
-          <ToggleIcon className="size-4" />
-          <span className={cn(collapsed && "hidden")}>{pinned ? "Collapse" : "Pin open"}</span>
-        </button>
-        <SidebarTooltip label={pinned ? "Collapse sidebar" : "Pin sidebar open"} visible={collapsed} />
-      </div>
+      {onToggleCollapse ? (
+        <div className="group relative">
+          <button
+            type="button"
+            className={cn("sidebar-button mt-3 flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-medium", collapsed && "px-0")}
+            onClick={onToggleCollapse}
+            aria-label={pinned ? "Collapse sidebar" : "Pin sidebar open"}
+          >
+            <ToggleIcon className="size-4" />
+            <span className={cn(collapsed && "hidden")}>{pinned ? "Collapse" : "Pin open"}</span>
+          </button>
+          <SidebarTooltip label={pinned ? "Collapse sidebar" : "Pin sidebar open"} visible={collapsed} />
+        </div>
+      ) : null}
     </aside>
   );
 }

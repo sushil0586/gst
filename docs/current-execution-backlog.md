@@ -24,6 +24,9 @@ Related documents:
 - [reconciliation-correction-and-itc-audit-implementation-plan.md](/Users/ansh/Documents/Gst-Compliance/docs/reconciliation-correction-and-itc-audit-implementation-plan.md:1)
 - [phase-2-gstr9-gstr9c-gstr2x-plan.md](/Users/ansh/Documents/Gst-Compliance/docs/phase-2-gstr9-gstr9c-gstr2x-plan.md:1)
 - [gstr9-implementation-backlog.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr9-implementation-backlog.md:1)
+- [gstr9-qa-high-level-checklist.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr9-qa-high-level-checklist.md:1)
+- [gstr9-qa-detailed-scenarios.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr9-qa-detailed-scenarios.md:1)
+- [gstr9-gstr9c-status.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr9-gstr9c-status.md:1)
 - [gstr9c-qa-high-level-checklist.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr9c-qa-high-level-checklist.md:1)
 - [gstr9c-qa-detailed-scenarios.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr9c-qa-detailed-scenarios.md:1)
 

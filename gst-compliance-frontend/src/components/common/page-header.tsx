@@ -20,7 +20,7 @@ export function PageHeader({
   actions?: Action[];
 }) {
   return (
-    <div className="page-header-surface flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+    <div className="page-header-surface flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
       <div className="space-y-3">
         <p className={typography.eyebrow}>Compliance workspace</p>
         <h1 className={typography.pageTitle}>{title}</h1>
@@ -28,16 +28,16 @@ export function PageHeader({
       </div>
 
       {actions.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-2 lg:max-w-xl lg:justify-end">
+        <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center lg:w-auto lg:max-w-xl lg:justify-end">
           {actions.map((action) =>
             action.href ? (
-              <Button key={action.label} size="default" asChild className={action.disabled ? "pointer-events-none opacity-50" : undefined}>
-                <Link href={action.href} aria-disabled={action.disabled}>
+              <Button key={action.label} size="default" asChild className={action.disabled ? "pointer-events-none w-full opacity-50 sm:w-auto" : "w-full sm:w-auto"}>
+                <Link href={action.href} aria-disabled={action.disabled} className="w-full justify-center">
                   {action.label}
                 </Link>
               </Button>
             ) : (
-              <Button key={action.label} size="default" onClick={action.onClick} disabled={action.disabled}>
+              <Button key={action.label} size="default" onClick={action.onClick} disabled={action.disabled} className="w-full sm:w-auto">
                 {action.label}
               </Button>
             ),

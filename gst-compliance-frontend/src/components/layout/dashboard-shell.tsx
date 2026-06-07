@@ -53,14 +53,13 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             side="left"
             className={cn(
               "border-none bg-transparent p-4 shadow-none transition-[width] duration-200",
-              sidebarPinned ? "w-76" : "w-28",
+              "w-76",
             )}
           >
             <AppSidebar
-              collapsed={!sidebarPinned}
-              pinned={sidebarPinned}
+              collapsed={false}
+              pinned={false}
               onNavigate={() => setMobileNavOpen(false)}
-              onToggleCollapse={toggleSidebar}
             />
           </SheetContent>
         </Sheet>

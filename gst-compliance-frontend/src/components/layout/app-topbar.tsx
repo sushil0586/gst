@@ -78,33 +78,33 @@ function ClientContextPicker({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [dismissedForceOpenSignal, setDismissedForceOpenSignal] = useState(0);
   const selectedClient = clients.find((client) => client.id === selectedClientId) ?? null;
   const filteredClients = useMemo(
     () => clients.filter((client) => matchesClientSearch(client, query)),
     [clients, query],
   );
 
-  useEffect(() => {
-    if (!open) {
-      setQuery("");
-    }
-  }, [open]);
-
-  useEffect(() => {
-    if (forceOpenSignal > 0) {
-      setOpen(true);
-    }
-  }, [forceOpenSignal]);
-
   const disabled = clients.length === 0;
+  const isForcedOpen = forceOpenSignal > dismissedForceOpenSignal;
+  const isOpen = open || isForcedOpen;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={isOpen}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (!nextOpen) {
+          setQuery("");
+          setDismissedForceOpenSignal(forceOpenSignal);
+        }
+      }}
+    >
       <PopoverTrigger asChild>
         <Button
           type="button"
           variant="outline"
-          className="topbar-select min-w-[13rem] justify-between gap-2 rounded-full border-slate-200/80 px-3 font-normal text-slate-700"
+          className="topbar-select w-full min-w-0 justify-between gap-2 rounded-full border-slate-200/80 px-3 font-normal text-slate-700 sm:min-w-[13rem]"
           disabled={disabled}
         >
           <span className="truncate">
@@ -118,7 +118,7 @@ function ClientContextPicker({
           </span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[24rem] rounded-3xl border border-slate-200 bg-white p-3 shadow-[0_28px_80px_-36px_rgba(15,23,42,0.28)]">
+      <PopoverContent align="start" className="w-[min(92vw,24rem)] rounded-3xl border border-slate-200 bg-white p-3 shadow-[0_28px_80px_-36px_rgba(15,23,42,0.28)]">
         <div className="space-y-3">
           <div className="space-y-1">
             <p className="text-sm font-semibold text-slate-900">Find client</p>
@@ -217,7 +217,7 @@ function CompactContextSelectors({
             setSelectedWorkspaceId(value);
           }}
         >
-          <SelectTrigger className="topbar-select min-w-[9rem]">
+          <SelectTrigger className="topbar-select w-full min-w-0 sm:min-w-[9rem]">
             <SelectValue placeholder="Workspace" />
           </SelectTrigger>
           <SelectContent>
@@ -248,7 +248,7 @@ function CompactContextSelectors({
             setSelectedGstinId(value);
           }}
         >
-          <SelectTrigger className="topbar-select min-w-[9.5rem]">
+          <SelectTrigger className="topbar-select w-full min-w-0 sm:min-w-[9.5rem]">
             <SelectValue placeholder="GSTIN" />
           </SelectTrigger>
           <SelectContent>
@@ -269,7 +269,7 @@ function CompactContextSelectors({
             setSelectedPeriodId(value);
           }}
         >
-          <SelectTrigger className="topbar-select min-w-[8.5rem]">
+          <SelectTrigger className="topbar-select w-full min-w-0 sm:min-w-[8.5rem]">
             <SelectValue placeholder="Period" />
           </SelectTrigger>
           <SelectContent>
@@ -334,11 +334,11 @@ export function AppTopbar({ onMenuClick }: { onMenuClick: () => void }) {
 
   return (
     <>
-      <header className="sticky top-0 z-30 px-4 pt-3 lg:px-8 xl:px-10">
+      <header className="sticky top-0 z-30 px-3 pt-2 sm:px-4 sm:pt-3 lg:px-8 xl:px-10">
         <div className="topbar-shell relative min-h-[60px] px-3 py-2 lg:px-4">
           <div className="topbar-accent pointer-events-none absolute inset-x-5 top-0 h-px opacity-90 lg:inset-x-6" />
-          <div className="flex min-h-11 items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-3">
+          <div className="flex min-h-11 flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
               <Button variant="outline" size="icon-sm" className="bg-white lg:hidden" onClick={onMenuClick}>
                 <Menu className="size-4" />
               </Button>
@@ -375,7 +375,7 @@ export function AppTopbar({ onMenuClick }: { onMenuClick: () => void }) {
               />
             </div>
 
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="ml-auto flex w-full items-center justify-end gap-2 sm:w-auto sm:justify-start">
               <Button
                 variant="outline"
                 size="sm"
