@@ -62,3 +62,98 @@ class ReturnPreparation(BaseModel):
             ),
         ]
         indexes = [models.Index(fields=["compliance_period", "status"])]
+
+
+class PortalLedgerSnapshot(BaseModel):
+    compliance_period = models.ForeignKey(
+        CompliancePeriod,
+        on_delete=models.CASCADE,
+        related_name="portal_ledger_snapshots",
+    )
+    prepared_return = models.ForeignKey(
+        ReturnPreparation,
+        on_delete=models.SET_NULL,
+        related_name="portal_ledger_snapshots",
+        null=True,
+        blank=True,
+    )
+    provider = models.CharField(max_length=32, default="whitebooks")
+    return_type = models.CharField(max_length=32, choices=ReturnPreparation.ReturnType.choices)
+    auth_session = models.ForeignKey(
+        "filings.WhiteBooksAuthSession",
+        on_delete=models.SET_NULL,
+        related_name="portal_ledger_snapshots",
+        null=True,
+        blank=True,
+    )
+    fetched_at = models.DateTimeField()
+    computed_summary = models.JSONField(default=dict, blank=True)
+    balance_response = models.JSONField(default=dict, blank=True)
+    taxpayable_response = models.JSONField(default=dict, blank=True)
+    cash_ledger_response = models.JSONField(default=dict, blank=True)
+    itc_ledger_response = models.JSONField(default=dict, blank=True)
+    liability_ledger_response = models.JSONField(default=dict, blank=True)
+    challan_reference = models.CharField(max_length=64, blank=True)
+    challan_history_response = models.JSONField(default=dict, blank=True)
+    challan_summary_response = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "portal_ledger_snapshots"
+        ordering = ["-fetched_at", "-created_at"]
+        indexes = [
+            models.Index(fields=["compliance_period", "return_type", "provider"]),
+            models.Index(fields=["auth_session", "provider"]),
+            models.Index(fields=["fetched_at"]),
+        ]
+
+
+class PortalChallanRequest(BaseModel):
+    class RequestStatus(models.TextChoices):
+        CREATED = "created", "Created"
+        SUBMITTED = "submitted", "Submitted"
+        FAILED = "failed", "Failed"
+
+    compliance_period = models.ForeignKey(
+        CompliancePeriod,
+        on_delete=models.CASCADE,
+        related_name="portal_challan_requests",
+    )
+    prepared_return = models.ForeignKey(
+        ReturnPreparation,
+        on_delete=models.SET_NULL,
+        related_name="portal_challan_requests",
+        null=True,
+        blank=True,
+    )
+    auth_session = models.ForeignKey(
+        "filings.WhiteBooksAuthSession",
+        on_delete=models.SET_NULL,
+        related_name="portal_challan_requests",
+        null=True,
+        blank=True,
+    )
+    provider = models.CharField(max_length=32, default="whitebooks")
+    return_type = models.CharField(max_length=32, choices=ReturnPreparation.ReturnType.choices)
+    status = models.CharField(max_length=32, choices=RequestStatus.choices, default=RequestStatus.CREATED)
+    cpin = models.CharField(max_length=64, blank=True)
+    challan_reason = models.CharField(max_length=32)
+    challan_period = models.CharField(max_length=16)
+    payment_mode = models.CharField(max_length=16)
+    bank_code = models.CharField(max_length=16, blank=True)
+    sub_payment_mode = models.CharField(max_length=16, blank=True)
+    taxpayer_name = models.CharField(max_length=128)
+    address = models.CharField(max_length=255)
+    mobile_number = models.CharField(max_length=32)
+    request_payload = models.JSONField(default=dict, blank=True)
+    response_payload = models.JSONField(default=dict, blank=True)
+    total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    error_message = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "portal_challan_requests"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["compliance_period", "return_type", "provider"]),
+            models.Index(fields=["status", "provider"]),
+            models.Index(fields=["cpin"]),
+        ]

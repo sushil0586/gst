@@ -873,6 +873,115 @@ export type ReturnReadinessPayload = {
   overall_status: "ready" | "ready_with_warnings" | "blocked";
 };
 
+export type PortalFilingReadinessPayload = {
+  provider: "whitebooks";
+  return_type: ReturnPreparationRecord["return_type"];
+  context: {
+    workspace: string;
+    client: string;
+    gstin: string;
+    gstin_value: string;
+    compliance_period: string;
+    period_label: string;
+    whitebooks_ret_period: string;
+    whitebooks_return_type: string;
+  };
+  portal_sync: {
+    enabled: boolean;
+    payment_reads_enabled: boolean;
+    can_fetch: boolean;
+    blockers: string[];
+    warnings: string[];
+    transport_error: string;
+  };
+  auth_session: {
+    available: boolean;
+    session_id: string | null;
+    status: string;
+    freshness_summary: {
+      verified_at: string | null;
+      expires_at: string | null;
+      is_stale: boolean;
+      stale_reason: string;
+    };
+  };
+  computed_summary: {
+    prepared_return_id: string | null;
+    prepared_return_status: string;
+    outward_tax_liability: string;
+    eligible_itc: string;
+    net_tax_payable: string;
+  };
+  provider_evidence: {
+    source: "live_fetch" | "saved_snapshot" | "none";
+    snapshot_id: string | null;
+    fetched_at: string | null;
+    balance_response: Record<string, unknown> | null;
+    taxpayable_response: Record<string, unknown> | null;
+    cash_ledger_response: Record<string, unknown> | null;
+    cash_ledger_summary: {
+      from_date: string;
+      to_date: string;
+      opening_total: string;
+      closing_total: string;
+      transaction_count: number;
+      closing_breakdown: {
+        cgst: string;
+        sgst: string;
+        igst: string;
+        cess: string;
+      };
+    } | null;
+    itc_ledger_response: Record<string, unknown> | null;
+    itc_ledger_summary: {
+      from_date: string;
+      to_date: string;
+      opening_total: string;
+      closing_total: string;
+      transaction_count: number;
+    } | null;
+    liability_ledger_response: Record<string, unknown> | null;
+    liability_ledger_summary: {
+      from_date: string;
+      to_date: string;
+      opening_total: string;
+      closing_total: string;
+      transaction_count: number;
+    } | null;
+    challan_reference: string | null;
+    challan_history_response: Record<string, unknown> | null;
+    challan_summary_response: Record<string, unknown> | null;
+  };
+};
+
+export type PortalChallanRecord = {
+  id: string;
+  workspace: string;
+  client: string;
+  gstin: string;
+  gstin_value: string;
+  compliance_period: string;
+  compliance_period_label: string;
+  provider: "whitebooks";
+  return_type: ReturnPreparationRecord["return_type"];
+  status: "created" | "submitted" | "failed";
+  cpin: string;
+  challan_reason: string;
+  challan_period: string;
+  payment_mode: string;
+  bank_code: string;
+  sub_payment_mode: string;
+  taxpayer_name: string;
+  address: string;
+  mobile_number: string;
+  request_payload: Record<string, unknown>;
+  response_payload: Record<string, unknown>;
+  total_amount: string;
+  error_message: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ReturnFilingAttemptRecord = {
   id: string;
   attempt_number: number;

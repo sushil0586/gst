@@ -93,6 +93,8 @@ export const queryKeys = {
     list: (filters?: Record<string, string | undefined>) => ["returns", "list", filters ?? {}] as const,
     detail: (returnId: string) => ["returns", returnId] as const,
     readiness: (filters?: Record<string, string | undefined>) => ["returns", "readiness", filters ?? {}] as const,
+    portalFilingReadiness: (filters?: Record<string, string | undefined>) => ["returns", "portal-filing-readiness", filters ?? {}] as const,
+    portalChallanRequests: (filters?: Record<string, string | undefined>) => ["returns", "portal-challan-requests", filters ?? {}] as const,
   },
   filings: {
     list: (filters?: Record<string, string | undefined>) => ["filings", "list", filters ?? {}] as const,

@@ -108,7 +108,10 @@ export default function OperationalFollowUpsPage() {
   const completeMutation = useCompleteOperationalFollowUpMutation(filters);
   const escalateMutation = useEscalateOperationalFollowUpMutation(filters);
   const logContactMutation = useLogOperationalFollowUpContactMutation(filters);
-  const followUps = followUpsQuery.data?.items ?? [];
+  const followUps = useMemo(
+    () => followUpsQuery.data?.items ?? [],
+    [followUpsQuery.data?.items],
+  );
   const contacts = contactsQuery.data?.items ?? [];
   const members = membersQuery.data?.items ?? [];
   const canManageFollowUps = hasPermission(sessionPermissions, permissions.manageClient);

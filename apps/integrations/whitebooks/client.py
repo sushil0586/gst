@@ -384,6 +384,218 @@ class WhiteBooksClient:
         )
         return self._normalize_submission_payload(response, default_message="WhiteBooks GSTR-2B fetch failed.")
 
+    def get_cash_itc_balance(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        ret_period: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/ledgers/bal",
+            method="GET",
+            query_params={"gstin": gstin, "retperiod": ret_period, "email": email},
+            headers=self._auth_headers({"txn": txn}, state_code=state_code, gst_username=gst_username),
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks cash and ITC balance fetch failed.")
+
+    def get_tax_payable_balance(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        ret_period: str,
+        return_type: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/ledgers/taxpayable",
+            method="GET",
+            query_params={
+                "gstin": gstin,
+                "retperiod": ret_period,
+                "rettype": return_type,
+                "email": email,
+            },
+            headers=self._auth_headers({"txn": txn}, state_code=state_code, gst_username=gst_username),
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks tax payable balance fetch failed.")
+
+    def get_cash_ledger_details(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        from_date: str,
+        to_date: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/ledgers/cashdtl",
+            method="GET",
+            query_params={
+                "gstin": gstin,
+                "frdt": from_date,
+                "todt": to_date,
+                "email": email,
+            },
+            headers=self._auth_headers({"txn": txn}, state_code=state_code, gst_username=gst_username),
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks cash ledger fetch failed.")
+
+    def get_itc_ledger_details(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        from_date: str,
+        to_date: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/ledgers/itc",
+            method="GET",
+            query_params={
+                "gstin": gstin,
+                "frdt": from_date,
+                "todt": to_date,
+                "email": email,
+            },
+            headers=self._auth_headers({"txn": txn}, state_code=state_code, gst_username=gst_username),
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks ITC ledger fetch failed.")
+
+    def get_liability_ledger_details(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        from_date: str,
+        to_date: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/ledgers/tax",
+            method="GET",
+            query_params={
+                "gstin": gstin,
+                "frdt": from_date,
+                "todt": to_date,
+                "email": email,
+            },
+            headers=self._auth_headers({"txn": txn}, state_code=state_code, gst_username=gst_username),
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks liability ledger fetch failed.")
+
+    def get_challan_history(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        from_date: str,
+        to_date: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/payment/chllnlst",
+            method="GET",
+            query_params={
+                "gstin": gstin,
+                "fromdate": from_date,
+                "todate": to_date,
+                "email": email,
+            },
+            headers=self._auth_headers({"txn": txn}, state_code=state_code, gst_username=gst_username),
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks challan history fetch failed.")
+
+    def get_challan_summary(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        cpin: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/payment/chllnsum",
+            method="GET",
+            query_params={
+                "gstin": gstin,
+                "cpin": cpin,
+                "email": email,
+            },
+            headers=self._auth_headers({"txn": txn}, state_code=state_code, gst_username=gst_username),
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks challan summary fetch failed.")
+
+    def generate_challan(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        ret_period: str,
+        txn: str,
+        payload: dict,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/payment/generateChallan",
+            method="POST",
+            query_params={"email": email},
+            headers=self._filing_headers(
+                gstin=gstin,
+                ret_period=ret_period,
+                txn=txn,
+                state_code=state_code,
+                gst_username=gst_username,
+            ) | {"Content-Type": "application/json"},
+            body=payload,
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks challan generation failed.")
+
+    def validate_challan_reason(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        ret_period: str,
+        txn: str,
+        payload: dict,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/payment/validatechlnrsn",
+            method="POST",
+            query_params={"email": email},
+            headers=self._filing_headers(
+                gstin=gstin,
+                ret_period=ret_period,
+                txn=txn,
+                state_code=state_code,
+                gst_username=gst_username,
+            ) | {"Content-Type": "application/json"},
+            body=payload,
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks challan validation failed.")
+
     def get_return_status(self, *, email: str, gstin: str, returnperiod: str, refid: str, txn: str, rettype: str | None = None) -> dict:
         path = "/all/newretstatus" if rettype else "/gstr/retstatus"
         query_params = {
@@ -582,6 +794,8 @@ class WhiteBooksClient:
             return sanitized
         if isinstance(payload, list):
             return [self.sanitize_response_payload(item) for item in payload]
+        if isinstance(payload, str):
+            return payload.replace("\x00", "")
         return payload
 
     def _normalize_taxpayer_search_payload(self, payload: dict) -> dict:

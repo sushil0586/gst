@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import { ChevronLeft, ChevronRight, ShieldCheck } from "lucide-react";
 
 import { sidebarNavItems } from "@/lib/constants/navigation";
+import { useSession } from "@/lib/query/session-provider";
+import { useWorkspaceContext } from "@/store/workspace-context";
 import { cn } from "@/lib/utils";
 
 const navSections = [
@@ -40,6 +42,21 @@ function SidebarTooltip({
   );
 }
 
+function getWorkspaceBadge(label?: string | null, fallback = "GW") {
+  if (!label) {
+    return fallback;
+  }
+
+  const initials = label
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+
+  return initials || fallback;
+}
+
 export function AppSidebar({
   collapsed = false,
   pinned = false,
@@ -52,7 +69,12 @@ export function AppSidebar({
   onToggleCollapse?: () => void;
 }) {
   const pathname = usePathname();
+  const { session, user } = useSession();
+  const { selectedWorkspace } = useWorkspaceContext();
   const ToggleIcon = pinned ? ChevronLeft : ChevronRight;
+  const workspaceName = selectedWorkspace?.name ?? session?.default_workspace?.name ?? "Workspace";
+  const workspaceBadge = getWorkspaceBadge(selectedWorkspace?.code ?? workspaceName);
+  const workspaceMeta = user?.email ?? session?.default_workspace?.organization_name ?? "Workspace access";
 
   return (
     <aside className={cn("sidebar-shell flex h-full w-full flex-col rounded-[30px] px-4 py-5 transition-[width,padding] duration-200", collapsed && "px-3 py-4")}>
@@ -125,9 +147,9 @@ export function AppSidebar({
           Current Workspace
         </p>
         <p className={cn("mt-3 text-sm font-semibold text-slate-900", collapsed && "mt-0 text-xs")}>
-          {collapsed ? "DW" : "Demo Workspace"}
+          {collapsed ? workspaceBadge : workspaceName}
         </p>
-        <p className={cn("mt-1 text-xs text-slate-500", collapsed && "hidden")}>demo@example.com</p>
+        <p className={cn("mt-1 text-xs text-slate-500", collapsed && "hidden")}>{workspaceMeta}</p>
         <p className={cn("mt-3 text-xs leading-5 text-slate-500", collapsed && "hidden")}>
           Central controls, filing workflows, and audit surfaces stay available from this shell.
         </p>

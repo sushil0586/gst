@@ -171,14 +171,14 @@ export default function Gstr9cReviewPage() {
     <div className="space-y-6">
       <PageHeader
         title="GSTR-9C Review"
-        description="Review the annual comparison between books and the prepared GSTR-9 base before moving into fuller annual certification workflows."
+        description="Review the annual comparison between books and the prepared GSTR-9 base before approval, filing support, and certification follow-through."
         actions={[{ label: "Back to Returns", href: reviewHref }]}
       />
 
       <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <SectionCard
           title={`${selectedClient?.legal_name ?? activeReturn.client_name ?? "Client"} · FY ${String(summary.financial_year ?? "Annual view")}`}
-          description="This first version focuses on books vs GSTR-9 comparison signals, not the full eventual certification workflow."
+          description="Use this review to compare annual books against the prepared GSTR-9 base and surface the main certification risks early."
           variant="soft"
           action={<StatusBadge label={activeReturn.status.replace(/_/g, " ")} variant={getStatusVariant(activeReturn.status)} />}
         >
@@ -190,7 +190,7 @@ export default function Gstr9cReviewPage() {
           </div>
         </SectionCard>
 
-        <SectionCard title="Comparison posture" description="Use this as the first annual comparison desk before the deeper 9C workflow matures." variant="soft">
+        <SectionCard title="Comparison posture" description="Use this as the annual comparison desk before final certification support and filing follow-through." variant="soft">
           <div className="space-y-3">
             <div className="rounded-2xl bg-slate-50 px-4 py-4 text-sm text-slate-700">
               <div className="flex items-start gap-3">
@@ -206,7 +206,7 @@ export default function Gstr9cReviewPage() {
                 <BookOpenText className="mt-0.5 size-4 shrink-0 text-amber-600" />
                 <div>
                   <p className="font-semibold text-slate-900">Books remain visible</p>
-                  <p className="mt-1 leading-6">This workspace keeps books-side annual totals visible so reviewers can decide whether a deeper auditor-style adjustment pass is needed.</p>
+                  <p className="mt-1 leading-6">This workspace keeps books-side annual totals visible so reviewers can decide whether reconciliation, adjustment, or auditor follow-up is needed.</p>
                 </div>
               </div>
             </div>
@@ -240,7 +240,7 @@ export default function Gstr9cReviewPage() {
         </TabsContent>
 
         <TabsContent value="books" className="space-y-4">
-          <SectionCard title="Books annual summary" description="Annual books-side totals feeding the first GSTR-9C comparison.">
+          <SectionCard title="Books annual summary" description="Annual books-side totals feeding the current GSTR-9C comparison.">
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-2xl bg-slate-50 p-4"><p className="text-sm text-slate-500">Outward taxable value</p><p className="mt-2 text-lg font-semibold text-slate-900">Rs. {formatMoney(String(booksSummary.outward_taxable_value ?? "0.00"))}</p></div>
               <div className="rounded-2xl bg-slate-50 p-4"><p className="text-sm text-slate-500">Outward tax amount</p><p className="mt-2 text-lg font-semibold text-slate-900">Rs. {formatMoney(String(booksSummary.outward_tax_amount ?? "0.00"))}</p></div>
@@ -262,7 +262,7 @@ export default function Gstr9cReviewPage() {
         </TabsContent>
 
         <TabsContent value="comparison" className="space-y-4">
-          <SectionCard title="Comparison details" description="Direct variance view for the first 9C pass.">
+          <SectionCard title="Comparison details" description="Direct variance view for the current GSTR-9C comparison pass.">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -307,7 +307,7 @@ export default function Gstr9cReviewPage() {
             <WarningList issues={allIssues.filter((issue) => issueMatchesTab(issue, requestedTab))} />
           </SectionCard>
 
-          <SectionCard title="Source dependencies" description="The first GSTR-9C slice depends on annual books plus a prepared anchor GSTR-9.">
+          <SectionCard title="Source dependencies" description="This GSTR-9C review depends on annual books plus a prepared anchor GSTR-9.">
             <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-2xl bg-slate-50 p-4"><p className="text-sm text-slate-500">Anchor GSTR-9 present</p><p className="mt-2 text-lg font-semibold text-slate-900">{sourceTrace.gstr9_return_id ? "Yes" : "No"}</p></div>
               <div className="rounded-2xl bg-slate-50 p-4"><p className="text-sm text-slate-500">Missing source periods</p><p className="mt-2 text-lg font-semibold text-slate-900">{asStringArray(sourceMonths.missing_periods).length}</p></div>

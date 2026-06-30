@@ -8,7 +8,14 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:chromium": "playwright test --project=chromium",
+    "test:e2e:cross-browser": "playwright test --project=chromium --project=firefox --project=webkit",
+    "test:e2e:staging": "playwright test",
+    "test:e2e:live": "playwright test tests/e2e/live-*.spec.ts --project=chromium",
+    "test:e2e:ci": "playwright test --reporter=github,html",
+    "test:e2e:visual": "playwright test tests/e2e/visual-regression.spec.ts --project=chromium",
+    "test:e2e:visual:update": "playwright test tests/e2e/visual-regression.spec.ts --project=chromium --update-snapshots"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",

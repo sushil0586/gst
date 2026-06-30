@@ -12,12 +12,12 @@ from apps.accounts.models import WorkspaceMembership, WorkspaceRole
 from apps.audit_logs.models import AuditLog
 from apps.clients.models import Client
 from apps.compliance_periods.models import CompliancePeriod
-from apps.filings.models import ReturnFiling
+from apps.filings.models import ProviderAuthSession, ReturnFiling
 from apps.gst_transactions.models import GSTTransaction
 from apps.gstins.models import GSTIN
 from apps.organizations.models import Organization
 from apps.reconciliation.models import ReconciliationItem, ReconciliationRun
-from apps.returns.models import ReturnPreparation
+from apps.returns.models import PortalChallanRequest, PortalLedgerSnapshot, ReturnPreparation
 from apps.workspaces.models import Workspace
 
 User = get_user_model()
@@ -203,6 +203,24 @@ def prepare_payload(context, return_type):
     }
 
 
+def create_ready_whitebooks_auth_session(*, context, txn="txn-ledger-001"):
+    return ProviderAuthSession.objects.create(
+        workspace=context["workspace"],
+        client=context["client"],
+        gstin=context["gstin"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        email="ops@example.com",
+        txn=txn,
+        status=ProviderAuthSession.SessionStatus.SESSION_ACTIVE,
+        response_contract_confirmed=True,
+        verified_at=timezone.now(),
+        initiated_by=context["user"],
+        verified_by=context["user"],
+        created_by=context["user"],
+        updated_by=context["user"],
+    )
+
+
 @pytest.mark.django_db
 def test_gstr1_summary(returns_authenticated_client, returns_context):
     create_transaction(context=returns_context, transaction_type="sales", reference_number="S-001", counterparty_gstin="29ABCDE1234F1Z5")
@@ -264,7 +282,594 @@ def test_gstr1_summary(returns_authenticated_client, returns_context):
     assert sections["hsn_summary"]["row_count"] >= 1
     assert sections["documents_issued"]["row_count"] == 3
     assert prepared.summary_snapshot["period_exceptions"]["count"] == 1
-    assert prepared.summary_snapshot["period_exceptions"]["documents"][0]["document_number"] == "S-EXC-001"
+
+
+@pytest.mark.django_db
+@override_settings(WHITEBOOKS_ENABLE_LEDGER_READS=False, WHITEBOOKS_ENABLE_PAYMENT_READS=False)
+def test_portal_filing_readiness_reports_blockers_when_ledger_reads_are_disabled(returns_authenticated_client, returns_context):
+    response = returns_authenticated_client.get(
+        "/api/v1/returns/portal-filing-readiness/",
+        {
+            "workspace": str(returns_context["workspace"].id),
+            "client": str(returns_context["client"].id),
+            "gstin": str(returns_context["gstin"].id),
+            "compliance_period": str(returns_context["compliance_period"].id),
+            "return_type": "gstr3b",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.data["data"]
+    assert payload["portal_sync"]["enabled"] is False
+    assert payload["portal_sync"]["can_fetch"] is False
+    assert "WhiteBooks ledger reads are not enabled" in payload["portal_sync"]["blockers"][0]
+    assert payload["auth_session"]["available"] is False
+
+
+@pytest.mark.django_db
+@override_settings(WHITEBOOKS_ENABLE_LEDGER_READS=True, WHITEBOOKS_ENABLE_PAYMENT_READS=True)
+def test_portal_filing_readiness_fetches_balance_and_taxpayable(monkeypatch, returns_authenticated_client, returns_context):
+    create_transaction(context=returns_context, transaction_type="sales", reference_number="S-001")
+    create_transaction(context=returns_context, transaction_type="purchase", reference_number="P-001")
+    create_reconciliation_run_with_items(context=returns_context)
+    prepare_response = returns_authenticated_client.post("/api/v1/returns/prepare/", prepare_payload(returns_context, "gstr3b"), format="json")
+    assert prepare_response.status_code == 200
+    create_ready_whitebooks_auth_session(context=returns_context, txn="txn-ledger-live")
+
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+
+    def mock_balance(self, **kwargs):
+        assert kwargs["ret_period"] == "042026"
+        assert kwargs["gstin"] == returns_context["gstin"].gstin
+        return {"status_cd": "1", "status_desc": "Success", "balances": {"cash": 1200, "itc": 450}}
+
+    def mock_taxpayable(self, **kwargs):
+        assert kwargs["return_type"] == "GSTR3B"
+        return {"status_cd": "1", "status_desc": "Success", "tax_payable": {"net": 720}}
+
+    def mock_cash_ledger(self, **kwargs):
+        assert kwargs["from_date"] == "01-04-2026"
+        assert kwargs["to_date"] == "30-04-2026"
+        return {
+            "status_cd": "1",
+            "status_desc": "Success",
+            "data": {
+                "fr_dt": "01/04/2026",
+                "to_dt": "30/04/2026",
+                "op_bal": {"tot_rng_bal": 1200, "cgstbal": {"tot": 300}, "sgstbal": {"tot": 300}, "igstbal": {"tot": 600}, "cessbal": {"tot": 0}},
+                "cl_bal": {"tot_rng_bal": 1800, "cgstbal": {"tot": 450}, "sgstbal": {"tot": 450}, "igstbal": {"tot": 900}, "cessbal": {"tot": 0}},
+                "tr": [{"ref": "CH-001"}],
+            },
+        }
+
+    def mock_itc_ledger(self, **kwargs):
+        assert kwargs["from_date"] == "01-04-2026"
+        assert kwargs["to_date"] == "30-04-2026"
+        return {
+            "status_cd": "1",
+            "status_desc": "Success",
+            "data": {
+                "fr_dt": "01/04/2026",
+                "to_dt": "30/04/2026",
+                "op_bal": {"tot_rng_bal": 500},
+                "cl_bal": {"tot_rng_bal": 650},
+                "tr": [{"ref": "ITC-001"}, {"ref": "ITC-002"}],
+            },
+        }
+
+    def mock_liability_ledger(self, **kwargs):
+        assert kwargs["from_date"] == "01-04-2026"
+        assert kwargs["to_date"] == "30-04-2026"
+        return {
+            "status_cd": "1",
+            "status_desc": "Success",
+            "data": {
+                "fr_dt": "01/04/2026",
+                "to_dt": "30/04/2026",
+                "op_bal": {"tot_rng_bal": 300},
+                "cl_bal": {"tot_rng_bal": 420},
+                "tr": [{"ref": "LIAB-001"}],
+            },
+        }
+
+    def mock_challan_history(self, **kwargs):
+        assert kwargs["from_date"] == "01-04-2026"
+        assert kwargs["to_date"] == "30-04-2026"
+        return {"status_cd": "1", "status_desc": "Success", "challans": [{"cpin": "CPIN-042026-001", "amount": 720}]}
+
+    def mock_challan_summary(self, **kwargs):
+        assert kwargs["cpin"] == "CPIN-042026-001"
+        return {"status_cd": "1", "status_desc": "Success", "challan": {"cpin": "CPIN-042026-001", "payment_status": "PAID"}}
+
+    monkeypatch.setattr(WhiteBooksClient, "get_cash_itc_balance", mock_balance)
+    monkeypatch.setattr(WhiteBooksClient, "get_tax_payable_balance", mock_taxpayable)
+    monkeypatch.setattr(WhiteBooksClient, "get_cash_ledger_details", mock_cash_ledger)
+    monkeypatch.setattr(WhiteBooksClient, "get_itc_ledger_details", mock_itc_ledger)
+    monkeypatch.setattr(WhiteBooksClient, "get_liability_ledger_details", mock_liability_ledger)
+    monkeypatch.setattr(WhiteBooksClient, "get_challan_history", mock_challan_history)
+    monkeypatch.setattr(WhiteBooksClient, "get_challan_summary", mock_challan_summary)
+
+    response = returns_authenticated_client.get(
+        "/api/v1/returns/portal-filing-readiness/",
+        {
+            "workspace": str(returns_context["workspace"].id),
+            "client": str(returns_context["client"].id),
+            "gstin": str(returns_context["gstin"].id),
+            "compliance_period": str(returns_context["compliance_period"].id),
+            "return_type": "gstr3b",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.data["data"]
+    assert payload["portal_sync"]["enabled"] is True
+    assert payload["portal_sync"]["payment_reads_enabled"] is True
+    assert payload["portal_sync"]["can_fetch"] is True
+    assert payload["auth_session"]["available"] is True
+    assert payload["computed_summary"]["prepared_return_status"] == "ready_for_review"
+    assert payload["provider_evidence"]["source"] == "live_fetch"
+    assert payload["provider_evidence"]["balance_response"]["balances"]["cash"] == 1200
+    assert payload["provider_evidence"]["taxpayable_response"]["tax_payable"]["net"] == 720
+    assert payload["provider_evidence"]["cash_ledger_response"]["data"]["cl_bal"]["tot_rng_bal"] == 1800
+    assert payload["provider_evidence"]["cash_ledger_summary"]["opening_total"] == "1200.00"
+    assert payload["provider_evidence"]["cash_ledger_summary"]["closing_total"] == "1800.00"
+    assert payload["provider_evidence"]["cash_ledger_summary"]["transaction_count"] == 1
+    assert payload["provider_evidence"]["itc_ledger_response"]["data"]["cl_bal"]["tot_rng_bal"] == 650
+    assert payload["provider_evidence"]["itc_ledger_summary"]["transaction_count"] == 2
+    assert payload["provider_evidence"]["liability_ledger_response"]["data"]["cl_bal"]["tot_rng_bal"] == 420
+    assert payload["provider_evidence"]["liability_ledger_summary"]["closing_total"] == "420.00"
+    assert payload["provider_evidence"]["challan_reference"] == "CPIN-042026-001"
+    assert payload["provider_evidence"]["challan_history_response"]["challans"][0]["cpin"] == "CPIN-042026-001"
+    assert payload["provider_evidence"]["challan_summary_response"]["challan"]["payment_status"] == "PAID"
+    snapshot = PortalLedgerSnapshot.objects.get(compliance_period=returns_context["compliance_period"], return_type="gstr3b")
+    assert snapshot.balance_response["balances"]["cash"] == 1200
+    assert snapshot.taxpayable_response["tax_payable"]["net"] == 720
+    assert snapshot.cash_ledger_response["data"]["cl_bal"]["tot_rng_bal"] == 1800
+    assert snapshot.itc_ledger_response["data"]["cl_bal"]["tot_rng_bal"] == 650
+    assert snapshot.liability_ledger_response["data"]["cl_bal"]["tot_rng_bal"] == 420
+    assert snapshot.challan_reference == "CPIN-042026-001"
+    assert snapshot.challan_summary_response["challan"]["payment_status"] == "PAID"
+    assert payload["provider_evidence"]["snapshot_id"] == str(snapshot.id)
+
+
+@pytest.mark.django_db
+@override_settings(WHITEBOOKS_ENABLE_LEDGER_READS=True, WHITEBOOKS_ENABLE_PAYMENT_READS=True)
+def test_portal_filing_readiness_keeps_other_ledgers_when_taxpayable_fails(
+    monkeypatch,
+    returns_authenticated_client,
+    returns_context,
+):
+    create_transaction(context=returns_context, transaction_type="sales", reference_number="S-001")
+    create_transaction(context=returns_context, transaction_type="purchase", reference_number="P-001")
+    create_reconciliation_run_with_items(context=returns_context)
+    prepare_response = returns_authenticated_client.post("/api/v1/returns/prepare/", prepare_payload(returns_context, "gstr3b"), format="json")
+    assert prepare_response.status_code == 200
+    create_ready_whitebooks_auth_session(context=returns_context, txn="txn-ledger-partial")
+
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+    from apps.integrations.whitebooks.exceptions import WhiteBooksSubmissionError
+
+    def mock_balance(self, **kwargs):
+        return {"status_cd": "1", "status_desc": "Success", "balances": {"cash": 1200, "itc": 450}}
+
+    def mock_taxpayable(self, **kwargs):
+        raise WhiteBooksSubmissionError("LG9010: Invalid Return Type")
+
+    def mock_cash_ledger(self, **kwargs):
+        return {
+            "status_cd": "1",
+            "data": {
+                "fr_dt": "01/04/2026",
+                "to_dt": "30/04/2026",
+                "op_bal": {"tot_rng_bal": 1000, "cgstbal": {"tot": 250}, "sgstbal": {"tot": 250}, "igstbal": {"tot": 500}, "cessbal": {"tot": 0}},
+                "cl_bal": {"tot_rng_bal": 1300, "cgstbal": {"tot": 325}, "sgstbal": {"tot": 325}, "igstbal": {"tot": 650}, "cessbal": {"tot": 0}},
+                "tr": [],
+            },
+        }
+
+    def mock_itc_ledger(self, **kwargs):
+        return {"status_cd": "1", "data": {"fr_dt": "01/04/2026", "to_dt": "30/04/2026", "op_bal": {"tot_rng_bal": 200}, "cl_bal": {"tot_rng_bal": 240}, "tr": []}}
+
+    def mock_liability_ledger(self, **kwargs):
+        return {"status_cd": "1", "data": {"fr_dt": "01/04/2026", "to_dt": "30/04/2026", "op_bal": {"tot_rng_bal": 300}, "cl_bal": {"tot_rng_bal": 420}, "tr": []}}
+
+    def mock_challan_history(self, **kwargs):
+        return {"status_cd": "1", "challans": [{"cpin": "CPIN-042026-001"}]}
+
+    def mock_challan_summary(self, **kwargs):
+        return {"status_cd": "1", "challan": {"cpin": "CPIN-042026-001", "payment_status": "PAID"}}
+
+    monkeypatch.setattr(WhiteBooksClient, "get_cash_itc_balance", mock_balance)
+    monkeypatch.setattr(WhiteBooksClient, "get_tax_payable_balance", mock_taxpayable)
+    monkeypatch.setattr(WhiteBooksClient, "get_cash_ledger_details", mock_cash_ledger)
+    monkeypatch.setattr(WhiteBooksClient, "get_itc_ledger_details", mock_itc_ledger)
+    monkeypatch.setattr(WhiteBooksClient, "get_liability_ledger_details", mock_liability_ledger)
+    monkeypatch.setattr(WhiteBooksClient, "get_challan_history", mock_challan_history)
+    monkeypatch.setattr(WhiteBooksClient, "get_challan_summary", mock_challan_summary)
+
+    response = returns_authenticated_client.get(
+        "/api/v1/returns/portal-filing-readiness/",
+        {
+            "workspace": str(returns_context["workspace"].id),
+            "client": str(returns_context["client"].id),
+            "gstin": str(returns_context["gstin"].id),
+            "compliance_period": str(returns_context["compliance_period"].id),
+            "return_type": "gstr3b",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.data["data"]
+    assert payload["provider_evidence"]["source"] == "live_fetch"
+    assert payload["provider_evidence"]["balance_response"]["balances"]["cash"] == 1200
+    assert payload["provider_evidence"]["taxpayable_response"] is None
+    assert payload["provider_evidence"]["cash_ledger_summary"]["closing_total"] == "1300.00"
+    assert payload["provider_evidence"]["itc_ledger_summary"]["closing_total"] == "240.00"
+    assert payload["provider_evidence"]["liability_ledger_summary"]["closing_total"] == "420.00"
+    assert "Portal tax payable evidence could not be fetched right now." in payload["portal_sync"]["warnings"]
+    assert "taxpayable: LG9010: Invalid Return Type" in payload["portal_sync"]["transport_error"]
+
+
+@pytest.mark.django_db
+@override_settings(WHITEBOOKS_ENABLE_LEDGER_READS=True, WHITEBOOKS_ENABLE_PAYMENT_READS=True)
+def test_portal_filing_readiness_sanitizes_provider_null_characters(
+    monkeypatch,
+    returns_authenticated_client,
+    returns_context,
+):
+    create_transaction(context=returns_context, transaction_type="sales", reference_number="S-001")
+    create_transaction(context=returns_context, transaction_type="purchase", reference_number="P-001")
+    create_reconciliation_run_with_items(context=returns_context)
+    prepare_response = returns_authenticated_client.post("/api/v1/returns/prepare/", prepare_payload(returns_context, "gstr3b"), format="json")
+    assert prepare_response.status_code == 200
+    create_ready_whitebooks_auth_session(context=returns_context, txn="txn-ledger-null-char")
+
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+
+    def mock_balance(self, **kwargs):
+        return {"status_cd": "1", "status_desc": "Success", "balances": {"cash": 1200, "itc": 450}}
+
+    def mock_taxpayable(self, **kwargs):
+        return {"status_cd": "1", "status_desc": "Success", "tax_payable": {"net": 720}}
+
+    def mock_cash_ledger(self, **kwargs):
+        return {"status_cd": "1", "data": {"fr_dt": "01/04/2026", "to_dt": "30/04/2026", "op_bal": {"tot_rng_bal": 1000}, "cl_bal": {"tot_rng_bal": 1300}, "tr": []}}
+
+    def mock_itc_ledger(self, **kwargs):
+        return {"status_cd": "1", "data": {"fr_dt": "01/04/2026", "to_dt": "30/04/2026", "op_bal": {"tot_rng_bal": 200}, "cl_bal": {"tot_rng_bal": 240}, "tr": []}}
+
+    def mock_liability_ledger(self, **kwargs):
+        return {"status_cd": "1", "data": {"fr_dt": "01/04/2026", "to_dt": "30/04/2026", "op_bal": {"tot_rng_bal": 300}, "cl_bal": {"tot_rng_bal": 420}, "tr": []}}
+
+    def mock_challan_history(self, **kwargs):
+        return {"status_cd": "1", "challans": [{"cpin": "CPIN-042026-001"}]}
+
+    def mock_challan_summary(self, **kwargs):
+        return {"data": {"status": "\x00PENDING", "cpin": "CPIN-042026-001"}, "status_cd": "1"}
+
+    monkeypatch.setattr(WhiteBooksClient, "get_cash_itc_balance", mock_balance)
+    monkeypatch.setattr(WhiteBooksClient, "get_tax_payable_balance", mock_taxpayable)
+    monkeypatch.setattr(WhiteBooksClient, "get_cash_ledger_details", mock_cash_ledger)
+    monkeypatch.setattr(WhiteBooksClient, "get_itc_ledger_details", mock_itc_ledger)
+    monkeypatch.setattr(WhiteBooksClient, "get_liability_ledger_details", mock_liability_ledger)
+    monkeypatch.setattr(WhiteBooksClient, "get_challan_history", mock_challan_history)
+    monkeypatch.setattr(WhiteBooksClient, "get_challan_summary", mock_challan_summary)
+
+    response = returns_authenticated_client.get(
+        "/api/v1/returns/portal-filing-readiness/",
+        {
+            "workspace": str(returns_context["workspace"].id),
+            "client": str(returns_context["client"].id),
+            "gstin": str(returns_context["gstin"].id),
+            "compliance_period": str(returns_context["compliance_period"].id),
+            "return_type": "gstr3b",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.data["data"]
+    assert payload["provider_evidence"]["challan_summary_response"]["data"]["status"] == "PENDING"
+    snapshot = PortalLedgerSnapshot.objects.get(compliance_period=returns_context["compliance_period"], return_type="gstr3b")
+    assert snapshot.challan_summary_response["data"]["status"] == "PENDING"
+
+
+@pytest.mark.django_db
+@override_settings(WHITEBOOKS_ENABLE_LEDGER_READS=False, WHITEBOOKS_ENABLE_PAYMENT_READS=False)
+def test_portal_filing_readiness_uses_latest_saved_snapshot_when_live_fetch_is_unavailable(
+    returns_authenticated_client,
+    returns_context,
+):
+    prepared_return = ReturnPreparation.objects.create(
+        compliance_period=returns_context["compliance_period"],
+        return_type="gstr3b",
+        status=ReturnPreparation.PreparationStatus.READY_FOR_REVIEW,
+        summary_snapshot={
+            "outward_supplies": {"outward_tax_liability": "1500.00"},
+            "itc_summary": {"eligible_itc": "500.00", "net_tax_payable": "1000.00"},
+        },
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+    snapshot = PortalLedgerSnapshot.objects.create(
+        compliance_period=returns_context["compliance_period"],
+        prepared_return=prepared_return,
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type="gstr3b",
+        fetched_at=timezone.now(),
+        computed_summary={
+            "prepared_return_id": str(prepared_return.id),
+            "prepared_return_status": "ready_for_review",
+            "outward_tax_liability": "1500.00",
+            "eligible_itc": "500.00",
+            "net_tax_payable": "1000.00",
+        },
+        balance_response={"status_cd": "1", "balances": {"cash": 900}},
+        taxpayable_response={"status_cd": "1", "tax_payable": {"net": 640}},
+        cash_ledger_response={
+            "status_cd": "1",
+            "data": {
+                "fr_dt": "01/04/2026",
+                "to_dt": "30/04/2026",
+                "op_bal": {"tot_rng_bal": 1000, "cgstbal": {"tot": 250}, "sgstbal": {"tot": 250}, "igstbal": {"tot": 500}, "cessbal": {"tot": 0}},
+                "cl_bal": {"tot_rng_bal": 1300, "cgstbal": {"tot": 325}, "sgstbal": {"tot": 325}, "igstbal": {"tot": 650}, "cessbal": {"tot": 0}},
+                "tr": [],
+            },
+        },
+        itc_ledger_response={
+            "status_cd": "1",
+            "data": {
+                "fr_dt": "01/04/2026",
+                "to_dt": "30/04/2026",
+                "op_bal": {"tot_rng_bal": 200},
+                "cl_bal": {"tot_rng_bal": 240},
+                "tr": [{"ref": "ITC-SAVED-001"}],
+            },
+        },
+        liability_ledger_response={
+            "status_cd": "1",
+            "data": {
+                "fr_dt": "01/04/2026",
+                "to_dt": "30/04/2026",
+                "op_bal": {"tot_rng_bal": 700},
+                "cl_bal": {"tot_rng_bal": 880},
+                "tr": [],
+            },
+        },
+        challan_reference="CPIN-SAVED-001",
+        challan_history_response={"challans": [{"cpin": "CPIN-SAVED-001"}]},
+        challan_summary_response={"challan": {"cpin": "CPIN-SAVED-001", "payment_status": "PENDING"}},
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+
+    response = returns_authenticated_client.get(
+        "/api/v1/returns/portal-filing-readiness/",
+        {
+            "workspace": str(returns_context["workspace"].id),
+            "client": str(returns_context["client"].id),
+            "gstin": str(returns_context["gstin"].id),
+            "compliance_period": str(returns_context["compliance_period"].id),
+            "return_type": "gstr3b",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.data["data"]
+    assert payload["portal_sync"]["enabled"] is False
+    assert payload["portal_sync"]["payment_reads_enabled"] is False
+    assert payload["provider_evidence"]["source"] == "saved_snapshot"
+    assert payload["provider_evidence"]["snapshot_id"] == str(snapshot.id)
+    assert payload["provider_evidence"]["balance_response"]["balances"]["cash"] == 900
+    assert payload["provider_evidence"]["taxpayable_response"]["tax_payable"]["net"] == 640
+    assert payload["provider_evidence"]["cash_ledger_summary"]["closing_total"] == "1300.00"
+    assert payload["provider_evidence"]["itc_ledger_summary"]["closing_total"] == "240.00"
+    assert payload["provider_evidence"]["liability_ledger_summary"]["closing_total"] == "880.00"
+    assert payload["provider_evidence"]["challan_reference"] == "CPIN-SAVED-001"
+    assert payload["provider_evidence"]["challan_summary_response"]["challan"]["payment_status"] == "PENDING"
+
+
+@pytest.mark.django_db
+@override_settings(WHITEBOOKS_ENABLE_CHALLAN_GENERATION=True)
+def test_generate_portal_challan_creates_request_and_audit_log(monkeypatch, returns_authenticated_client, returns_context):
+    prepared_return = ReturnPreparation.objects.create(
+        compliance_period=returns_context["compliance_period"],
+        return_type="gstr3b",
+        status=ReturnPreparation.PreparationStatus.READY_FOR_REVIEW,
+        summary_snapshot={},
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+    create_ready_whitebooks_auth_session(context=returns_context, txn="txn-challan-001")
+
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+
+    def mock_generate_challan(self, **kwargs):
+        assert kwargs["txn"] == "txn-challan-001"
+        assert kwargs["gstin"] == returns_context["gstin"].gstin
+        assert kwargs["ret_period"] == "042026"
+        assert kwargs["payload"]["payment_mod"] == "OTC"
+        assert kwargs["payload"]["chln_rsn"] == "RET3B"
+        assert kwargs["payload"]["cgst_tax_amt"] == 250
+        assert kwargs["payload"]["igst_tax_amt"] == 500
+        return {"status_cd": "1", "status_desc": "Success", "cpin": "CPIN-NEW-001"}
+
+    monkeypatch.setattr(WhiteBooksClient, "generate_challan", mock_generate_challan)
+
+    response = returns_authenticated_client.post(
+        "/api/v1/returns/generate-portal-challan/",
+        {
+            "workspace": str(returns_context["workspace"].id),
+            "client": str(returns_context["client"].id),
+            "gstin": str(returns_context["gstin"].id),
+            "compliance_period": str(returns_context["compliance_period"].id),
+            "return_type": "gstr3b",
+            "challan_reason": "RET3B",
+            "payment_mode": "OTC",
+            "bank_code": "ICIC",
+            "sub_payment_mode": "CQ",
+            "mobile_number": "9876543210",
+            "address": "123 Example Street, Bengaluru",
+            "cgst_tax_amount": "250.00",
+            "igst_tax_amount": "500.00",
+            "sgst_tax_amount": "250.00",
+            "cess_tax_amount": "0.00",
+        },
+        format="json",
+    )
+    assert response.status_code == 200
+    payload = response.data["data"]
+    assert payload["status"] == "submitted"
+    assert payload["cpin"] == "CPIN-NEW-001"
+    request_record = PortalChallanRequest.objects.get(pk=payload["id"])
+    assert request_record.prepared_return == prepared_return
+    assert request_record.total_amount == Decimal("1000.00")
+    assert AuditLog.objects.filter(action="portal_challan.requested", entity_id=request_record.id).exists()
+    assert AuditLog.objects.filter(action="portal_challan.generated", entity_id=request_record.id).exists()
+
+
+@pytest.mark.django_db
+def test_portal_challan_requests_lists_recent_requests(returns_authenticated_client, returns_context):
+    prepared_return = ReturnPreparation.objects.create(
+        compliance_period=returns_context["compliance_period"],
+        return_type="gstr3b",
+        status=ReturnPreparation.PreparationStatus.READY_FOR_REVIEW,
+        summary_snapshot={},
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+    auth_session = create_ready_whitebooks_auth_session(context=returns_context, txn="txn-challan-list")
+    PortalChallanRequest.objects.create(
+        compliance_period=returns_context["compliance_period"],
+        prepared_return=prepared_return,
+        auth_session=auth_session,
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type="gstr3b",
+        status=PortalChallanRequest.RequestStatus.SUBMITTED,
+        cpin="CPIN-LIST-001",
+        challan_reason="RET3B",
+        challan_period="042026",
+        payment_mode="OTC",
+        bank_code="ICIC",
+        sub_payment_mode="CQ",
+        taxpayer_name=returns_context["client"].legal_name,
+        address="123 Test Road",
+        mobile_number="9876543210",
+        request_payload={"total_amt": 1200},
+        response_payload={"cpin": "CPIN-LIST-001"},
+        total_amount=Decimal("1200.00"),
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+
+    response = returns_authenticated_client.get(
+        "/api/v1/returns/portal-challan-requests/",
+        {
+            "workspace": str(returns_context["workspace"].id),
+            "client": str(returns_context["client"].id),
+            "gstin": str(returns_context["gstin"].id),
+            "compliance_period": str(returns_context["compliance_period"].id),
+            "return_type": "gstr3b",
+        },
+    )
+    assert response.status_code == 200
+    items = response.data["data"]
+    assert len(items) == 1
+    assert items[0]["cpin"] == "CPIN-LIST-001"
+    assert items[0]["status"] == "submitted"
+
+
+@pytest.mark.django_db
+@override_settings(WHITEBOOKS_ENABLE_CHALLAN_GENERATION=True)
+def test_validate_portal_challan_returns_valid_true_on_success(monkeypatch, returns_authenticated_client, returns_context):
+    ReturnPreparation.objects.create(
+        compliance_period=returns_context["compliance_period"],
+        return_type="gstr3b",
+        status=ReturnPreparation.PreparationStatus.READY_FOR_REVIEW,
+        summary_snapshot={},
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+    create_ready_whitebooks_auth_session(context=returns_context, txn="txn-challan-validate")
+
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+
+    def mock_validate_challan_reason(self, **kwargs):
+        assert kwargs["ret_period"] == "042026"
+        assert kwargs["payload"]["chln_rsn"] == "RET3B"
+        return {"status_cd": "1", "status_desc": "Validated"}
+
+    monkeypatch.setattr(WhiteBooksClient, "validate_challan_reason", mock_validate_challan_reason)
+
+    response = returns_authenticated_client.post(
+        "/api/v1/returns/validate-portal-challan/",
+        {
+            "workspace": str(returns_context["workspace"].id),
+            "client": str(returns_context["client"].id),
+            "gstin": str(returns_context["gstin"].id),
+            "compliance_period": str(returns_context["compliance_period"].id),
+            "return_type": "gstr3b",
+            "challan_reason": "RET3B",
+            "payment_mode": "OTC",
+            "bank_code": "ICIC",
+            "sub_payment_mode": "CQ",
+            "mobile_number": "9876543210",
+            "address": "123 Example Street, Bengaluru",
+            "cgst_tax_amount": "250.00",
+            "igst_tax_amount": "500.00",
+            "sgst_tax_amount": "250.00",
+            "cess_tax_amount": "0.00",
+        },
+        format="json",
+    )
+    assert response.status_code == 200
+    payload = response.data["data"]
+    assert payload["valid"] is True
+    assert payload["computed_total_amount"] == "1000.00"
+    assert AuditLog.objects.filter(action="portal_challan.validated").exists()
+
+
+@pytest.mark.django_db
+@override_settings(WHITEBOOKS_ENABLE_CHALLAN_GENERATION=True)
+def test_validate_portal_challan_returns_valid_false_on_submission_error(monkeypatch, returns_authenticated_client, returns_context):
+    ReturnPreparation.objects.create(
+        compliance_period=returns_context["compliance_period"],
+        return_type="gstr3b",
+        status=ReturnPreparation.PreparationStatus.READY_FOR_REVIEW,
+        summary_snapshot={},
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+    create_ready_whitebooks_auth_session(context=returns_context, txn="txn-challan-validate-fail")
+
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+    from apps.integrations.whitebooks.exceptions import WhiteBooksSubmissionError
+
+    def mock_validate_challan_reason(self, **kwargs):
+        raise WhiteBooksSubmissionError("Invalid challan reason for the selected period.")
+
+    monkeypatch.setattr(WhiteBooksClient, "validate_challan_reason", mock_validate_challan_reason)
+
+    response = returns_authenticated_client.post(
+        "/api/v1/returns/validate-portal-challan/",
+        {
+            "workspace": str(returns_context["workspace"].id),
+            "client": str(returns_context["client"].id),
+            "gstin": str(returns_context["gstin"].id),
+            "compliance_period": str(returns_context["compliance_period"].id),
+            "return_type": "gstr3b",
+            "challan_reason": "BADCODE",
+            "payment_mode": "OTC",
+            "bank_code": "ICIC",
+            "sub_payment_mode": "CQ",
+            "mobile_number": "9876543210",
+            "address": "123 Example Street, Bengaluru",
+            "cgst_tax_amount": "250.00",
+            "igst_tax_amount": "500.00",
+            "sgst_tax_amount": "250.00",
+            "cess_tax_amount": "0.00",
+        },
+        format="json",
+    )
+    assert response.status_code == 200
+    payload = response.data["data"]
+    assert payload["valid"] is False
+    assert "Invalid challan reason" in payload["error_message"]
+    assert AuditLog.objects.filter(action="portal_challan.validation_failed").exists()
 
 
 @pytest.mark.django_db

@@ -871,7 +871,7 @@ export default function DashboardPage() {
                             date: format(new Date(entry.date), "dd MMM"),
                             digests: String(entry.digests_dispatched),
                             reminders: String(entry.reminders_sent),
-                            completions: String(entry.follow_ups_completed),
+                            completions: String(entry.follow_ups_completed ?? 0),
                             escalations: String(entry.auto_escalations),
                           }))}
                         />

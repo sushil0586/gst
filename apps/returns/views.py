@@ -10,14 +10,22 @@ from apps.common.cache_utils import get_cached_or_build, scoped_cache_key
 from apps.common.permissions import WorkspaceRBACPermission
 from apps.common.viewsets import StandardizedModelViewSet
 from apps.compliance_periods.models import CompliancePeriod
+from apps.returns.models import PortalChallanRequest
 from apps.returns.selectors.returns import get_return_preparation_queryset
 from apps.returns.serializers import (
+    PortalChallanListRequestSerializer,
+    PortalChallanRecordSerializer,
+    PortalChallanRequestSerializer,
+    PortalFilingReadinessRequestSerializer,
     ReturnApprovalSerializer,
     ReturnReadinessRequestSerializer,
     ReturnMarkFiledSerializer,
     ReturnPreparationRequestSerializer,
     ReturnPreparationSerializer,
 )
+from apps.returns.services.portal_readiness import get_portal_filing_readiness
+from apps.returns.services.portal_challans import generate_portal_challan
+from apps.returns.services.portal_challans import validate_portal_challan
 from apps.returns.services.readiness import get_return_readiness
 from apps.returns.services.returns import approve_return, mark_filed, prepare_return
 
@@ -54,6 +62,14 @@ class ReturnPreparationViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSe
             return ReturnApprovalSerializer
         if self.action == "readiness":
             return ReturnReadinessRequestSerializer
+        if self.action == "portal_filing_readiness":
+            return PortalFilingReadinessRequestSerializer
+        if self.action == "generate_portal_challan":
+            return PortalChallanRequestSerializer
+        if self.action == "portal_challan_requests":
+            return PortalChallanListRequestSerializer
+        if self.action == "validate_portal_challan":
+            return PortalChallanRequestSerializer
         return ReturnPreparationSerializer
 
     def get_permission_code(self, request):
@@ -150,6 +166,93 @@ class ReturnPreparationViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSe
             build_payload,
         )
         return Response(payload)
+
+    @action(detail=False, methods=["get"], url_path="portal-filing-readiness")
+    def portal_filing_readiness(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        try:
+            payload = get_portal_filing_readiness(
+                workspace_id=serializer.validated_data["workspace"],
+                client_id=serializer.validated_data["client"],
+                gstin_id=serializer.validated_data["gstin"],
+                compliance_period_id=serializer.validated_data["compliance_period"],
+                return_type=serializer.validated_data["return_type"],
+                actor=request.user,
+            )
+        except ValueError as exc:
+            from rest_framework.exceptions import ValidationError
+
+            raise ValidationError({"compliance_period": str(exc)}) from exc
+        return Response(api_response(data=payload, message="Portal filing readiness evaluated"))
+
+    @action(detail=False, methods=["post"], url_path="generate-portal-challan")
+    def generate_portal_challan(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        record = generate_portal_challan(
+            workspace_id=serializer.validated_data["workspace"],
+            client_id=serializer.validated_data["client"],
+            gstin_id=serializer.validated_data["gstin"],
+            compliance_period_id=serializer.validated_data["compliance_period"],
+            return_type=serializer.validated_data["return_type"],
+            challan_reason=serializer.validated_data["challan_reason"],
+            payment_mode=serializer.validated_data["payment_mode"],
+            bank_code=serializer.validated_data["bank_code"],
+            sub_payment_mode=serializer.validated_data["sub_payment_mode"],
+            mobile_number=serializer.validated_data["mobile_number"],
+            address=serializer.validated_data["address"],
+            cgst_tax_amount=serializer.validated_data["cgst_tax_amount"],
+            igst_tax_amount=serializer.validated_data["igst_tax_amount"],
+            sgst_tax_amount=serializer.validated_data["sgst_tax_amount"],
+            cess_tax_amount=serializer.validated_data["cess_tax_amount"],
+            actor=request.user,
+        )
+        output = PortalChallanRecordSerializer(record, context=self.get_serializer_context())
+        return Response(api_response(data=output.data, message="Portal challan generated"))
+
+    @action(detail=False, methods=["get"], url_path="portal-challan-requests")
+    def portal_challan_requests(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        queryset = (
+            PortalChallanRequest.objects.filter(
+                is_active=True,
+                compliance_period_id=serializer.validated_data["compliance_period"],
+                return_type=serializer.validated_data["return_type"],
+                compliance_period__gstin__client__workspace_id=serializer.validated_data["workspace"],
+                compliance_period__gstin__client_id=serializer.validated_data["client"],
+                compliance_period__gstin_id=serializer.validated_data["gstin"],
+            )
+            .select_related("compliance_period", "compliance_period__gstin", "compliance_period__gstin__client")
+            .order_by("-created_at")
+        )
+        output = PortalChallanRecordSerializer(queryset[:10], many=True, context=self.get_serializer_context())
+        return Response(api_response(data=output.data, message="Portal challan requests retrieved"))
+
+    @action(detail=False, methods=["post"], url_path="validate-portal-challan")
+    def validate_portal_challan(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = validate_portal_challan(
+            workspace_id=serializer.validated_data["workspace"],
+            client_id=serializer.validated_data["client"],
+            gstin_id=serializer.validated_data["gstin"],
+            compliance_period_id=serializer.validated_data["compliance_period"],
+            return_type=serializer.validated_data["return_type"],
+            challan_reason=serializer.validated_data["challan_reason"],
+            payment_mode=serializer.validated_data["payment_mode"],
+            bank_code=serializer.validated_data["bank_code"],
+            sub_payment_mode=serializer.validated_data["sub_payment_mode"],
+            mobile_number=serializer.validated_data["mobile_number"],
+            address=serializer.validated_data["address"],
+            cgst_tax_amount=serializer.validated_data["cgst_tax_amount"],
+            igst_tax_amount=serializer.validated_data["igst_tax_amount"],
+            sgst_tax_amount=serializer.validated_data["sgst_tax_amount"],
+            cess_tax_amount=serializer.validated_data["cess_tax_amount"],
+            actor=request.user,
+        )
+        return Response(api_response(data=payload, message="Portal challan validated"))
 
     @action(detail=True, methods=["post"], url_path="approve")
     def approve(self, request, *args, **kwargs):

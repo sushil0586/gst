@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { EmptyState } from "@/components/common/empty-state";
@@ -64,6 +65,7 @@ export default function TeamManagementPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [formState, setFormState] = useState<MemberFormState>(initialFormState);
   const [editingMember, setEditingMember] = useState<WorkspaceMemberRecord | null>(null);
+  const [memberPendingDeactivation, setMemberPendingDeactivation] = useState<WorkspaceMemberRecord | null>(null);
   const updateMemberMutation = useUpdateWorkspaceMemberMutation(selectedWorkspaceId, editingMember?.id);
   const canManageMembers = hasPermission(sessionPermissions, permissions.manageUsers) || Boolean(session?.is_platform_admin);
   const members = useMemo(() => membersQuery.data?.items ?? [], [membersQuery.data?.items]);
@@ -130,10 +132,15 @@ export default function TeamManagementPage() {
     }
   };
 
-  const handleDeactivate = async (memberId: string) => {
+  const handleDeactivate = async () => {
+    if (!memberPendingDeactivation) {
+      return;
+    }
+
     try {
-      await deactivateMemberMutation.mutateAsync(memberId);
+      await deactivateMemberMutation.mutateAsync(memberPendingDeactivation.id);
       toast.success("Workspace member deactivated.");
+      setMemberPendingDeactivation(null);
     } catch (error) {
       toast.error(getErrorMessage(error));
     }
@@ -198,7 +205,7 @@ export default function TeamManagementPage() {
                       <Button size="sm" variant="outline" onClick={() => openEditDialog(member)}>
                         <ActionLabel kind="edit" label="Edit" />
                       </Button>
-                      <Button size="sm" variant="ghost" onClick={() => handleDeactivate(member.id)}>
+                      <Button size="sm" variant="ghost" onClick={() => setMemberPendingDeactivation(member)}>
                         <ActionLabel kind="deactivate" label="Deactivate" />
                       </Button>
                     </div>
@@ -317,6 +324,30 @@ export default function TeamManagementPage() {
                     : "Add member"}
               </Button>
             </div>
+          </AppModalFooter>
+        </AppModalContent>
+      </Dialog>
+
+      <Dialog open={Boolean(memberPendingDeactivation)} onOpenChange={(open) => !open && setMemberPendingDeactivation(null)}>
+        <AppModalContent size="sm">
+          <AppModalHeader
+            title="Deactivate workspace member"
+            description={memberPendingDeactivation
+              ? `This will remove ${memberPendingDeactivation.full_name} from ${selectedWorkspace?.name ?? "the selected workspace"} and revoke their current access.`
+              : "This will revoke the member's current workspace access."}
+          />
+          <AppModalBody className="space-y-3">
+            <p className="text-sm leading-6 text-slate-600">
+              Use this only when the member should no longer access filings, approvals, or review workflows in this workspace.
+            </p>
+          </AppModalBody>
+          <AppModalFooter>
+            <Button variant="outline" onClick={() => setMemberPendingDeactivation(null)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeactivate} disabled={deactivateMemberMutation.isPending}>
+              {deactivateMemberMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <ActionLabel kind="confirm" label="Confirm deactivation" />}
+            </Button>
           </AppModalFooter>
         </AppModalContent>
       </Dialog>

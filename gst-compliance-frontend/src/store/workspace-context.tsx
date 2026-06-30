@@ -169,7 +169,6 @@ export function WorkspaceContextProvider({ children }: { children: React.ReactNo
     }),
     [
       clients,
-      contextDataQuery.isError,
       contextDataQuery.isLoading,
       gstins,
       periods,

@@ -53,27 +53,33 @@ export default function ClientsPage() {
   const { selectedWorkspaceId } = useWorkspaceContext();
   const clientsQuery = useClientsQuery(selectedWorkspaceId);
   const deleteClientMutation = useDeleteClientMutation(selectedWorkspaceId);
-  const connectedClients = clientsQuery.data?.items;
-  const displayClients = connectedClients?.map((client) => ({
-    id: client.id,
-    name: client.legal_name,
-    code: client.client_code,
-    tradeName: client.trade_name,
-    pan: client.pan,
-    email: client.email,
-    industry: "Managed account",
-    owner: user?.full_name ?? "Assigned user",
-    activeIssues: "Live",
-    filingStatus: "On Track",
-    canEdit: true,
-    canDelete: Boolean(client.can_delete),
-    transactionCount: client.transaction_count ?? 0,
-  })) ?? [];
+  const connectedClients = useMemo(
+    () => clientsQuery.data?.items ?? [],
+    [clientsQuery.data?.items],
+  );
+  const displayClients = useMemo(
+    () => connectedClients.map((client) => ({
+      id: client.id,
+      name: client.legal_name,
+      code: client.client_code,
+      tradeName: client.trade_name,
+      pan: client.pan,
+      email: client.email,
+      industry: "Managed account",
+      owner: user?.full_name ?? "Assigned user",
+      activeIssues: "Live",
+      filingStatus: "On Track",
+      canEdit: true,
+      canDelete: Boolean(client.can_delete),
+      transactionCount: client.transaction_count ?? 0,
+    })),
+    [connectedClients, user?.full_name],
+  );
   const filteredClients = useMemo(
     () => displayClients.filter((client) => matchesClientSearch(client, searchQuery)),
     [displayClients, searchQuery],
   );
-  const editingClient = connectedClients?.find((client) => client.id === editingClientId) ?? null;
+  const editingClient = connectedClients.find((client) => client.id === editingClientId) ?? null;
   const canManageClients = hasPermission(sessionPermissions, permissions.manageClient);
 
   const handleDeleteClient = async (clientId: string, clientName: string) => {

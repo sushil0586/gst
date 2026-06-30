@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import Link from "next/link";
 
@@ -109,12 +109,25 @@ export default function WorkspaceManagementPage() {
     || hasPermission(sessionPermissions, permissions.manageUsers)
     || Boolean(session?.is_platform_admin);
 
-  const organizations = organizationsQuery.data?.items ?? [];
-  const workspaces = workspacesQuery.data?.items ?? [];
-  const sessionWorkspaceFallback = session?.workspaces ?? [];
+  const organizations = useMemo(
+    () => organizationsQuery.data?.items ?? [],
+    [organizationsQuery.data?.items],
+  );
+  const workspaces = useMemo(
+    () => workspacesQuery.data?.items ?? [],
+    [workspacesQuery.data?.items],
+  );
+  const sessionWorkspaceFallback = useMemo(
+    () => session?.workspaces ?? [],
+    [session?.workspaces],
+  );
   const sessionOrganizationIds = useMemo(
     () => (session?.organizations ?? []).map((organization) => organization.id),
     [session?.organizations],
+  );
+  const suggestedOrganizationId = useMemo(
+    () => getSuggestedOrganizationId(organizations, sessionOrganizationIds),
+    [organizations, sessionOrganizationIds],
   );
   const organizationsById = useMemo(
     () => new Map(organizations.map((organization) => [organization.id, organization])),
@@ -170,22 +183,9 @@ export default function WorkspaceManagementPage() {
     setEditingWorkspace(null);
     setFormState((current) => ({
       ...initialFormState,
-      organization: current.organization || getSuggestedOrganizationId(organizations, sessionOrganizationIds),
+      organization: current.organization || suggestedOrganizationId,
     }));
   };
-
-  useEffect(() => {
-    if (editingWorkspace || organizations.length === 0 || formState.organization) {
-      return;
-    }
-
-    const suggestedOrganizationId = getSuggestedOrganizationId(organizations, sessionOrganizationIds);
-    if (!suggestedOrganizationId) {
-      return;
-    }
-
-    setFormState((current) => ({ ...current, organization: suggestedOrganizationId }));
-  }, [editingWorkspace, formState.organization, organizations, sessionOrganizationIds]);
 
   const populateEditForm = (workspace: WorkspaceRecord) => {
     setEditingWorkspace(workspace);
@@ -207,7 +207,7 @@ export default function WorkspaceManagementPage() {
 
   const handleCreateWorkspace = async () => {
     const missingFields = [
-      !formState.organization ? "organization" : null,
+      !(formState.organization || suggestedOrganizationId) ? "organization" : null,
       !formState.name.trim() ? "workspace name" : null,
       !formState.code.trim() ? "workspace code" : null,
       !formState.timezone.trim() ? "timezone" : null,
@@ -220,7 +220,7 @@ export default function WorkspaceManagementPage() {
 
     try {
       const payload = {
-        organization: formState.organization,
+        organization: formState.organization || suggestedOrganizationId,
         name: formState.name.trim(),
         code: formState.code.trim().toUpperCase(),
         timezone: formState.timezone.trim(),
@@ -437,7 +437,7 @@ export default function WorkspaceManagementPage() {
             <div className="space-y-2 md:col-span-2">
               <Label>Organization</Label>
               <Select
-                value={formState.organization}
+                value={formState.organization || suggestedOrganizationId}
                 onValueChange={(value) => setFormState((current) => ({ ...current, organization: value }))}
                 disabled={organizations.length <= 1}
               >

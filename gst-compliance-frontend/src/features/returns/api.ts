@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api/client";
 import { unwrapApiData, unwrapPaginatedData } from "@/lib/api/helpers";
 import { queryKeys } from "@/lib/query/query-keys";
-import type { ReturnPreparationRecord, ReturnReadinessPayload } from "@/types/api";
+import type { PortalChallanRecord, PortalFilingReadinessPayload, ReturnPreparationRecord, ReturnReadinessPayload } from "@/types/api";
 
 type ReturnFilters = {
   workspace?: string;
@@ -19,6 +19,31 @@ type PrepareReturnPayload = {
   gstin: string;
   compliance_period: string;
   return_type: "gstr1" | "gstr3b" | "gstr7" | "gstr9" | "gstr9c";
+};
+
+type GeneratePortalChallanPayload = {
+  workspace: string;
+  client: string;
+  gstin: string;
+  compliance_period: string;
+  return_type: "gstr3b";
+  challan_reason: string;
+  payment_mode: string;
+  bank_code?: string;
+  sub_payment_mode?: string;
+  mobile_number: string;
+  address: string;
+  cgst_tax_amount: string;
+  igst_tax_amount: string;
+  sgst_tax_amount: string;
+  cess_tax_amount: string;
+};
+
+type ValidatePortalChallanResult = {
+  valid: boolean;
+  error_message: string;
+  provider_response: Record<string, unknown>;
+  computed_total_amount: string;
 };
 
 export function useReturnsQuery(filters: ReturnFilters) {
@@ -57,6 +82,68 @@ export function useReturnReadinessQuery(filters: ReturnFilters) {
         },
       });
       return unwrapApiData<ReturnReadinessPayload>(response);
+    },
+  });
+}
+
+export function usePortalFilingReadinessQuery(filters: ReturnFilters & { return_type?: string }) {
+  return useQuery({
+    queryKey: queryKeys.returns.portalFilingReadiness(filters),
+    enabled: Boolean(filters.workspace && filters.client && filters.gstin && filters.period && filters.return_type),
+    queryFn: async () => {
+      const response = await apiClient.get("/returns/portal-filing-readiness/", {
+        params: {
+          workspace: filters.workspace,
+          client: filters.client,
+          gstin: filters.gstin,
+          compliance_period: filters.period,
+          return_type: filters.return_type,
+        },
+      });
+      return unwrapApiData<PortalFilingReadinessPayload>(response);
+    },
+  });
+}
+
+export function usePortalChallanRequestsQuery(filters: ReturnFilters & { return_type?: string }) {
+  return useQuery({
+    queryKey: queryKeys.returns.portalChallanRequests(filters),
+    enabled: Boolean(filters.workspace && filters.client && filters.gstin && filters.period && filters.return_type),
+    queryFn: async () => {
+      const response = await apiClient.get("/returns/portal-challan-requests/", {
+        params: {
+          workspace: filters.workspace,
+          client: filters.client,
+          gstin: filters.gstin,
+          compliance_period: filters.period,
+          return_type: filters.return_type,
+        },
+      });
+      return unwrapApiData<PortalChallanRecord[]>(response);
+    },
+  });
+}
+
+export function useGeneratePortalChallanMutation(filtersToInvalidate?: ReturnFilters) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: GeneratePortalChallanPayload) => {
+      const response = await apiClient.post("/returns/generate-portal-challan/", payload);
+      return unwrapApiData<PortalChallanRecord>(response);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.returns.portalFilingReadiness(filtersToInvalidate) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.returns.portalChallanRequests(filtersToInvalidate) });
+    },
+  });
+}
+
+export function useValidatePortalChallanMutation() {
+  return useMutation({
+    mutationFn: async (payload: GeneratePortalChallanPayload) => {
+      const response = await apiClient.post("/returns/validate-portal-challan/", payload);
+      return unwrapApiData<ValidatePortalChallanResult>(response);
     },
   });
 }

@@ -1,0 +1,218 @@
+export const defaultSessionPayload = {
+  full_name: "Owner Accounts",
+  user: {
+    id: 1,
+    username: "owner-accounts",
+    email: "owner@example.com",
+    first_name: "Owner",
+    last_name: "Accounts",
+    full_name: "Owner Accounts",
+  },
+  organizations: [
+    {
+      id: "org-1",
+      name: "Acme Org",
+      code: "ACME-ORG",
+    },
+  ],
+  workspaces: [
+    {
+      id: "workspace-1",
+      name: "Primary Workspace",
+      code: "PRIMARY",
+      timezone: "Asia/Kolkata",
+      organization_id: "org-1",
+      organization_name: "Acme Org",
+      role: "owner",
+      permissions: ["manage_users", "view_client", "prepare_return", "run_reconciliation"],
+    },
+  ],
+  default_workspace: {
+    id: "workspace-1",
+    name: "Primary Workspace",
+    code: "PRIMARY",
+    timezone: "Asia/Kolkata",
+    organization_id: "org-1",
+    organization_name: "Acme Org",
+    role: "owner",
+    permissions: ["manage_users", "view_client", "prepare_return", "run_reconciliation"],
+  },
+  is_platform_admin: false,
+  permissions_summary: {
+    codes: ["manage_users", "view_client", "prepare_return", "run_reconciliation"],
+    total: 4,
+    memberships: [
+      {
+        workspace_id: "workspace-1",
+        workspace_name: "Primary Workspace",
+        organization_id: "org-1",
+        organization_name: "Acme Org",
+        role: "owner",
+        permissions: ["manage_users", "view_client", "prepare_return", "run_reconciliation"],
+      },
+    ],
+  },
+};
+
+export function createWorkspaceContextPayload() {
+  return {
+    workspace: {
+      id: "workspace-1",
+      organization: "org-1",
+      name: "Primary Workspace",
+      code: "PRIMARY",
+      timezone: "Asia/Kolkata",
+      is_active: true,
+    },
+    clients: [
+      {
+        id: "client-1",
+        workspace: "workspace-1",
+        legal_name: "Acme Client Private Limited",
+        trade_name: "Acme Client",
+        client_code: "ACME001",
+        pan: "ABCDE1234F",
+        email: "ops@acme.example.com",
+        is_active: true,
+      },
+    ],
+    gstins: [
+      {
+        id: "gstin-1",
+        client: "client-1",
+        gstin: "27ABCDE1234F1Z5",
+        registration_type: "regular",
+        state_code: "27",
+        is_active: true,
+      },
+    ],
+    periods: [
+      {
+        id: "period-1",
+        gstin: "gstin-1",
+        gstin_value: "27ABCDE1234F1Z5",
+        client_id: "client-1",
+        client_name: "Acme Client Private Limited",
+        period: "2026-05",
+        return_type: "GSTR-3B",
+        status: "open",
+        due_date: "2026-06-20",
+        is_locked: false,
+      },
+    ],
+  };
+}
+
+export function createImportBatchRecord(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "batch-1",
+    workspace: "workspace-1",
+    workspace_name: "Primary Workspace",
+    client: "client-1",
+    client_name: "Acme Client Private Limited",
+    gstin: "gstin-1",
+    gstin_value: "27ABCDE1234F1Z5",
+    import_template: null,
+    import_template_name: null,
+    compliance_period: "period-1",
+    compliance_period_label: "2026-05",
+    import_type: "purchase",
+    source_type: "csv",
+    file_name: "purchase_standard.csv",
+    source_metadata: {},
+    status: "processed",
+    total_rows: 24,
+    valid_rows: 24,
+    invalid_rows: 0,
+    processed_rows: 24,
+    error_summary: {
+      errors: 0,
+      warnings: 0,
+      by_field: {},
+      message: "All rows processed successfully.",
+    },
+    processed_at: "2026-06-05T10:30:00Z",
+    uploaded_by_name: "Owner Accounts",
+    transaction_count: 24,
+    correction_summary: null,
+    superseded_by: null,
+    supersedes_batch: null,
+    created_at: "2026-06-05T10:25:00Z",
+    updated_at: "2026-06-05T10:30:00Z",
+    ...overrides,
+  };
+}
+
+export function createReconciliationRunRecord(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "run-1",
+    workspace: "workspace-1",
+    workspace_name: "Primary Workspace",
+    client: "client-1",
+    client_name: "Acme Client Private Limited",
+    gstin: "gstin-1",
+    gstin_value: "27ABCDE1234F1Z5",
+    compliance_period: "period-1",
+    compliance_period_label: "2026-05",
+    run_type: "gstr_2b_purchase",
+    status: "completed",
+    notes: "",
+    matched_count: 24,
+    mismatch_count: 0,
+    partial_match_count: 0,
+    missing_in_books_count: 0,
+    missing_in_portal_count: 0,
+    duplicate_count: 0,
+    total_tax_difference: "0.00",
+    total_itc_at_risk: "0.00",
+    processed_at: "2026-06-05T11:05:00Z",
+    error_summary: {},
+    is_stale: false,
+    invalidated_at: null,
+    invalidated_by: null,
+    invalidated_by_name: null,
+    invalidation_reason: "",
+    created_at: "2026-06-05T11:00:00Z",
+    updated_at: "2026-06-05T11:05:00Z",
+    ...overrides,
+  };
+}
+
+export function createPreparedReturnRecord(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "return-1",
+    workspace: "workspace-1",
+    workspace_name: "Primary Workspace",
+    client: "client-1",
+    client_name: "Acme Client Private Limited",
+    gstin: "gstin-1",
+    gstin_value: "27ABCDE1234F1Z5",
+    compliance_period: "period-1",
+    compliance_period_label: "2026-05",
+    return_type: "gstr3b",
+    status: "draft",
+    summary_snapshot: {
+      outward_supplies: {
+        total_taxable_value: "850000.00",
+        total_tax_amount: "153000.00",
+      },
+      itc_summary: {
+        eligible_itc: "72000.00",
+        net_tax_payable: "81000.00",
+      },
+    },
+    prepared_by: 1,
+    prepared_by_name: "Owner Accounts",
+    approved_by: null,
+    approved_by_name: null,
+    filed_by: null,
+    filed_by_name: null,
+    filed_at: null,
+    arn: "",
+    is_blocked_by_stale_reconciliation: false,
+    blocking_reason: "",
+    created_at: "2026-06-05T11:15:00Z",
+    updated_at: "2026-06-05T11:15:00Z",
+    ...overrides,
+  };
+}

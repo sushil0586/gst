@@ -120,7 +120,12 @@ export default function OnboardingPage() {
     isLoading,
   } = useWorkspaceContext();
   const [step, setStep] = useState(0);
-  const [showFreshWorkspaceBanner, setShowFreshWorkspaceBanner] = useState(false);
+  const [showFreshWorkspaceBanner, setShowFreshWorkspaceBanner] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    return new URLSearchParams(window.location.search).get("setup") === "workspace-created";
+  });
 
   const createOrganizationMutation = useCreateOrganizationMutation();
   const createWorkspaceMutation = useCreateWorkspaceMutation();
@@ -195,9 +200,9 @@ export default function OnboardingPage() {
     control: periodForm.control,
     name: "status",
   });
+  const currentStep = step === 0 && workspaces.length === 1 && selectedWorkspaceId ? 1 : step;
   const isWorkspaceCreated = workspaces.length > 0;
-  const isFoundationSetup = step >= 1 || isWorkspaceCreated;
-  const onboardingHeading = isFoundationSetup ? "First client setup" : "Workspace onboarding";
+  const isFoundationSetup = currentStep >= 1 || isWorkspaceCreated;
   const onboardingDescription = isFoundationSetup
     ? "Your CA workspace is ready. Now set up the first client, GSTIN, and period that monthly work will run on."
     : "Create the minimum operating setup once so every future module has a stable context.";
@@ -213,22 +218,14 @@ export default function OnboardingPage() {
   }, [periodForm, selectedGstinId]);
 
   useEffect(() => {
-    if (step === 0 && workspaces.length === 1 && selectedWorkspaceId) {
-      setStep(1);
-    }
-  }, [selectedWorkspaceId, step, workspaces.length]);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const isFreshWorkspaceSetup = params.get("setup") === "workspace-created";
-    if (!isFreshWorkspaceSetup) {
+    if (!showFreshWorkspaceBanner) {
       return;
     }
-    setShowFreshWorkspaceBanner(true);
+    const params = new URLSearchParams(window.location.search);
     params.delete("setup");
     const search = params.toString();
     window.history.replaceState({}, "", `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`);
-  }, []);
+  }, [showFreshWorkspaceBanner]);
 
   useEffect(() => {
     if (!clientLegalName?.trim()) {
@@ -404,10 +401,10 @@ export default function OnboardingPage() {
               <div className="space-y-4">
                 {steps.map((label, index) => (
                   <div key={label} className="flex items-center gap-3">
-                    <div className={`flex size-8 items-center justify-center rounded-full text-sm font-semibold ${index < step ? "bg-emerald-500 text-white" : index === step ? "bg-indigo-500 text-white" : "bg-white/10 text-slate-300"}`}>
-                      {index < step ? <CheckCircle2 className="size-4" /> : index + 1}
+                    <div className={`flex size-8 items-center justify-center rounded-full text-sm font-semibold ${index < currentStep ? "bg-emerald-500 text-white" : index === currentStep ? "bg-indigo-500 text-white" : "bg-white/10 text-slate-300"}`}>
+                      {index < currentStep ? <CheckCircle2 className="size-4" /> : index + 1}
                     </div>
-                    <p className={`text-sm ${index <= step ? "text-white" : "text-slate-400"}`}>{label}</p>
+                    <p className={`text-sm ${index <= currentStep ? "text-white" : "text-slate-400"}`}>{label}</p>
                   </div>
                 ))}
               </div>
@@ -421,10 +418,10 @@ export default function OnboardingPage() {
           </Card>
 
           <Card className="min-h-[560px] rounded-3xl border-slate-200/80 bg-white/95 py-0 shadow-[0_32px_80px_-36px_rgba(15,23,42,0.28)]">
-              {step === 0 ? (
+              {currentStep === 0 ? (
                 <form onSubmit={submitWorkspaceStep}>
                   <StepShell
-                    title={steps[step]}
+                    title={steps[currentStep]}
                     description="Create the minimum operating setup needed to reach the monthly workspace."
                     footer={
                       <Button type="submit" className="h-11 min-w-36">
@@ -490,10 +487,10 @@ export default function OnboardingPage() {
                 </form>
               ) : null}
 
-              {step === 1 ? (
+              {currentStep === 1 ? (
                 <form onSubmit={submitClientStep}>
                   <StepShell
-                    title={steps[step]}
+                    title={steps[currentStep]}
                     description="Create the first client for this workspace. You can fetch taxpayer details first, or enter the basics manually and continue."
                     footer={
                       <Button type="submit" className="h-11 min-w-36">
@@ -592,10 +589,10 @@ export default function OnboardingPage() {
                 </form>
               ) : null}
 
-              {step === 2 ? (
+              {currentStep === 2 ? (
                 <form onSubmit={submitGstinStep}>
                   <StepShell
-                    title={steps[step]}
+                    title={steps[currentStep]}
                     description="Add the first GSTIN for this client. This can be completed now or finished later from the workspace registers."
                     footer={
                       <div className="flex w-full flex-col-reverse gap-3 sm:flex-row sm:justify-end">
@@ -664,10 +661,10 @@ export default function OnboardingPage() {
                 </form>
               ) : null}
 
-              {step === 3 ? (
+              {currentStep === 3 ? (
                 <form onSubmit={submitPeriodStep}>
                   <StepShell
-                    title={steps[step]}
+                    title={steps[currentStep]}
                     description="Create the first working period for this client. You can do it now or continue to the dashboard and create periods later."
                     footer={
                       <div className="flex w-full flex-col-reverse gap-3 sm:flex-row sm:justify-end">
@@ -726,9 +723,9 @@ export default function OnboardingPage() {
                 </form>
               ) : null}
 
-              {step === 4 ? (
+              {currentStep === 4 ? (
                 <StepShell
-                  title={steps[step]}
+                  title={steps[currentStep]}
                   description="The monthly workspace foundation is complete and ready for actual compliance operations."
                   footer={
                     <Button className="h-11 min-w-36" onClick={() => router.push("/dashboard")}>

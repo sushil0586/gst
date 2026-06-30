@@ -6,6 +6,8 @@ import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppTopbar } from "@/components/layout/app-topbar";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { PageContainer } from "@/components/common/page-container";
+import { useSession } from "@/lib/query/session-provider";
+import { useWorkspaceContext } from "@/store/workspace-context";
 import { cn } from "@/lib/utils";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
@@ -18,6 +20,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     return window.localStorage.getItem("gst-sidebar-pinned") === "true";
   });
   const [sidebarHovered, setSidebarHovered] = useState(false);
+  const { session, user } = useSession();
+  const { selectedWorkspace } = useWorkspaceContext();
 
   const toggleSidebar = () => {
     setSidebarPinned((current) => {
@@ -27,6 +31,8 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     });
   };
   const desktopSidebarExpanded = sidebarPinned || sidebarHovered;
+  const footerWorkspace = selectedWorkspace?.name ?? session?.default_workspace?.name ?? "Workspace";
+  const footerIdentity = user?.email ?? session?.default_workspace?.organization_name ?? "GST Compliance Workspace";
 
   return (
     <div className="app-shell-bg relative min-h-screen">
@@ -71,11 +77,14 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           </main>
           <footer className="px-4 pb-6 lg:px-8 xl:px-10">
             <div className="flex flex-col gap-3 rounded-[24px] border border-white/75 bg-white/70 px-5 py-4 text-xs text-slate-500 shadow-[0_16px_34px_-28px_rgba(15,23,42,0.12)] backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
-              <p>© 2026 GST Compliance Workspace. All rights reserved.</p>
+              <div className="space-y-1">
+                <p className="text-slate-700">Connected workspace: {footerWorkspace}</p>
+                <p>{footerIdentity}</p>
+              </div>
               <div className="flex items-center gap-2">
                 <span>v2.0.0</span>
                 <span className="size-1 rounded-full bg-slate-300" />
-                <span>Operations Console</span>
+                <span>Secure operations console</span>
               </div>
             </div>
           </footer>

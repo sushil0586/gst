@@ -34,7 +34,7 @@ const settingsSections = [
     title: "Change password",
     description: "Update your own workspace password without leaving the product.",
     href: "/settings/change-password",
-    action: "Open password",
+    action: "Change password",
   },
 ];
 

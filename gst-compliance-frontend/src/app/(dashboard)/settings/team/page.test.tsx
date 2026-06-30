@@ -143,4 +143,20 @@ describe("TeamManagementPage", () => {
     });
     expect(toast.success).toHaveBeenCalledWith("Workspace member updated.");
   });
+
+  it("requires confirmation before deactivating a member", async () => {
+    deactivateMutateAsync.mockResolvedValueOnce(undefined);
+    const user = userEvent.setup();
+
+    setupTeamPage();
+
+    await user.click(screen.getByRole("button", { name: "Deactivate" }));
+    expect(screen.getByRole("heading", { name: "Deactivate workspace member" })).toBeVisible();
+    expect(deactivateMutateAsync).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Confirm deactivation" }));
+
+    expect(deactivateMutateAsync).toHaveBeenCalledWith("membership-1");
+    expect(toast.success).toHaveBeenCalledWith("Workspace member deactivated.");
+  });
 });

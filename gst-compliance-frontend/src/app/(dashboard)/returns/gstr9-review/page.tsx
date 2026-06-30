@@ -222,7 +222,7 @@ export default function Gstr9ReviewPage() {
       <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <SectionCard
           title={`${selectedClient?.legal_name ?? activeReturn.client_name ?? "Client"} · FY ${String(summary.financial_year ?? "Annual view")}`}
-          description="This workspace turns the first GSTR-9 annual snapshot into an in-app review surface so annual completeness is visible before exports or later audit-style work."
+          description="Use this annual review workspace to confirm source-month coverage, annual totals, and warning posture before export, approval, and audit handoff."
           variant="soft"
           action={<StatusBadge label={activeReturn.status.replace(/_/g, " ")} variant={getStatusVariant(activeReturn.status)} />}
         >
@@ -234,14 +234,14 @@ export default function Gstr9ReviewPage() {
           </div>
         </SectionCard>
 
-        <SectionCard title="Annual review posture" description="Use this as the working surface for annual completeness before deeper GSTR-9 and GSTR-9C build-out." variant="soft">
+        <SectionCard title="Annual review posture" description="Use this as the working surface for annual completeness before filing support or audit follow-through." variant="soft">
           <div className="space-y-3">
             <div className="rounded-2xl bg-slate-50 px-4 py-4 text-sm text-slate-700">
               <div className="flex items-start gap-3">
                 <Sparkles className="mt-0.5 size-4 shrink-0 text-indigo-600" />
                 <div>
-                  <p className="font-semibold text-slate-900">Annual rollup first</p>
-                  <p className="mt-1 leading-6">This first version focuses on monthly source coverage, annual totals, and annual warnings before we add deeper table-by-table GSTR-9 sections.</p>
+                  <p className="font-semibold text-slate-900">Annual rollup clarity</p>
+                  <p className="mt-1 leading-6">This review keeps monthly source coverage, annual totals, and annual warnings in one place so the filing team can confirm completeness quickly.</p>
                 </div>
               </div>
             </div>
@@ -287,7 +287,7 @@ export default function Gstr9ReviewPage() {
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
-          <SectionCard title="Prepared GSTR-9 snapshot" description="Annual summary from the first GSTR-9 rollup contract.">
+          <SectionCard title="Prepared GSTR-9 snapshot" description="Annual summary generated from the current GSTR-9 rollup.">
             <SummaryGrid
               entries={[
                 { label: "Financial year", value: String(summary.financial_year ?? "—") },

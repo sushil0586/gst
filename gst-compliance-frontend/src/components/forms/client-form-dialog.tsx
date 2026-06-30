@@ -133,6 +133,7 @@ function ClientFormDialogContent({
     defaultValues: initialFormValues,
   });
   const workspaceId = useWatch({ control: form.control, name: "workspace" });
+  const registrationType = useWatch({ control: form.control, name: "registration_type" });
   const { setSelectedClientId, setSelectedGstinId } = useWorkspaceContext();
   const [taxpayerLookupGstin, setTaxpayerLookupGstin] = useState("");
   const [taxpayerLookupResult, setTaxpayerLookupResult] = useState<GSTINTaxpayerSearchResult | null>(null);
@@ -383,7 +384,7 @@ function ClientFormDialogContent({
                 <div className="space-y-2">
                   <Label>Registration type</Label>
                   <Select
-                    value={form.watch("registration_type") || "regular"}
+                    value={registrationType || "regular"}
                     onValueChange={(value) => form.setValue("registration_type", value, { shouldDirty: true, shouldValidate: true })}
                   >
                     <SelectTrigger className="h-10 w-full">

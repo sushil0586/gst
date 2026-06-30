@@ -104,6 +104,7 @@ function ClientContextPicker({
         <Button
           type="button"
           variant="outline"
+          data-testid="client-selector"
           className="topbar-select w-full min-w-0 justify-between gap-2 rounded-full border-slate-200/80 px-3 font-normal text-slate-700"
           disabled={disabled}
         >
@@ -217,7 +218,7 @@ function CompactContextSelectors({
             setSelectedWorkspaceId(value);
           }}
         >
-          <SelectTrigger className="topbar-select w-full min-w-0 xl:w-[8.5rem]">
+          <SelectTrigger data-testid="workspace-selector" className="topbar-select w-full min-w-0 xl:w-[8.5rem]">
             <SelectValue placeholder="Workspace" />
           </SelectTrigger>
           <SelectContent>
@@ -248,7 +249,7 @@ function CompactContextSelectors({
             setSelectedGstinId(value);
           }}
         >
-          <SelectTrigger className="topbar-select w-full min-w-0 xl:w-[10.5rem]">
+          <SelectTrigger data-testid="gstin-selector" className="topbar-select w-full min-w-0 xl:w-[10.5rem]">
             <SelectValue placeholder="GSTIN" />
           </SelectTrigger>
           <SelectContent>
@@ -269,7 +270,7 @@ function CompactContextSelectors({
             setSelectedPeriodId(value);
           }}
         >
-          <SelectTrigger className="topbar-select w-full min-w-0 xl:w-[7.5rem]">
+          <SelectTrigger data-testid="period-selector" className="topbar-select w-full min-w-0 xl:w-[7.5rem]">
             <SelectValue placeholder="Period" />
           </SelectTrigger>
           <SelectContent>
@@ -339,7 +340,7 @@ export function AppTopbar({ onMenuClick }: { onMenuClick: () => void }) {
           <div className="topbar-accent pointer-events-none absolute inset-x-5 top-0 h-px opacity-90 lg:inset-x-6" />
           <div className="flex min-h-11 flex-wrap items-center justify-between gap-3">
             <div className="flex min-w-0 flex-1 items-center gap-3">
-              <Button variant="outline" size="icon-sm" className="bg-white lg:hidden" onClick={onMenuClick}>
+              <Button variant="outline" size="icon-sm" className="bg-white lg:hidden" onClick={onMenuClick} aria-label="Open navigation" data-testid="mobile-nav-trigger">
                 <Menu className="size-4" />
               </Button>
 

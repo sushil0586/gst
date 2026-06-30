@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from apps.returns.models import ReturnPreparation
+from apps.returns.models import PortalChallanRequest, ReturnPreparation
 
 
 class ReturnPreparationSerializer(serializers.ModelSerializer):
@@ -82,3 +82,76 @@ class ReturnReadinessRequestSerializer(serializers.Serializer):
     client = serializers.UUIDField()
     gstin = serializers.UUIDField()
     compliance_period = serializers.UUIDField()
+
+
+class PortalFilingReadinessRequestSerializer(serializers.Serializer):
+    workspace = serializers.UUIDField()
+    client = serializers.UUIDField()
+    gstin = serializers.UUIDField()
+    compliance_period = serializers.UUIDField()
+    return_type = serializers.ChoiceField(choices=ReturnPreparation.ReturnType.choices, default=ReturnPreparation.ReturnType.GSTR3B)
+
+
+class PortalChallanRequestSerializer(serializers.Serializer):
+    workspace = serializers.UUIDField()
+    client = serializers.UUIDField()
+    gstin = serializers.UUIDField()
+    compliance_period = serializers.UUIDField()
+    return_type = serializers.ChoiceField(choices=ReturnPreparation.ReturnType.choices, default=ReturnPreparation.ReturnType.GSTR3B)
+    challan_reason = serializers.CharField(max_length=32)
+    payment_mode = serializers.CharField(max_length=16)
+    bank_code = serializers.CharField(required=False, allow_blank=True, max_length=16)
+    sub_payment_mode = serializers.CharField(required=False, allow_blank=True, max_length=16)
+    mobile_number = serializers.CharField(max_length=32)
+    address = serializers.CharField(max_length=255)
+    cgst_tax_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+    igst_tax_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+    sgst_tax_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+    cess_tax_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+
+
+class PortalChallanListRequestSerializer(serializers.Serializer):
+    workspace = serializers.UUIDField()
+    client = serializers.UUIDField()
+    gstin = serializers.UUIDField()
+    compliance_period = serializers.UUIDField()
+    return_type = serializers.ChoiceField(choices=ReturnPreparation.ReturnType.choices, default=ReturnPreparation.ReturnType.GSTR3B)
+
+
+class PortalChallanRecordSerializer(serializers.ModelSerializer):
+    workspace = serializers.UUIDField(source="compliance_period.gstin.client.workspace_id", read_only=True)
+    client = serializers.UUIDField(source="compliance_period.gstin.client_id", read_only=True)
+    gstin = serializers.UUIDField(source="compliance_period.gstin_id", read_only=True)
+    gstin_value = serializers.CharField(source="compliance_period.gstin.gstin", read_only=True)
+    compliance_period_label = serializers.CharField(source="compliance_period.period", read_only=True)
+
+    class Meta:
+        model = PortalChallanRequest
+        fields = [
+            "id",
+            "workspace",
+            "client",
+            "gstin",
+            "gstin_value",
+            "compliance_period",
+            "compliance_period_label",
+            "provider",
+            "return_type",
+            "status",
+            "cpin",
+            "challan_reason",
+            "challan_period",
+            "payment_mode",
+            "bank_code",
+            "sub_payment_mode",
+            "taxpayer_name",
+            "address",
+            "mobile_number",
+            "request_payload",
+            "response_payload",
+            "total_amount",
+            "error_message",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields

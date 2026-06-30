@@ -420,7 +420,7 @@ async function mockMonthlyWorkflowApis(page: import("@playwright/test").Page) {
     await route.fulfill(paginatedResponse([]));
   });
 
-  await page.route("**/api/backend/imports/batches/fetch-gstr2b/", async (route) => {
+  await page.route(/\/api\/backend\/imports\/batches\/fetch-gstr2b\/?$/, async (route) => {
     fetch2bSeen = true;
     gstr2bTransactionsCount = 18;
     const batch = createImportBatchRecord({
@@ -437,7 +437,7 @@ async function mockMonthlyWorkflowApis(page: import("@playwright/test").Page) {
     await route.fulfill(successResponse(batch));
   });
 
-  await page.route("**/api/backend/imports/batches/", async (route) => {
+  await page.route(/\/api\/backend\/imports\/batches\/?(?:\?.*)?$/, async (route) => {
     if (route.request().method() === "GET") {
       await route.fulfill(paginatedResponse(importBatches));
       return;
@@ -449,11 +449,11 @@ async function mockMonthlyWorkflowApis(page: import("@playwright/test").Page) {
     await route.fulfill(successResponse(batch));
   });
 
-  await page.route("**/api/backend/imports/batches/*/errors/", async (route) => {
+  await page.route(/\/api\/backend\/imports\/batches\/batch-[^/?]+\/errors\/?$/, async (route) => {
     await route.fulfill(paginatedResponse([]));
   });
 
-  await page.route("**/api/backend/imports/batches/*/correction-policy/", async (route) => {
+  await page.route(/\/api\/backend\/imports\/batches\/batch-[^/?]+\/correction-policy\/?$/, async (route) => {
     await route.fulfill(successResponse({
       lifecycle_state: "processed",
       can_edit_rows: true,
@@ -475,7 +475,7 @@ async function mockMonthlyWorkflowApis(page: import("@playwright/test").Page) {
     }));
   });
 
-  await page.route("**/api/backend/imports/batches/*/impact-summary/", async (route) => {
+  await page.route(/\/api\/backend\/imports\/batches\/batch-[^/?]+\/impact-summary\/?$/, async (route) => {
     await route.fulfill(successResponse({
       summary_title: "No downstream impact",
       summary_message: "This batch is ready for downstream workflow.",
@@ -490,7 +490,7 @@ async function mockMonthlyWorkflowApis(page: import("@playwright/test").Page) {
     }));
   });
 
-  await page.route("**/api/backend/imports/batches/*", async (route) => {
+  await page.route(/\/api\/backend\/imports\/batches\/batch-[^/?]+\/?$/, async (route) => {
     const batchId = route.request().url().split("/imports/batches/")[1]?.replace(/\/$/, "");
     const batch = importBatches.find((entry) => entry.id === batchId) ?? createImportBatchRecord();
     await route.fulfill(successResponse(batch));
@@ -540,7 +540,7 @@ async function mockMonthlyWorkflowApis(page: import("@playwright/test").Page) {
     await route.fulfill(paginatedResponse(items, count));
   });
 
-  await page.route("**/api/backend/reconciliation/runs/", async (route) => {
+  await page.route(/\/api\/backend\/reconciliation\/runs\/?(?:\?.*)?$/, async (route) => {
     if (route.request().method() === "GET") {
       await route.fulfill(paginatedResponse(reconciliationRuns));
       return;
@@ -553,17 +553,28 @@ async function mockMonthlyWorkflowApis(page: import("@playwright/test").Page) {
     await route.fulfill(successResponse(run));
   });
 
-  await page.route("**/api/backend/reconciliation/runs/*/items/**", async (route) => {
+  await page.route(/\/api\/backend\/reconciliation\/runs\/run-[^/?]+\/items\/?(?:\?.*)?$/, async (route) => {
     await route.fulfill(paginatedResponse([]));
   });
 
-  await page.route("**/api/backend/reconciliation/runs/*", async (route) => {
+  await page.route(/\/api\/backend\/reconciliation\/runs\/run-[^/?]+\/?$/, async (route) => {
     await route.fulfill(successResponse(reconciliationRuns[0] ?? createReconciliationRunRecord()));
   });
 
-  await page.route("**/api/backend/returns/readiness/**", async (route) => {
+  await page.route(/\/api\/backend\/returns\/readiness\/?(?:\?.*)?$/, async (route) => {
     const activePreparedReturn =
       preparedReturns.find((entry) => entry.return_type === "gstr3b") ?? null;
+    const readyState = {
+      status: "ready",
+      can_prepare: true,
+      can_export: true,
+      warning_count: 0,
+      error_count: 0,
+      issues: [],
+      prepared_return: null,
+      metrics: {},
+    };
+
     await route.fulfill(successResponse({
       context: {
         workspace: "workspace-1",
@@ -576,25 +587,10 @@ async function mockMonthlyWorkflowApis(page: import("@playwright/test").Page) {
         period_label: "2026-05",
         is_locked: false,
       },
-      gstr1: {
-        return_type: "gstr1",
-        status: "ready",
-        can_prepare: true,
-        can_export: true,
-        warning_count: 0,
-        error_count: 0,
-        issues: [],
-        prepared_return: null,
-        metrics: {},
-      },
+      gstr1: { return_type: "gstr1", ...readyState },
       gstr3b: {
         return_type: "gstr3b",
-        status: "ready",
-        can_prepare: true,
-        can_export: true,
-        warning_count: 0,
-        error_count: 0,
-        issues: [],
+        ...readyState,
         prepared_return: activePreparedReturn
           ? {
               id: String(activePreparedReturn.id),
@@ -602,13 +598,61 @@ async function mockMonthlyWorkflowApis(page: import("@playwright/test").Page) {
               updated_at: String(activePreparedReturn.updated_at),
             }
           : null,
-        metrics: {},
       },
+      gstr7: { return_type: "gstr7", ...readyState },
+      gstr9: { return_type: "gstr9", ...readyState },
+      gstr9c: { return_type: "gstr9c", ...readyState },
       overall_status: "ready",
     }));
   });
 
-  await page.route("**/api/backend/returns/prepare/", async (route) => {
+  await page.route("**/api/backend/returns/portal-filing-readiness/**", async (route) => {
+    await route.fulfill(successResponse({
+      computed_summary: {
+        net_tax_payable: "81000.00",
+        eligible_itc: "72000.00",
+      },
+      auth_session: {
+        available: false,
+        freshness_summary: { is_stale: false, stale_reason: "" },
+      },
+      portal_sync: {
+        can_fetch: false,
+        enabled: true,
+        payment_reads_enabled: false,
+        blockers: [],
+        warnings: [],
+        transport_error: "",
+      },
+      provider_evidence: {
+        source: "unavailable",
+        fetched_at: null,
+        snapshot_id: null,
+        cash_ledger_summary: {
+          opening_total: "0.00",
+          closing_total: "0.00",
+          transaction_count: 0,
+          from_date: "",
+          to_date: "",
+          closing_breakdown: { cgst: "0.00", sgst: "0.00", igst: "0.00", cess: "0.00" },
+        },
+        itc_ledger_summary: { opening_total: "0.00", closing_total: "0.00", transaction_count: 0 },
+        liability_ledger_summary: { opening_total: "0.00", closing_total: "0.00", transaction_count: 0 },
+        cash_ledger_response: null,
+        itc_ledger_response: null,
+        liability_ledger_response: null,
+        challan_history_response: null,
+        challan_summary_response: null,
+        challan_reference: "",
+      },
+    }));
+  });
+
+  await page.route("**/api/backend/returns/portal-challan-requests/**", async (route) => {
+    await route.fulfill(successResponse([]));
+  });
+
+  await page.route(/\/api\/backend\/returns\/prepare\/?$/, async (route) => {
     prepareReturnSeen = true;
     const payload = route.request().postDataJSON() as Record<string, string>;
     expect(payload.return_type).toBe("gstr3b");
@@ -617,11 +661,11 @@ async function mockMonthlyWorkflowApis(page: import("@playwright/test").Page) {
     await route.fulfill(successResponse(preparedReturn));
   });
 
-  await page.route("**/api/backend/returns/", async (route) => {
+  await page.route(/\/api\/backend\/returns\/?(?:\?.*)?$/, async (route) => {
     await route.fulfill(paginatedResponse(preparedReturns));
   });
 
-  await page.route("**/api/backend/returns/*", async (route) => {
+  await page.route(/\/api\/backend\/returns\/return-[^/?]+\/?$/, async (route) => {
     await route.fulfill(successResponse(preparedReturns[0] ?? createPreparedReturnRecord()));
   });
 
@@ -633,8 +677,40 @@ async function mockMonthlyWorkflowApis(page: import("@playwright/test").Page) {
     await route.fulfill(paginatedResponse([]));
   });
 
-  await page.route("**/api/backend/provider-auth-sessions/**", async (route) => {
-    await route.fulfill(paginatedResponse([]));
+  await page.route(/\/api\/backend\/provider-auth-sessions\/?(?:\?.*)?$/, async (route) => {
+    await route.fulfill(paginatedResponse([{
+      id: "provider-session-1",
+      workspace: "workspace-1",
+      workspace_name: "Primary Workspace",
+      client: "client-1",
+      client_name: "Acme Client Private Limited",
+      gstin: "gstin-1",
+      gstin_value: "27ABCDE1234F1Z5",
+      provider: "whitebooks",
+      email: "ops@acme.example.com",
+      txn: "txn-ready-1",
+      status: "session_active",
+      otp_request_payload: {},
+      auth_token_payload: {},
+      session_metadata: {},
+      freshness_summary: {
+        max_age_minutes: 360,
+        verified_at: "2026-06-05T11:10:00Z",
+        expires_at: "2026-06-05T17:10:00Z",
+        is_stale: false,
+        stale_reason: "",
+      },
+      error_summary: {},
+      response_contract_confirmed: true,
+      last_requested_at: "2026-06-05T11:05:00Z",
+      verified_at: "2026-06-05T11:10:00Z",
+      initiated_by: 1,
+      initiated_by_name: "Owner Accounts",
+      verified_by: 1,
+      verified_by_name: "Owner Accounts",
+      created_at: "2026-06-05T11:05:00Z",
+      updated_at: "2026-06-05T11:10:00Z",
+    }]));
   });
 
   return {
@@ -826,7 +902,7 @@ test("settings page opens the change-password workspace", async ({ page }) => {
   await mockAuthenticatedShell(page);
   await page.goto("/settings");
   await expect(page.getByRole("main").getByRole("heading", { name: "Settings" })).toBeVisible();
-  const changePasswordLink = page.getByRole("link", { name: "Open password" });
+  const changePasswordLink = page.getByRole("link", { name: "Change password" });
   await expect(changePasswordLink).toHaveAttribute("href", "/settings/change-password");
   await page.goto("/settings/change-password");
   await expect(page).toHaveURL(/\/settings\/change-password$/);
@@ -1175,7 +1251,7 @@ test("monthly workflow opens reconciliation, refreshes 2B, and prepares a return
   await test.step("prepare the return after reconciliation is complete", async () => {
     await page.goto("/returns");
     await expect(page).toHaveURL(/\/returns$/);
-    await expect(page.getByRole("main").getByRole("heading", { name: "Returns" })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("heading", { name: "Returns", exact: true })).toBeVisible();
 
     await page.getByRole("button", { name: "Prepare GSTR-3B" }).click();
     await expect(page.getByText("GSTR3B draft prepared.")).toBeVisible();

@@ -41,12 +41,16 @@ import {
 } from "@/features/filings";
 import { useGstTransactionsQuery } from "@/features/imports";
 import {
+  useGeneratePortalChallanMutation,
   useApproveReturnMutation,
   useMarkFiledMutation,
   usePrepareReturnMutation,
+  usePortalChallanRequestsQuery,
+  usePortalFilingReadinessQuery,
   useReturnReadinessQuery,
   useReturnQuery,
   useReturnsQuery,
+  useValidatePortalChallanMutation,
 } from "@/features/returns";
 import { downloadFile } from "@/lib/api/download";
 import { useReconciliationRunsQuery } from "@/features/reconciliation";
@@ -96,6 +100,14 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function getRecordString(record: Record<string, unknown> | null | undefined, key: string) {
   const value = record?.[key];
   return typeof value === "string" ? value : "";
+}
+
+function formatJsonPayload(value: unknown) {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return "";
+  }
 }
 
 function getProviderStage(attempt?: ReturnFilingAttemptRecord | null): WhiteBooksProviderStage {
@@ -575,9 +587,22 @@ export default function ReturnsPage() {
   const [manualSelectedReturnId, setManualSelectedReturnId] = useState<string | null>(null);
   const [dismissedQueryReturnId, setDismissedQueryReturnId] = useState<string | null>(null);
   const [isMarkFiledOpen, setIsMarkFiledOpen] = useState(false);
+  const [isGenerateChallanOpen, setIsGenerateChallanOpen] = useState(false);
+  const [isPortalLedgerOpen, setIsPortalLedgerOpen] = useState(false);
   const [arn, setArn] = useState("");
   const [whiteBooksOtp, setWhiteBooksOtp] = useState("");
   const [whiteBooksTxn, setWhiteBooksTxn] = useState("");
+  const [challanReason, setChallanReason] = useState("");
+  const [challanPaymentMode, setChallanPaymentMode] = useState("OTC");
+  const [challanBankCode, setChallanBankCode] = useState("ICIC");
+  const [challanSubPaymentMode, setChallanSubPaymentMode] = useState("CQ");
+  const [challanMobileNumber, setChallanMobileNumber] = useState("");
+  const [challanAddress, setChallanAddress] = useState("");
+  const [challanCgstAmount, setChallanCgstAmount] = useState("0.00");
+  const [challanIgstAmount, setChallanIgstAmount] = useState("0.00");
+  const [challanSgstAmount, setChallanSgstAmount] = useState("0.00");
+  const [challanCessAmount, setChallanCessAmount] = useState("0.00");
+  const [challanValidationFeedback, setChallanValidationFeedback] = useState<{ valid: boolean; message: string } | null>(null);
   const [filingActionFeedback, setFilingActionFeedback] = useState<{ tone: "warning" | "danger" | "success"; message: string } | null>(null);
   const queryWorkspaceId = searchParams.get("workspace");
   const queryClientId = searchParams.get("client");
@@ -651,6 +676,19 @@ export default function ReturnsPage() {
   const selectedReturnId = manualSelectedReturnId ?? querySelectedReturnId;
   const returnQuery = useReturnQuery(selectedReturnId ?? undefined);
   const readinessQuery = useReturnReadinessQuery(filters);
+  const portalFilingReadinessQuery = usePortalFilingReadinessQuery({
+    ...filters,
+    return_type: "gstr3b",
+  });
+  const portalChallanRequestsQuery = usePortalChallanRequestsQuery({
+    ...filters,
+    return_type: "gstr3b",
+  });
+  const generatePortalChallanMutation = useGeneratePortalChallanMutation({
+    ...filters,
+    return_type: "gstr3b",
+  });
+  const validatePortalChallanMutation = useValidatePortalChallanMutation();
   const reconciliationRunsQuery = useReconciliationRunsQuery(reconciliationFilters);
   const salesTransactionsQuery = useGstTransactionsQuery({
     client: selectedClientId ?? undefined,
@@ -781,6 +819,12 @@ export default function ReturnsPage() {
   const totalPeriodExceptionCount = salesPeriodExceptionCount + purchasePeriodExceptionCount;
   const readiness = readinessQuery.data;
   const activeFilingProviderStage = getProviderStage(activeFiling?.latest_attempt);
+  const challanTotalAmount = (
+    Number(challanCgstAmount || 0) +
+    Number(challanIgstAmount || 0) +
+    Number(challanSgstAmount || 0) +
+    Number(challanCessAmount || 0)
+  ).toFixed(2);
   const latestProviderMessage = getProviderMessage(activeFiling?.latest_attempt);
   const linkedAuthSessionId = getLinkedAuthSessionId(activeFiling?.latest_attempt);
   const latestSavedProviderResponse = getSavedProviderResponse(activeFiling?.latest_attempt);
@@ -1128,6 +1172,82 @@ export default function ReturnsPage() {
       toast.success("Return marked filed.");
       setIsMarkFiledOpen(false);
       setArn("");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
+  };
+
+  const handleGeneratePortalChallan = async () => {
+    if (!selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId) {
+      toast.error("Select a full return context before generating a portal challan.");
+      return;
+    }
+    if (!challanReason.trim()) {
+      toast.error("Enter the WhiteBooks challan reason code before generating a portal challan.");
+      return;
+    }
+    try {
+      const result = await generatePortalChallanMutation.mutateAsync({
+        workspace: selectedWorkspaceId,
+        client: selectedClientId,
+        gstin: selectedGstinId,
+        compliance_period: selectedPeriodId,
+        return_type: "gstr3b",
+        challan_reason: challanReason,
+        payment_mode: challanPaymentMode,
+        bank_code: challanBankCode,
+        sub_payment_mode: challanSubPaymentMode,
+        mobile_number: challanMobileNumber,
+        address: challanAddress,
+        cgst_tax_amount: challanCgstAmount,
+        igst_tax_amount: challanIgstAmount,
+        sgst_tax_amount: challanSgstAmount,
+        cess_tax_amount: challanCessAmount,
+      });
+      toast.success(result.cpin ? `Portal challan generated. CPIN: ${result.cpin}` : "Portal challan generated.");
+      setChallanValidationFeedback(null);
+      setIsGenerateChallanOpen(false);
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
+  };
+
+  const handleValidatePortalChallan = async () => {
+    if (!selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId) {
+      toast.error("Select a full return context before validating a portal challan.");
+      return;
+    }
+    if (!challanReason.trim()) {
+      toast.error("Enter the WhiteBooks challan reason code before validating a portal challan.");
+      return;
+    }
+    try {
+      const result = await validatePortalChallanMutation.mutateAsync({
+        workspace: selectedWorkspaceId,
+        client: selectedClientId,
+        gstin: selectedGstinId,
+        compliance_period: selectedPeriodId,
+        return_type: "gstr3b",
+        challan_reason: challanReason,
+        payment_mode: challanPaymentMode,
+        bank_code: challanBankCode,
+        sub_payment_mode: challanSubPaymentMode,
+        mobile_number: challanMobileNumber,
+        address: challanAddress,
+        cgst_tax_amount: challanCgstAmount,
+        igst_tax_amount: challanIgstAmount,
+        sgst_tax_amount: challanSgstAmount,
+        cess_tax_amount: challanCessAmount,
+      });
+      setChallanValidationFeedback({
+        valid: result.valid,
+        message: result.valid ? "WhiteBooks challan validation succeeded for the current payload." : result.error_message || "WhiteBooks challan validation failed.",
+      });
+      if (result.valid) {
+        toast.success("Portal challan validation succeeded.");
+      } else {
+        toast.error(result.error_message || "Portal challan validation failed.");
+      }
     } catch (error) {
       toast.error(getErrorMessage(error));
     }
@@ -1821,6 +1941,293 @@ export default function ReturnsPage() {
         ) : null}
       </SectionCard>
 
+      <SectionCard
+        title="Portal filing readiness"
+        description="Use WhiteBooks ledger reads to compare computed GSTR-3B posture with live portal-readiness evidence."
+        variant="soft"
+      >
+        {!selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId ? (
+          <EmptyState title="Portal readiness needs a full context" description="Select workspace, client, GSTIN, and period to evaluate live ledger-backed filing readiness." />
+        ) : portalFilingReadinessQuery.isLoading ? (
+          <LoadingState message="Checking portal filing readiness..." />
+        ) : portalFilingReadinessQuery.isError ? (
+          <ErrorState title="We couldn’t load portal filing readiness" description={getErrorMessage(portalFilingReadinessQuery.error)} />
+        ) : portalFilingReadinessQuery.data ? (
+          <div className="space-y-4">
+            <div className="grid gap-4 xl:grid-cols-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-500">Computed net tax payable</p>
+                <p className="mt-2 text-lg font-semibold text-slate-900">{formatMoney(portalFilingReadinessQuery.data.computed_summary.net_tax_payable)}</p>
+                <p className="mt-1 text-sm text-slate-600">Latest prepared GSTR-3B output.</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-500">Computed eligible ITC</p>
+                <p className="mt-2 text-lg font-semibold text-slate-900">{formatMoney(portalFilingReadinessQuery.data.computed_summary.eligible_itc)}</p>
+                <p className="mt-1 text-sm text-slate-600">Claim-ready ITC from current reconciliation.</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-500">WhiteBooks session</p>
+                <p className="mt-2 text-lg font-semibold text-slate-900">
+                  {portalFilingReadinessQuery.data.auth_session.available ? "Available" : "Missing"}
+                </p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {portalFilingReadinessQuery.data.auth_session.freshness_summary.is_stale
+                    ? "Refresh or verify OTP before portal reads."
+                    : "Fresh enough for guarded ledger reads."}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-500">Portal fetch state</p>
+                <p className="mt-2 text-lg font-semibold text-slate-900">
+                  {portalFilingReadinessQuery.data.portal_sync.can_fetch ? "Ready" : "Blocked"}
+                </p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {portalFilingReadinessQuery.data.portal_sync.enabled
+                    ? "Ledger read feature is enabled."
+                    : "Ledger reads are feature-gated off."}
+                </p>
+                <p className="mt-2 text-xs text-slate-500">
+                  {portalFilingReadinessQuery.data.portal_sync.payment_reads_enabled
+                    ? "Challan read feature is enabled."
+                    : "Challan reads are feature-gated off."}
+                </p>
+              </div>
+            </div>
+
+            {portalFilingReadinessQuery.data.portal_sync.blockers.length > 0 ? (
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+                <p className="text-sm font-semibold text-rose-950">Portal fetch blockers</p>
+                <div className="mt-2 space-y-2">
+                  {portalFilingReadinessQuery.data.portal_sync.blockers.map((blocker: string) => (
+                    <p key={blocker} className="text-sm text-rose-800">{blocker}</p>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {portalFilingReadinessQuery.data.portal_sync.warnings.length > 0 ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <p className="text-sm font-semibold text-amber-950">Portal fetch warnings</p>
+                <div className="mt-2 space-y-2">
+                  {portalFilingReadinessQuery.data.portal_sync.warnings.map((warning: string) => (
+                    <p key={warning} className="text-sm text-amber-800">{warning}</p>
+                  ))}
+                  {portalFilingReadinessQuery.data.portal_sync.transport_error ? (
+                    <p className="text-sm text-amber-900">Transport detail: {portalFilingReadinessQuery.data.portal_sync.transport_error}</p>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="grid gap-4 xl:grid-cols-2">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="text-sm font-semibold text-slate-900">Balance evidence</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {portalFilingReadinessQuery.data.provider_evidence.source === "live_fetch"
+                    ? "WhiteBooks balance payload fetched successfully."
+                    : portalFilingReadinessQuery.data.provider_evidence.source === "saved_snapshot"
+                      ? "Showing the latest saved WhiteBooks balance snapshot."
+                      : "No portal balance payload captured yet."}
+                </p>
+                {portalFilingReadinessQuery.data.provider_evidence.fetched_at ? (
+                  <p className="mt-2 text-xs text-slate-500">
+                    {portalFilingReadinessQuery.data.provider_evidence.source === "live_fetch"
+                      ? "Captured from the latest live portal fetch"
+                      : "Showing the latest saved portal snapshot"}
+                    {" · "}
+                    {formatDateTime(portalFilingReadinessQuery.data.provider_evidence.fetched_at)}
+                  </p>
+                ) : null}
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="text-sm font-semibold text-slate-900">Tax payable evidence</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {portalFilingReadinessQuery.data.provider_evidence.source === "live_fetch"
+                    ? "WhiteBooks tax payable payload fetched successfully."
+                    : portalFilingReadinessQuery.data.provider_evidence.source === "saved_snapshot"
+                      ? "Showing the latest saved WhiteBooks tax payable snapshot."
+                      : "No portal tax payable payload captured yet."}
+                </p>
+                {portalFilingReadinessQuery.data.provider_evidence.snapshot_id ? (
+                  <p className="mt-2 text-xs text-slate-500">
+                    Snapshot ID: {portalFilingReadinessQuery.data.provider_evidence.snapshot_id}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-4">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="text-sm font-semibold text-slate-900">Cash ledger opening</p>
+                <p className="mt-2 text-lg font-semibold text-slate-900">
+                  {formatMoney(portalFilingReadinessQuery.data.provider_evidence.cash_ledger_summary?.opening_total ?? "0.00")}
+                </p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {portalFilingReadinessQuery.data.provider_evidence.cash_ledger_summary?.from_date
+                    ? `From ${portalFilingReadinessQuery.data.provider_evidence.cash_ledger_summary.from_date}`
+                    : "No cash ledger payload captured yet."}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="text-sm font-semibold text-slate-900">Cash ledger closing</p>
+                <p className="mt-2 text-lg font-semibold text-slate-900">
+                  {formatMoney(portalFilingReadinessQuery.data.provider_evidence.cash_ledger_summary?.closing_total ?? "0.00")}
+                </p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {portalFilingReadinessQuery.data.provider_evidence.cash_ledger_summary?.to_date
+                    ? `To ${portalFilingReadinessQuery.data.provider_evidence.cash_ledger_summary.to_date}`
+                    : "Waiting for cash ledger evidence."}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="text-sm font-semibold text-slate-900">Cash ledger transactions</p>
+                <p className="mt-2 text-lg font-semibold text-slate-900">
+                  {portalFilingReadinessQuery.data.provider_evidence.cash_ledger_summary?.transaction_count ?? 0}
+                </p>
+                <p className="mt-1 text-sm text-slate-600">Portal transactions returned in the selected period range.</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="text-sm font-semibold text-slate-900">Closing split</p>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-sm text-slate-700">
+                  <p>CGST: {formatMoney(portalFilingReadinessQuery.data.provider_evidence.cash_ledger_summary?.closing_breakdown.cgst ?? "0.00")}</p>
+                  <p>SGST: {formatMoney(portalFilingReadinessQuery.data.provider_evidence.cash_ledger_summary?.closing_breakdown.sgst ?? "0.00")}</p>
+                  <p>IGST: {formatMoney(portalFilingReadinessQuery.data.provider_evidence.cash_ledger_summary?.closing_breakdown.igst ?? "0.00")}</p>
+                  <p>Cess: {formatMoney(portalFilingReadinessQuery.data.provider_evidence.cash_ledger_summary?.closing_breakdown.cess ?? "0.00")}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-2">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="text-sm font-semibold text-slate-900">ITC ledger evidence</p>
+                <p className="mt-2 text-lg font-semibold text-slate-900">
+                  {formatMoney(portalFilingReadinessQuery.data.provider_evidence.itc_ledger_summary?.closing_total ?? "0.00")}
+                </p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {portalFilingReadinessQuery.data.provider_evidence.itc_ledger_response
+                    ? "Closing ITC ledger total from the selected portal date range."
+                    : "No ITC ledger payload captured yet."}
+                </p>
+                <p className="mt-2 text-xs text-slate-500">
+                  Transactions: {portalFilingReadinessQuery.data.provider_evidence.itc_ledger_summary?.transaction_count ?? 0}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="text-sm font-semibold text-slate-900">Liability ledger evidence</p>
+                <p className="mt-2 text-lg font-semibold text-slate-900">
+                  {formatMoney(portalFilingReadinessQuery.data.provider_evidence.liability_ledger_summary?.closing_total ?? "0.00")}
+                </p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {portalFilingReadinessQuery.data.provider_evidence.liability_ledger_response
+                    ? "Closing liability ledger total from the selected portal date range."
+                    : "No liability ledger payload captured yet."}
+                </p>
+                <p className="mt-2 text-xs text-slate-500">
+                  Transactions: {portalFilingReadinessQuery.data.provider_evidence.liability_ledger_summary?.transaction_count ?? 0}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-2">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="text-sm font-semibold text-slate-900">Challan history evidence</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {portalFilingReadinessQuery.data.provider_evidence.challan_history_response
+                    ? "Portal challan history was captured for the selected period."
+                    : "No portal challan history payload captured yet."}
+                </p>
+                {portalFilingReadinessQuery.data.provider_evidence.challan_reference ? (
+                  <p className="mt-2 text-xs text-slate-500">
+                    Latest CPIN detected: {portalFilingReadinessQuery.data.provider_evidence.challan_reference}
+                  </p>
+                ) : null}
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <p className="text-sm font-semibold text-slate-900">Challan summary evidence</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {portalFilingReadinessQuery.data.provider_evidence.challan_summary_response
+                    ? "Portal challan summary was captured for a detected CPIN."
+                    : "No portal challan summary payload captured yet."}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">Portal challan action</p>
+                <p className="mt-1 text-sm text-slate-600">
+                  Generate a tax-only challan from this workspace after reviewing portal balances and payable evidence.
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button variant="outline" onClick={() => setIsPortalLedgerOpen(true)}>
+                  View portal ledgers
+                </Button>
+                <Button
+                  onClick={() => setIsGenerateChallanOpen(true)}
+                  disabled={
+                    !portalFilingReadinessQuery.data.auth_session.available ||
+                    !portalFilingReadinessQuery.data.portal_sync.payment_reads_enabled ||
+                    generatePortalChallanMutation.isPending
+                  }
+                >
+                  {generatePortalChallanMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Generate portal challan"}
+                </Button>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">Recent portal challans</p>
+                  <p className="mt-1 text-sm text-slate-600">Latest challan requests created from this return workspace.</p>
+                </div>
+                <StatusBadge label={`${portalChallanRequestsQuery.data?.length ?? 0} records`} variant="primary" />
+              </div>
+              <div className="mt-4">
+                {portalChallanRequestsQuery.isLoading ? (
+                  <LoadingState message="Loading recent portal challans..." />
+                ) : portalChallanRequestsQuery.isError ? (
+                  <ErrorState description={getErrorMessage(portalChallanRequestsQuery.error)} />
+                ) : portalChallanRequestsQuery.data?.length ? (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Created</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>CPIN</TableHead>
+                          <TableHead>Reason</TableHead>
+                          <TableHead>Total</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {portalChallanRequestsQuery.data.map((challan) => (
+                          <TableRow key={challan.id}>
+                            <TableCell>{formatDateTime(challan.created_at)}</TableCell>
+                            <TableCell>
+                              <StatusBadge
+                                label={challan.status.replace(/_/g, " ")}
+                                variant={challan.status === "submitted" ? "success" : challan.status === "failed" ? "danger" : "warning"}
+                              />
+                            </TableCell>
+                            <TableCell>{challan.cpin || "Pending"}</TableCell>
+                            <TableCell>{challan.challan_reason}</TableCell>
+                            <TableCell>Rs. {formatMoney(challan.total_amount)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <EmptyState title="No portal challans yet" description="Generated challans for this return context will appear here." />
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </SectionCard>
+
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Return Type"
@@ -1864,7 +2271,10 @@ export default function ReturnsPage() {
         />
       </div>
 
-      <SectionCard title="Return preparation history" description="Track prepared, approved, and filed return drafts for the selected period.">
+      <SectionCard
+        title="Return preparation history"
+        description="Track prepared, approved, and filed return drafts for the selected period. Open a draft to request approval, verify OTP access, or continue filing."
+      >
         {!selectedClientId || !selectedPeriodId ? (
           <EmptyState title="Return history will appear here" description="Choose a client and period to load return preparations." />
         ) : returnsQuery.isLoading ? (
@@ -1918,7 +2328,7 @@ export default function ReturnsPage() {
                           setDismissedQueryReturnId(null);
                         }}
                       >
-                        <ActionLabel kind="view" label="View" />
+                        <ActionLabel kind="view" label="Review & file" />
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -3066,6 +3476,200 @@ export default function ReturnsPage() {
             )}
           </div>
           </AppModalBody>
+        </AppModalContent>
+      </Dialog>
+
+      <Dialog open={isPortalLedgerOpen} onOpenChange={setIsPortalLedgerOpen}>
+        <AppModalContent size="xl">
+          <AppModalHeader
+            title="Portal ledger evidence"
+            description="Inspect the captured WhiteBooks cash, ITC, liability, and challan evidence for this workspace before filing."
+          />
+          <AppModalBody className="space-y-6">
+            {portalFilingReadinessQuery.data ? (
+              <>
+                <div className="grid gap-4 lg:grid-cols-4">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-500">Evidence source</p>
+                    <p className="mt-2 text-lg font-semibold text-slate-900">
+                      {portalFilingReadinessQuery.data.provider_evidence.source === "live_fetch"
+                        ? "Live fetch"
+                        : portalFilingReadinessQuery.data.provider_evidence.source === "saved_snapshot"
+                          ? "Saved snapshot"
+                          : "Not captured"}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-500">Cash closing</p>
+                    <p className="mt-2 text-lg font-semibold text-slate-900">
+                      {formatMoney(portalFilingReadinessQuery.data.provider_evidence.cash_ledger_summary?.closing_total ?? "0.00")}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-500">ITC closing</p>
+                    <p className="mt-2 text-lg font-semibold text-slate-900">
+                      {formatMoney(portalFilingReadinessQuery.data.provider_evidence.itc_ledger_summary?.closing_total ?? "0.00")}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-500">Liability closing</p>
+                    <p className="mt-2 text-lg font-semibold text-slate-900">
+                      {formatMoney(portalFilingReadinessQuery.data.provider_evidence.liability_ledger_summary?.closing_total ?? "0.00")}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 xl:grid-cols-3">
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                    <p className="text-sm font-semibold text-slate-900">Cash ledger</p>
+                    <div className="mt-3 space-y-2 text-sm text-slate-600">
+                      <p>Opening: Rs. {formatMoney(portalFilingReadinessQuery.data.provider_evidence.cash_ledger_summary?.opening_total ?? "0.00")}</p>
+                      <p>Closing: Rs. {formatMoney(portalFilingReadinessQuery.data.provider_evidence.cash_ledger_summary?.closing_total ?? "0.00")}</p>
+                      <p>Transactions: {portalFilingReadinessQuery.data.provider_evidence.cash_ledger_summary?.transaction_count ?? 0}</p>
+                    </div>
+                    <pre className="mt-4 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">
+                      {formatJsonPayload(portalFilingReadinessQuery.data.provider_evidence.cash_ledger_response ?? {})}
+                    </pre>
+                  </div>
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                    <p className="text-sm font-semibold text-slate-900">ITC ledger</p>
+                    <div className="mt-3 space-y-2 text-sm text-slate-600">
+                      <p>Opening: Rs. {formatMoney(portalFilingReadinessQuery.data.provider_evidence.itc_ledger_summary?.opening_total ?? "0.00")}</p>
+                      <p>Closing: Rs. {formatMoney(portalFilingReadinessQuery.data.provider_evidence.itc_ledger_summary?.closing_total ?? "0.00")}</p>
+                      <p>Transactions: {portalFilingReadinessQuery.data.provider_evidence.itc_ledger_summary?.transaction_count ?? 0}</p>
+                    </div>
+                    <pre className="mt-4 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">
+                      {formatJsonPayload(portalFilingReadinessQuery.data.provider_evidence.itc_ledger_response ?? {})}
+                    </pre>
+                  </div>
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                    <p className="text-sm font-semibold text-slate-900">Liability ledger</p>
+                    <div className="mt-3 space-y-2 text-sm text-slate-600">
+                      <p>Opening: Rs. {formatMoney(portalFilingReadinessQuery.data.provider_evidence.liability_ledger_summary?.opening_total ?? "0.00")}</p>
+                      <p>Closing: Rs. {formatMoney(portalFilingReadinessQuery.data.provider_evidence.liability_ledger_summary?.closing_total ?? "0.00")}</p>
+                      <p>Transactions: {portalFilingReadinessQuery.data.provider_evidence.liability_ledger_summary?.transaction_count ?? 0}</p>
+                    </div>
+                    <pre className="mt-4 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">
+                      {formatJsonPayload(portalFilingReadinessQuery.data.provider_evidence.liability_ledger_response ?? {})}
+                    </pre>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 xl:grid-cols-2">
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                    <p className="text-sm font-semibold text-slate-900">Challan history</p>
+                    <p className="mt-2 text-sm text-slate-600">
+                      Latest CPIN: {portalFilingReadinessQuery.data.provider_evidence.challan_reference ?? "Not detected"}
+                    </p>
+                    <pre className="mt-4 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">
+                      {formatJsonPayload(portalFilingReadinessQuery.data.provider_evidence.challan_history_response ?? {})}
+                    </pre>
+                  </div>
+                  <div className="rounded-3xl border border-slate-200 bg-white p-5">
+                    <p className="text-sm font-semibold text-slate-900">Challan summary</p>
+                    <pre className="mt-4 overflow-x-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-100">
+                      {formatJsonPayload(portalFilingReadinessQuery.data.provider_evidence.challan_summary_response ?? {})}
+                    </pre>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <EmptyState title="Portal evidence is not ready yet" description="Load portal filing readiness first, then open this ledger view." />
+            )}
+          </AppModalBody>
+          <AppModalFooter>
+            <div className="text-sm text-slate-500">
+              Use this evidence view to compare portal balances with your computed return before filing.
+            </div>
+            <Button variant="outline" onClick={() => setIsPortalLedgerOpen(false)}>
+              Close
+            </Button>
+          </AppModalFooter>
+        </AppModalContent>
+      </Dialog>
+
+      <Dialog open={isGenerateChallanOpen} onOpenChange={setIsGenerateChallanOpen}>
+        <AppModalContent size="lg">
+          <AppModalHeader
+            title="Generate portal challan"
+            description="Enter the payment metadata and tax-component amounts exactly as you want the challan to be created on WhiteBooks."
+          />
+          <AppModalBody>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="challan-reason">Challan reason</Label>
+                <Input id="challan-reason" value={challanReason} onChange={(event) => setChallanReason(event.target.value)} className="h-11 bg-slate-50" />
+                <p className="text-xs text-slate-500">
+                  Enter the exact WhiteBooks challan reason code for the client profile. `QRMP35` is only for QRMP filers and should not be used for monthly-profile periods.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="challan-payment-mode">Payment mode</Label>
+                <Input id="challan-payment-mode" value={challanPaymentMode} onChange={(event) => setChallanPaymentMode(event.target.value)} className="h-11 bg-slate-50" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="challan-bank-code">Bank code</Label>
+                <Input id="challan-bank-code" value={challanBankCode} onChange={(event) => setChallanBankCode(event.target.value)} className="h-11 bg-slate-50" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="challan-sub-mode">Sub payment mode</Label>
+                <Input id="challan-sub-mode" value={challanSubPaymentMode} onChange={(event) => setChallanSubPaymentMode(event.target.value)} className="h-11 bg-slate-50" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="challan-mobile-number">Mobile number</Label>
+                <Input id="challan-mobile-number" value={challanMobileNumber} onChange={(event) => setChallanMobileNumber(event.target.value)} className="h-11 bg-slate-50" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="challan-address">Address</Label>
+                <Input id="challan-address" value={challanAddress} onChange={(event) => setChallanAddress(event.target.value)} className="h-11 bg-slate-50" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="challan-cgst-tax">CGST tax amount</Label>
+                <Input id="challan-cgst-tax" value={challanCgstAmount} onChange={(event) => setChallanCgstAmount(event.target.value)} className="h-11 bg-slate-50" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="challan-igst-tax">IGST tax amount</Label>
+                <Input id="challan-igst-tax" value={challanIgstAmount} onChange={(event) => setChallanIgstAmount(event.target.value)} className="h-11 bg-slate-50" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="challan-sgst-tax">SGST tax amount</Label>
+                <Input id="challan-sgst-tax" value={challanSgstAmount} onChange={(event) => setChallanSgstAmount(event.target.value)} className="h-11 bg-slate-50" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="challan-cess-tax">Cess tax amount</Label>
+                <Input id="challan-cess-tax" value={challanCessAmount} onChange={(event) => setChallanCessAmount(event.target.value)} className="h-11 bg-slate-50" />
+              </div>
+            </div>
+            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-medium uppercase tracking-[0.24em] text-slate-500">Calculated total</p>
+              <p className="mt-2 text-lg font-semibold text-slate-900">Rs. {formatMoney(challanTotalAmount)}</p>
+              <p className="mt-1 text-sm text-slate-600">The total is calculated from the tax-component amounts you enter above.</p>
+            </div>
+            {challanValidationFeedback ? (
+              <div className={`mt-4 rounded-2xl border p-4 ${challanValidationFeedback.valid ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"}`}>
+                <p className={`text-sm font-semibold ${challanValidationFeedback.valid ? "text-emerald-950" : "text-rose-950"}`}>
+                  {challanValidationFeedback.valid ? "Validation passed" : "Validation failed"}
+                </p>
+                <p className={`mt-1 text-sm ${challanValidationFeedback.valid ? "text-emerald-800" : "text-rose-800"}`}>
+                  {challanValidationFeedback.message}
+                </p>
+              </div>
+            ) : null}
+          </AppModalBody>
+          <AppModalFooter>
+            <div className="text-sm text-slate-500">Use this only after reviewing live portal balance, tax payable, and challan evidence.</div>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row">
+              <Button variant="outline" onClick={() => setIsGenerateChallanOpen(false)}>
+                <ActionLabel kind="cancel" label="Cancel" />
+              </Button>
+              <Button variant="outline" onClick={handleValidatePortalChallan} disabled={validatePortalChallanMutation.isPending}>
+                {validatePortalChallanMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Validate challan"}
+              </Button>
+              <Button onClick={handleGeneratePortalChallan} disabled={generatePortalChallanMutation.isPending}>
+                {generatePortalChallanMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <ActionLabel kind="confirm" label="Generate challan" />}
+              </Button>
+            </div>
+          </AppModalFooter>
         </AppModalContent>
       </Dialog>
 

@@ -81,6 +81,16 @@ function toDatetimeLocalValue(value?: string | null) {
   return local.toISOString().slice(0, 16);
 }
 
+function buildDefaultFollowUpDueAt(dueDate?: string | null) {
+  if (dueDate) {
+    return toDatetimeLocalValue(new Date(`${dueDate}T11:00:00`).toISOString());
+  }
+
+  const fallback = new Date();
+  fallback.setHours(fallback.getHours() + 4);
+  return toDatetimeLocalValue(fallback.toISOString());
+}
+
 function toLabel(value?: string | null) {
   if (!value) return "Not set";
   return value.replace(/_/g, " ");
@@ -132,7 +142,10 @@ export default function ReturnStatusRegisterPage() {
   const createFollowUpMutation = useCreateOperationalFollowUpMutation(filters);
   const contactsQuery = useClientContactsQuery(followUpTarget?.client);
   const membersQuery = useWorkspaceMembersQuery(selectedWorkspaceId);
-  const rows = registerQuery.data?.items ?? [];
+  const rows = useMemo(
+    () => registerQuery.data?.items ?? [],
+    [registerQuery.data?.items],
+  );
   const contacts = contactsQuery.data?.items ?? [];
   const members = membersQuery.data?.items ?? [];
   const canManageFollowUps = hasPermission(sessionPermissions, permissions.manageClient);
@@ -209,7 +222,7 @@ export default function ReturnStatusRegisterPage() {
       priority: row.is_overdue || row.status_bucket === "blocked" ? "high" : "medium",
       contact: "none",
       assigned_to: "unassigned",
-      due_at: toDatetimeLocalValue(row.due_date ? new Date(`${row.due_date}T11:00:00`).toISOString() : new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString()),
+      due_at: buildDefaultFollowUpDueAt(row.due_date),
       next_action: row.pending_with === "customer" ? "Call the customer and confirm the pending item." : "Review the current blocker and decide the next safe action.",
       notes: row.latest_follow_up_title ? `Latest follow-up on record: ${row.latest_follow_up_title}` : "",
     });

@@ -35,6 +35,7 @@ Related documents:
 - [gstr7-gstr9-gstr9c-whitebooks-integration-readiness.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr7-gstr9-gstr9c-whitebooks-integration-readiness.md:1)
 - [gstr7-gstr9-gstr9c-whitebooks-payload-attachment-contract.md](/Users/ansh/Documents/Gst-Compliance/docs/gstr7-gstr9-gstr9c-whitebooks-payload-attachment-contract.md:1)
 - [portal-data-download-opportunities.md](/Users/ansh/Documents/Gst-Compliance/docs/portal-data-download-opportunities.md:1)
+- [ledger-and-payment-mvp-plan.md](/Users/ansh/Documents/Gst-Compliance/docs/ledger-and-payment-mvp-plan.md:1)
 
 ## Delivery assumptions
 
