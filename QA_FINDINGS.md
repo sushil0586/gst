@@ -2,14 +2,16 @@
 
 ## Current status
 
-Two active functional application bugs are currently confirmed on staging:
+The following issues are still reproducible on the current staging deployment and require a fresh frontend deploy to verify the source fixes:
 
-- team member deactivation executes immediately with no confirmation
+- imports page triggers an initial `403` request before the full context is applied
 - `/reports/transaction-review` returns `404`
 
-One additional UI copy defect is confirmed in the local source-backed approval workflow:
+The following issues were fixed in source and verified locally on June 30, 2026:
 
-- approval rejection success toast is misspelled as `Approval request rejectd.`
+- approval rejection success toast copy
+- mobile import-history layout
+- blocked return preparation buttons now show disabled guidance before click
 
 ## Latest live verification
 
@@ -20,34 +22,43 @@ One additional UI copy defect is confirmed in the local source-backed approval w
   - browser refresh preserves session
   - logout returns the user to `/login`
   - imports workspace shows stable empty-state and import-history detail behavior
+  - imports workspace still issues one premature background `403` request before the client, GSTIN, and period selectors finish applying
   - returns workspace shows blocker guidance and routes users toward imports and reconciliation
   - operations and approvals empty states load consistently
   - follow-up creation modal and audit event detail open correctly from live workspaces
   - notices empty state and add-notice modal render correctly
   - audit filters, detail modal, and XLSX export work in staging
   - settings navigation, team add-member modal, change-password validation, and workspace-management context work in staging
+  - team-member deactivation now opens a confirmation modal correctly
   - clients search/no-match guidance and add-client validation work in staging
   - GSTIN and compliance-period edit surfaces open correctly without forced mutations
-- No blocking functional defects were observed in this live smoke slice.
+- The dedicated live Playwright slice passed after aligning one stale test expectation with the current `Change password` CTA label.
+- Additional local verification on June 30, 2026 confirmed source fixes for:
+  - `/reports/transaction-review` redirecting into `/reports`
+  - import batch queries waiting for full context before firing
+  - corrected approval rejection toast copy
+  - mobile import-history cards
+  - disabled blocked-return preparation actions
 
 ## Open bugs
 
-### Bug: Team member deactivation happens immediately with no confirmation
+### Bug: Imports page fires a premature `403` request before full context selection is applied
 
 - Steps to reproduce:
   1. Sign in to `https://gst-stage.accerio.in` with a user that can manage workspace members.
-  2. Open `/settings/team`.
-  3. Click `Deactivate` on a workspace member row.
+  2. Open `/imports`.
+  3. Observe network activity while the page initializes the selected workspace context.
 - Actual result:
-  - The UI sends a live `DELETE` request immediately and shows `Workspace member deactivated.` with no confirmation dialog or safety step.
+  - The frontend first requests `/api/backend/imports/batches?workspace=<workspace-id>` and receives `403 Forbidden`.
+  - After the client, GSTIN, and compliance-period values finish loading, a second request with the full filter set succeeds and the page renders normally.
 - Expected result:
-  - Deactivation should require an explicit confirmation step before the destructive request is sent.
-- Severity: High
+  - The page should wait until the full required context is available before requesting import batches, so it does not emit avoidable authorization errors in normal use.
+- Severity: Medium
 - Screenshot/video reference if available:
   - Reproduced in live browser verification on June 30, 2026.
-  - Local Playwright regression coverage now also verifies that the source application flow is expected to show a confirmation modal before deletion.
+  - Confirmed through a Playwright network trace: initial workspace-only request returns `403`, subsequent full-context requests return `200`.
 - Suggested fix area:
-  - Team management deactivation flow in the frontend settings workspace, plus staging deployment/version parity review because the source-backed regression path expects confirmation.
+  - Frontend imports query enablement or filter-gating logic in `useImportBatchesQuery` and the imports screen context-loading flow.
 
 ### Bug: Transaction Review deep link returns 404 on staging
 
@@ -71,12 +82,13 @@ One additional UI copy defect is confirmed in the local source-backed approval w
   2. Click `Reject`.
   3. Enter review remarks and confirm the action.
 - Actual result:
-  - The flow completes, but the success toast shows `Approval request rejectd.`
+  - The flow previously completed with `Approval request rejectd.`
 - Expected result:
   - The success toast should say `Approval request rejected.`
 - Severity: Low
 - Screenshot/video reference if available:
   - Reproduced during local Playwright regression execution on June 30, 2026.
+  - Fixed in source and verified locally the same day.
 - Suggested fix area:
   - Approval action success-message copy in the approvals workspace frontend.
 

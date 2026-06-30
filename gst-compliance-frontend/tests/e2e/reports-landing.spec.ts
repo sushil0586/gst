@@ -19,6 +19,17 @@ test.describe("Reports landing", () => {
     await expect(page).toHaveURL(/\/reports\/return-status$/);
   });
 
+  test("redirects the transaction-review deep link into the reports workspace", async ({ page, app }) => {
+    await app.mockAuthenticatedShell();
+    await app.mockReportsWorkflowApis();
+
+    await page.goto("/reports/transaction-review?client=client-1&period=period-1");
+
+    await expect(page).toHaveURL(/\/reports\?client=client-1&period=period-1$/);
+    await expect(page.getByRole("heading", { name: "Transaction Review" })).toBeVisible();
+    await expect(page.getByText("Normalized GST transactions", { exact: true })).toBeVisible();
+  });
+
   test("explains when client and period context are missing", async ({ page, app }) => {
     const reportsPage = new ReportsPage(page);
 

@@ -138,4 +138,18 @@ test.describe("Import center", () => {
     await expect(page.getByText("This period is locked. Unlock it before uploading any new files.")).toBeVisible();
     await expect(page.getByText("Locked for changes")).toBeVisible();
   });
+
+  test("renders import history as stacked cards on mobile width", async ({ page, app }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await app.mockAuthenticatedShell();
+    await app.mockImportsApis();
+
+    await page.goto("/imports");
+
+    await expect(page.getByRole("heading", { name: "Import Center" })).toBeVisible();
+    await expect(page.locator("table")).not.toBeVisible();
+    await expect(page.getByText("sales_standard.csv").first()).toBeVisible();
+    await expect(page.getByText("Valid / Invalid").first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "View details" }).first()).toBeVisible();
+  });
 });

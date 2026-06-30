@@ -131,6 +131,8 @@ test.describe("Returns workflow", () => {
         "Source imports were changed after the last reconciliation run. Re-run reconciliation before approving, filing, or sharing this return output.",
       ),
     ).toBeVisible();
+    await expect(page.getByText(/Preparation is currently blocked for at least one return type\./)).toBeVisible();
+    await expect(page.getByRole("button", { name: "Prepare GSTR-3B" })).toBeDisabled();
   });
 
   test("shows live portal ledger evidence for a filing-ready GSTR-3B context", async ({ page, app }) => {

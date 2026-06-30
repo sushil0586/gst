@@ -539,7 +539,13 @@ export default function ApprovalsPage() {
       } else {
         await cancelMutation.mutateAsync({ approvalId: selectedApproval.id, comments });
       }
-      toast.success(`Approval request ${actionType}d.`);
+      const successMessage =
+        actionType === "approve"
+          ? "Approval request approved."
+          : actionType === "reject"
+            ? "Approval request rejected."
+            : "Approval request cancelled.";
+      toast.success(successMessage);
       setSelectedApproval(null);
       setActionType(null);
       setComments("");

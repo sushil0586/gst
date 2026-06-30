@@ -354,6 +354,18 @@ function getReadinessVariant(status?: "ready" | "ready_with_warnings" | "blocked
   return "primary" as const;
 }
 
+function getReadinessForReturnType(
+  readiness: ReturnType<typeof useReturnReadinessQuery>["data"] | undefined,
+  returnType: "gstr1" | "gstr3b" | "gstr7" | "gstr9" | "gstr9c",
+) {
+  if (!readiness) return null;
+  if (returnType === "gstr1") return readiness.gstr1;
+  if (returnType === "gstr3b") return readiness.gstr3b;
+  if (returnType === "gstr7") return readiness.gstr7;
+  if (returnType === "gstr9") return readiness.gstr9;
+  return readiness.gstr9c;
+}
+
 function formatSummaryKey(key: string) {
   const labels: Record<string, string> = {
     b2b_taxable_value: "B2B taxable value",
@@ -873,6 +885,25 @@ export default function ReturnsPage() {
     activeFiling?.readiness_snapshot?.manual_filing_only === true ||
     ((activeReturn?.return_type === "gstr9" || activeReturn?.return_type === "gstr9c") && !hasExplicitAnnualLiveSavePayload(activeReturn));
   const canPrepare = Boolean(selectedWorkspaceId && selectedClientId && selectedGstinId && selectedPeriodId && !isPeriodLocked);
+  const getPrepareBlockedReason = (returnType: "gstr1" | "gstr3b" | "gstr7" | "gstr9" | "gstr9c") => {
+    const targetReadiness = getReadinessForReturnType(readiness, returnType);
+    if (targetReadiness?.status !== "blocked") {
+      return null;
+    }
+    return targetReadiness.issues[0]?.detail ?? `Resolve ${returnType.toUpperCase()} blockers before preparation.`;
+  };
+  const gstr1PrepareBlockedReason = getPrepareBlockedReason("gstr1");
+  const gstr3bPrepareBlockedReason = getPrepareBlockedReason("gstr3b");
+  const gstr7PrepareBlockedReason = getPrepareBlockedReason("gstr7");
+  const gstr9PrepareBlockedReason = getPrepareBlockedReason("gstr9");
+  const gstr9cPrepareBlockedReason = getPrepareBlockedReason("gstr9c");
+  const prepareActionGuidance = [
+    gstr1PrepareBlockedReason,
+    gstr3bPrepareBlockedReason,
+    gstr7PrepareBlockedReason,
+    gstr9PrepareBlockedReason,
+    gstr9cPrepareBlockedReason,
+  ].find(Boolean) ?? null;
   const exportReturnType =
     activeReturn?.return_type ??
     (gstr1Return ? "gstr1" : gstr3bReturn ? "gstr3b" : gstr7Return ? "gstr7" : gstr9Return ? "gstr9" : gstr9cReturn ? "gstr9c" : null);
@@ -1756,22 +1787,57 @@ export default function ReturnsPage() {
         description="Return preparation runs against the active workspace, client, GSTIN, and compliance period."
         variant="soft"
         action={
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => handlePrepare("gstr1")} disabled={!canPrepare || prepareReturnMutation.isPending}>
-              {prepareReturnMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Prepare GSTR-1"}
-            </Button>
-            <Button size="sm" onClick={() => handlePrepare("gstr3b")} disabled={!canPrepare || prepareReturnMutation.isPending}>
-              {prepareReturnMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Prepare GSTR-3B"}
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => handlePrepare("gstr7")} disabled={!canPrepare || prepareReturnMutation.isPending}>
-              {prepareReturnMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Prepare GSTR-7"}
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => handlePrepare("gstr9")} disabled={!canPrepare || prepareReturnMutation.isPending}>
-              {prepareReturnMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Prepare GSTR-9"}
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => handlePrepare("gstr9c")} disabled={!canPrepare || prepareReturnMutation.isPending}>
-              {prepareReturnMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Prepare GSTR-9C"}
-            </Button>
+          <div className="space-y-2">
+            {prepareActionGuidance ? (
+              <p className="max-w-xl text-xs leading-5 text-amber-700">
+                Preparation is currently blocked for at least one return type. {prepareActionGuidance}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                onClick={() => handlePrepare("gstr1")}
+                disabled={!canPrepare || prepareReturnMutation.isPending || Boolean(gstr1PrepareBlockedReason)}
+                title={gstr1PrepareBlockedReason ?? undefined}
+              >
+                {prepareReturnMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Prepare GSTR-1"}
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => handlePrepare("gstr3b")}
+                disabled={!canPrepare || prepareReturnMutation.isPending || Boolean(gstr3bPrepareBlockedReason)}
+                title={gstr3bPrepareBlockedReason ?? undefined}
+              >
+                {prepareReturnMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Prepare GSTR-3B"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handlePrepare("gstr7")}
+                disabled={!canPrepare || prepareReturnMutation.isPending || Boolean(gstr7PrepareBlockedReason)}
+                title={gstr7PrepareBlockedReason ?? undefined}
+              >
+                {prepareReturnMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Prepare GSTR-7"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handlePrepare("gstr9")}
+                disabled={!canPrepare || prepareReturnMutation.isPending || Boolean(gstr9PrepareBlockedReason)}
+                title={gstr9PrepareBlockedReason ?? undefined}
+              >
+                {prepareReturnMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Prepare GSTR-9"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handlePrepare("gstr9c")}
+                disabled={!canPrepare || prepareReturnMutation.isPending || Boolean(gstr9cPrepareBlockedReason)}
+                title={gstr9cPrepareBlockedReason ?? undefined}
+              >
+                {prepareReturnMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Prepare GSTR-9C"}
+              </Button>
+            </div>
           </div>
         }
       >

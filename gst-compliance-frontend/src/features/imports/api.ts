@@ -25,6 +25,10 @@ type ImportBatchFilters = {
   compliance_period?: string;
 };
 
+type ImportBatchQueryOptions = {
+  enabled?: boolean;
+};
+
 type UploadImportBatchPayload = {
   workspace: string;
   client: string;
@@ -79,10 +83,10 @@ type ImportTemplateFilters = {
   source_type?: string;
 };
 
-export function useImportBatchesQuery(filters: ImportBatchFilters) {
+export function useImportBatchesQuery(filters: ImportBatchFilters, options?: ImportBatchQueryOptions) {
   return useQuery({
     queryKey: queryKeys.imports.list(filters),
-    enabled: Boolean(filters.workspace || filters.client || filters.compliance_period),
+    enabled: options?.enabled ?? Boolean(filters.workspace || filters.client || filters.compliance_period),
     refetchInterval: (query) => {
       const data = query.state.data;
       return data?.items?.some((batch) => batch.status === "queued" || batch.status === "processing") ? 3000 : false;

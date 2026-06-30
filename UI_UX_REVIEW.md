@@ -12,13 +12,14 @@
 ## Validation and Safety
 
 - Confirmation is now present on risky member-access changes, which is the right direction to preserve across other destructive actions.
-- Live staging verification on June 30, 2026 showed a regression in this area: `Deactivate` from Team Management currently executes immediately without a confirmation step. That makes member-access changes feel unsafe and increases the chance of accidental destructive actions.
+- Current source and live verification both show the member deactivation flow behind an explicit confirmation step, which is the right interaction for a destructive access change.
 
 ## Navigation Experience
 
 - Context switching is central to the product, so the topbar selectors are critical. They would benefit from explicit test hooks and clearer visual ownership on smaller widths.
 - A live staging pass on June 30, 2026 found a navigation reliability gap inside Reports: the landing page works, but the deep route `/reports/transaction-review` resolves to a 404. For an operator, that makes bookmarked or directly shared report links feel unreliable.
 - The `Operations` empty state gives users a direct next step through `Open Follow-ups` and `Open Returns workspace`, which is helpful. `Approvals` is clearer than before, but its empty state still feels more passive because it explains where approvals come from without offering a direct action back to the originating workflow.
+- The imports screen also has a quieter reliability issue during load: it briefly issues a forbidden request before the client, GSTIN, and period context finish resolving. Operators do not immediately see a broken screen, but background authorization errors make the product feel less trustworthy and complicate support diagnostics.
 
 ## Loading, Empty, and Error States
 
@@ -32,6 +33,7 @@
 - Core auth and import layouts remain readable at mobile width.
 - The biggest mobile concern is discoverability and accessibility of navigation controls rather than raw layout breakage.
 - Live staging verification on June 30, 2026 confirmed this concern: the mobile dashboard exposes the `Context` control and page CTAs, but it does not present an obvious globally labeled navigation trigger such as `Menu` or `Open navigation`.
+- The imports page remains readable on mobile overall. A source fix now swaps the history section to stacked cards on small screens, which should make that section materially easier to scan after deployment.
 
 ## Return Review Screens
 
@@ -44,4 +46,5 @@
 ## Returns Workspace Discoverability
 
 - The return history area is much clearer once the row action explicitly signals that approval and filing actions live inside the workflow modal.
-- Live staging verification on June 30, 2026 showed that blocked return actions such as `Prepare GSTR-3B` remain enabled and explain the blocker only after click via toast. This is functional, but some operators may read the enabled button state as ready-to-run. A stronger inline disabled state or embedded blocker summary near the action would reduce hesitation and misclicks.
+- Live staging verification on June 30, 2026 showed that blocked return actions such as `Prepare GSTR-3B` remained enabled and explained the blocker only after click via toast.
+- A source fix now disables blocked preparation actions and surfaces the first blocker inline near the action area, which should reduce hesitation and misclicks once deployed.

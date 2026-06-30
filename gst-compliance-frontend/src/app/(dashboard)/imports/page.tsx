@@ -331,8 +331,9 @@ export default function ImportsPage() {
     }),
     [selectedWorkspaceId, selectedClientId, selectedGstinId, selectedPeriodId],
   );
+  const isImportContextReady = Boolean(selectedWorkspaceId && selectedClientId && selectedGstinId && selectedPeriodId);
 
-  const batchesQuery = useImportBatchesQuery(filters);
+  const batchesQuery = useImportBatchesQuery(filters, { enabled: isImportContextReady });
   const selectedBatchQuery = useImportBatchQuery(selectedBatchId ?? undefined);
   const errorsQuery = useImportBatchErrorsQuery(selectedBatchId ?? undefined);
   const correctionPolicyQuery = useImportBatchCorrectionPolicyQuery(selectedBatchId ?? undefined);
@@ -1227,73 +1228,141 @@ export default function ImportsPage() {
           />
         ) : batchesQuery.data && batchesQuery.data.items.length > 0 ? (
           <div className="overflow-hidden rounded-2xl border border-slate-200">
-            <Table>
-              <TableHeader className="bg-slate-50">
-                <TableRow className="hover:bg-transparent">
-                  <TableHead>Batch</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Total</TableHead>
-                  <TableHead>Valid</TableHead>
-                  <TableHead>Invalid</TableHead>
-                  <TableHead>Uploaded</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {batchesQuery.data.items.map((batch) => (
-                  <TableRow key={batch.id}>
-                    <TableCell>
-                      <div>
-                        <p className="font-medium text-slate-900">{batch.file_name}</p>
-                        <p className="text-xs text-slate-500">{batch.id.slice(0, 8)}</p>
-                        {batch.correction_summary ? (
-                          <div className="mt-2 flex flex-wrap items-center gap-2">
-                            <StatusBadge
-                              label={getCorrectionStatusLabel(batch.correction_summary) ?? "correction ready"}
-                              variant={getCorrectionStatusVariant(batch.correction_summary)}
-                            />
-                            {batch.status === "superseded" ? <StatusBadge label="superseded" variant="warning" /> : null}
-                            {batch.status === "discarded" ? <StatusBadge label="discarded" variant="neutral" /> : null}
-                            {batch.supersedes_batch ? <Badge variant="outline">replacement batch</Badge> : null}
-                            {batch.correction_summary.next_required_action ? (
-                              <p className="text-xs text-slate-500">{batch.correction_summary.next_required_action}</p>
-                            ) : null}
-                          </div>
-                        ) : null}
-                        {batch.superseded_by ? (
-                          <p className="mt-2 text-xs text-slate-500">Superseded by batch {batch.superseded_by.slice(0, 8)}</p>
-                        ) : batch.supersedes_batch ? (
-                          <p className="mt-2 text-xs text-slate-500">Active replacement for batch {batch.supersedes_batch.slice(0, 8)}</p>
-                        ) : batch.status === "discarded" ? (
-                          <p className="mt-2 text-xs text-slate-500">Removed from active processing. Audit history remains intact.</p>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell className="capitalize">{batch.import_type.replace(/_/g, " ")}</TableCell>
-                    <TableCell className="uppercase">{batch.source_type}</TableCell>
-                    <TableCell>
-                      <StatusBadge label={batch.status} variant={getStatusVariant(batch.status)} />
-                    </TableCell>
-                    <TableCell>{batch.total_rows}</TableCell>
-                    <TableCell>{batch.valid_rows}</TableCell>
-                    <TableCell>{batch.invalid_rows}</TableCell>
-                    <TableCell>
-                      <div>
-                        <p className="text-sm text-slate-900">{batch.uploaded_by_name ?? "System"}</p>
-                        <p className="text-xs text-slate-500">{formatDateTime(batch.created_at)}</p>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="outline" size="sm" onClick={() => setSelectedBatchId(batch.id)}>
-                        <ActionLabel kind="view" label="View details" />
-                      </Button>
-                    </TableCell>
+            <div className="space-y-3 p-3 md:hidden">
+              {batchesQuery.data.items.map((batch) => (
+                <div key={batch.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-slate-900">{batch.file_name}</p>
+                      <p className="text-xs text-slate-500">{batch.id.slice(0, 8)}</p>
+                    </div>
+                    <StatusBadge label={batch.status} variant={getStatusVariant(batch.status)} />
+                  </div>
+
+                  {batch.correction_summary ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <StatusBadge
+                        label={getCorrectionStatusLabel(batch.correction_summary) ?? "correction ready"}
+                        variant={getCorrectionStatusVariant(batch.correction_summary)}
+                      />
+                      {batch.status === "superseded" ? <StatusBadge label="superseded" variant="warning" /> : null}
+                      {batch.status === "discarded" ? <StatusBadge label="discarded" variant="neutral" /> : null}
+                      {batch.supersedes_batch ? <Badge variant="outline">replacement batch</Badge> : null}
+                    </div>
+                  ) : null}
+
+                  {batch.correction_summary?.next_required_action ? (
+                    <p className="mt-2 text-xs text-slate-500">{batch.correction_summary.next_required_action}</p>
+                  ) : null}
+                  {batch.superseded_by ? (
+                    <p className="mt-2 text-xs text-slate-500">Superseded by batch {batch.superseded_by.slice(0, 8)}</p>
+                  ) : batch.supersedes_batch ? (
+                    <p className="mt-2 text-xs text-slate-500">Active replacement for batch {batch.supersedes_batch.slice(0, 8)}</p>
+                  ) : batch.status === "discarded" ? (
+                    <p className="mt-2 text-xs text-slate-500">Removed from active processing. Audit history remains intact.</p>
+                  ) : null}
+
+                  <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl bg-slate-50 p-3 text-sm">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Type</p>
+                      <p className="mt-1 capitalize text-slate-900">{batch.import_type.replace(/_/g, " ")}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Source</p>
+                      <p className="mt-1 uppercase text-slate-900">{batch.source_type}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Rows</p>
+                      <p className="mt-1 text-slate-900">{batch.total_rows} total</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.18em] text-slate-500">Valid / Invalid</p>
+                      <p className="mt-1 text-slate-900">{batch.valid_rows} / {batch.invalid_rows}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm text-slate-900">{batch.uploaded_by_name ?? "System"}</p>
+                      <p className="text-xs text-slate-500">{formatDateTime(batch.created_at)}</p>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => setSelectedBatchId(batch.id)}>
+                      <ActionLabel kind="view" label="View details" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="hidden md:block">
+              <Table>
+                <TableHeader className="bg-slate-50">
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead>Batch</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Source</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Total</TableHead>
+                    <TableHead>Valid</TableHead>
+                    <TableHead>Invalid</TableHead>
+                    <TableHead>Uploaded</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {batchesQuery.data.items.map((batch) => (
+                    <TableRow key={batch.id}>
+                      <TableCell>
+                        <div>
+                          <p className="font-medium text-slate-900">{batch.file_name}</p>
+                          <p className="text-xs text-slate-500">{batch.id.slice(0, 8)}</p>
+                          {batch.correction_summary ? (
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <StatusBadge
+                                label={getCorrectionStatusLabel(batch.correction_summary) ?? "correction ready"}
+                                variant={getCorrectionStatusVariant(batch.correction_summary)}
+                              />
+                              {batch.status === "superseded" ? <StatusBadge label="superseded" variant="warning" /> : null}
+                              {batch.status === "discarded" ? <StatusBadge label="discarded" variant="neutral" /> : null}
+                              {batch.supersedes_batch ? <Badge variant="outline">replacement batch</Badge> : null}
+                              {batch.correction_summary.next_required_action ? (
+                                <p className="text-xs text-slate-500">{batch.correction_summary.next_required_action}</p>
+                              ) : null}
+                            </div>
+                          ) : null}
+                          {batch.superseded_by ? (
+                            <p className="mt-2 text-xs text-slate-500">Superseded by batch {batch.superseded_by.slice(0, 8)}</p>
+                          ) : batch.supersedes_batch ? (
+                            <p className="mt-2 text-xs text-slate-500">Active replacement for batch {batch.supersedes_batch.slice(0, 8)}</p>
+                          ) : batch.status === "discarded" ? (
+                            <p className="mt-2 text-xs text-slate-500">Removed from active processing. Audit history remains intact.</p>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="capitalize">{batch.import_type.replace(/_/g, " ")}</TableCell>
+                      <TableCell className="uppercase">{batch.source_type}</TableCell>
+                      <TableCell>
+                        <StatusBadge label={batch.status} variant={getStatusVariant(batch.status)} />
+                      </TableCell>
+                      <TableCell>{batch.total_rows}</TableCell>
+                      <TableCell>{batch.valid_rows}</TableCell>
+                      <TableCell>{batch.invalid_rows}</TableCell>
+                      <TableCell>
+                        <div>
+                          <p className="text-sm text-slate-900">{batch.uploaded_by_name ?? "System"}</p>
+                          <p className="text-xs text-slate-500">{formatDateTime(batch.created_at)}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="outline" size="sm" onClick={() => setSelectedBatchId(batch.id)}>
+                          <ActionLabel kind="view" label="View details" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </div>
         ) : (
           <EmptyState

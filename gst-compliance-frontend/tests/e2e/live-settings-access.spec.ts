@@ -19,11 +19,12 @@ test.describe("Live settings and access", () => {
     await expect(page.getByRole("main").getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Open team", exact: true })).toHaveAttribute("href", "/settings/team");
     await expect(page.getByRole("link", { name: "Open workspaces", exact: true })).toHaveAttribute("href", "/settings/workspaces");
-    await expect(page.getByRole("link", { name: "Open password", exact: true })).toHaveAttribute("href", "/settings/change-password");
+    await expect(page.getByRole("link", { name: "Change password", exact: true })).toHaveAttribute("href", "/settings/change-password");
 
     await page.goto("/settings/team");
-    await expect(page.getByRole("main").getByRole("heading", { name: "Team Management", exact: true })).toBeVisible();
-    await expect(page.getByText("demo_admin@example.com", { exact: true })).toBeVisible();
+    const main = page.getByRole("main");
+    await expect(main.getByRole("heading", { name: "Team Management", exact: true })).toBeVisible();
+    await expect(main.getByRole("cell", { name: "demo_admin@example.com", exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Add Member", exact: true }).click();
 
     const memberDialog = page.getByRole("dialog", { name: "Add workspace member" });

@@ -52,7 +52,7 @@ test.describe("Approvals workflow", () => {
     await actionDialog.getByLabel("Review remarks").fill("Mismatch noted. Rejecting until exception evidence is attached.");
     await actionDialog.getByRole("button", { name: "Confirm", exact: true }).click();
 
-    await expect(page.getByText(/Approval request reject/i)).toBeVisible();
+    await expect(page.getByText("Approval request rejected.")).toBeVisible();
     await expect(page.getByRole("row").filter({ hasText: "return-1" })).toHaveCount(0);
   });
 
