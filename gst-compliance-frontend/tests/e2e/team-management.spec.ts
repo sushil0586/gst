@@ -71,4 +71,38 @@ test.describe("Team management", () => {
     await expect(page.getByRole("heading", { name: "Team Management" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Add Member" })).toHaveCount(0);
   });
+
+  test("shows an API error and keeps the add-member dialog open when member creation fails", async ({ page, app }) => {
+    await app.mockAuthenticatedShell();
+    await app.mockWorkspaceMembersApis();
+
+    await page.route(/\/api\/backend\/workspace-members\/?(?:\?.*)?$/, async (route) => {
+      if (route.request().method() === "POST") {
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "Member service unavailable" }),
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+    await page.goto("/settings/team");
+    await expect(page.getByRole("heading", { name: "Team Management" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Add Member", exact: true }).click();
+    const memberDialog = page.getByRole("dialog", { name: "Add workspace member" });
+    await expect(memberDialog).toBeVisible();
+
+    await memberDialog.getByLabel("Email").fill("ops-reviewer@example.com");
+    await memberDialog.getByLabel("First name").fill("Ops");
+    await memberDialog.getByLabel("Last name").fill("Reviewer");
+    await memberDialog.getByLabel("Initial password").fill("temp-pass-123");
+    await memberDialog.getByRole("button", { name: "Add member", exact: true }).click();
+
+    await expect(memberDialog).toBeVisible();
+    await expect(page.getByText("Workspace member added.")).toHaveCount(0);
+    await expect(memberDialog.getByLabel("Email")).toHaveValue("ops-reviewer@example.com");
+  });
 });

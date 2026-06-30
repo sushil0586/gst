@@ -2,13 +2,12 @@
 
 ## Current status
 
-The following issues are still reproducible on the current staging deployment and require a fresh frontend deploy to verify the source fixes:
+No active functional staging bugs are currently confirmed in the latest verified smoke slice.
 
-- imports page triggers an initial `403` request before the full context is applied
-- `/reports/transaction-review` returns `404`
+The following issues were fixed in source and verified on staging on June 30, 2026:
 
-The following issues were fixed in source and verified locally on June 30, 2026:
-
+- imports page initial `403` during context hydration
+- `/reports/transaction-review` deep-link `404`
 - approval rejection success toast copy
 - mobile import-history layout
 - blocked return preparation buttons now show disabled guidance before click
@@ -22,7 +21,7 @@ The following issues were fixed in source and verified locally on June 30, 2026:
   - browser refresh preserves session
   - logout returns the user to `/login`
   - imports workspace shows stable empty-state and import-history detail behavior
-  - imports workspace still issues one premature background `403` request before the client, GSTIN, and period selectors finish applying
+  - imports workspace no longer issues the premature background `403` request seen before deployment
   - returns workspace shows blocker guidance and routes users toward imports and reconciliation
   - operations and approvals empty states load consistently
   - follow-up creation modal and audit event detail open correctly from live workspaces
@@ -32,7 +31,9 @@ The following issues were fixed in source and verified locally on June 30, 2026:
   - team-member deactivation now opens a confirmation modal correctly
   - clients search/no-match guidance and add-client validation work in staging
   - GSTIN and compliance-period edit surfaces open correctly without forced mutations
-- The dedicated live Playwright slice passed after aligning one stale test expectation with the current `Change password` CTA label.
+- `/reports/transaction-review` now resolves correctly into the transaction review workspace
+- Full live Playwright Chromium verification passed on June 30, 2026:
+  - `13/13` live tests passed against staging
 - Additional local verification on June 30, 2026 confirmed source fixes for:
   - `/reports/transaction-review` redirecting into `/reports`
   - import batch queries waiting for full context before firing
@@ -40,7 +41,7 @@ The following issues were fixed in source and verified locally on June 30, 2026:
   - mobile import-history cards
   - disabled blocked-return preparation actions
 
-## Open bugs
+## Recently fixed
 
 ### Bug: Imports page fires a premature `403` request before full context selection is applied
 
@@ -59,6 +60,8 @@ The following issues were fixed in source and verified locally on June 30, 2026:
   - Confirmed through a Playwright network trace: initial workspace-only request returns `403`, subsequent full-context requests return `200`.
 - Suggested fix area:
   - Frontend imports query enablement or filter-gating logic in `useImportBatchesQuery` and the imports screen context-loading flow.
+- Status:
+  - Fixed in source and verified on staging on June 30, 2026.
 
 ### Bug: Transaction Review deep link returns 404 on staging
 
@@ -74,6 +77,8 @@ The following issues were fixed in source and verified locally on June 30, 2026:
   - Reproduced in live browser verification on June 30, 2026.
 - Suggested fix area:
   - Frontend route registration or deployment artifact for the Reports child route.
+- Status:
+  - Fixed in source and verified on staging on June 30, 2026.
 
 ### Bug: Approval rejection success toast is misspelled
 
@@ -88,9 +93,11 @@ The following issues were fixed in source and verified locally on June 30, 2026:
 - Severity: Low
 - Screenshot/video reference if available:
   - Reproduced during local Playwright regression execution on June 30, 2026.
-  - Fixed in source and verified locally the same day.
+  - Fixed in source, verified locally, and staging smoke remained green after deployment.
 - Suggested fix area:
   - Approval action success-message copy in the approvals workspace frontend.
+- Status:
+  - Fixed.
 
 Previously reported issues around:
 
@@ -103,16 +110,15 @@ were verified as fixed or no longer reproducible in the current build.
 
 ## Data-testid Recommendations
 
-- Add stable `data-testid` hooks for the four topbar context selectors:
+- Stable `data-testid` hooks are now available for:
   - workspace selector
   - client selector
   - GSTIN selector
   - period selector
-- Add stable `data-testid` hooks for:
-  - import batch rows
-  - reconciliation run rows
-  - return history rows
-  - primary modal submit buttons
+  - import batch rows and detail actions
+  - reconciliation run rows and detail actions
+  - return history rows and review actions
+  - primary client-form submit button
   - mobile navigation trigger
 
-These are not required for current coverage, but they would reduce ambiguity where repeated text and repeated controls exist.
+These hooks should be preferred for future Playwright coverage where repeated labels or repeated row actions would otherwise make selectors fragile.

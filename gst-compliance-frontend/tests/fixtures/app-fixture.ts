@@ -2344,3 +2344,4 @@ export const test = base.extend<{
 });
 
 export { expect };
+export type { Page };

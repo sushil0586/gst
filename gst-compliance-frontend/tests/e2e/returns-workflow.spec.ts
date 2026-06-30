@@ -91,9 +91,9 @@ test.describe("Returns workflow", () => {
     await page.goto("/returns");
     await returnsPage.expectReady();
 
-    const gstr1Row = page.getByRole("row", { name: /GSTR1.*2026-05/i });
+    const gstr1Row = page.getByTestId("return-row-return-gstr1");
     await expect(gstr1Row).toBeVisible();
-    await gstr1Row.getByRole("button", { name: "Review & file", exact: true }).click();
+    await gstr1Row.getByTestId("return-open-return-gstr1").click();
 
     const reviewDialog = page.getByRole("dialog", { name: "GSTR1 review summary" });
     await expect(reviewDialog).toBeVisible();

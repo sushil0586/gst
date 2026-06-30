@@ -134,9 +134,11 @@ function ClientFormDialogContent({
   });
   const workspaceId = useWatch({ control: form.control, name: "workspace" });
   const registrationType = useWatch({ control: form.control, name: "registration_type" });
+  const gstinValue = useWatch({ control: form.control, name: "gstin" });
   const { setSelectedClientId, setSelectedGstinId } = useWorkspaceContext();
   const [taxpayerLookupGstin, setTaxpayerLookupGstin] = useState("");
   const [taxpayerLookupResult, setTaxpayerLookupResult] = useState<GSTINTaxpayerSearchResult | null>(null);
+  const [showGstinSetup, setShowGstinSetup] = useState(false);
   const clientsQuery = useClientsQuery(workspaceId);
   const existingClientCodes = (clientsQuery.data?.items ?? []).map((client) => client.client_code);
 
@@ -146,6 +148,7 @@ function ClientFormDialogContent({
   const searchTaxpayerMutation = useSearchTaxpayerMutation(workspaceId);
   const isEditing = Boolean(initialValues);
   const isSubmitting = createMutation.isPending || bootstrapMutation.isPending || updateMutation.isPending;
+  const shouldShowGstinSetup = !isEditing && (showGstinSetup || Boolean(taxpayerLookupResult) || Boolean(gstinValue?.trim()));
 
   const handleSearchTaxpayer = async () => {
     if (!workspaceId) {
@@ -349,57 +352,70 @@ function ClientFormDialogContent({
           </div>
           {!isEditing ? (
             <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">
-              <div className="flex flex-col gap-1">
-                <p className="text-sm font-medium text-slate-900">Create GSTIN now</p>
-                <p className="text-sm leading-6 text-slate-600">
-                  Save the GST registration in the same step so onboarding does not need a second screen.
-                </p>
-              </div>
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="gstin">GSTIN</Label>
-                  <Input id="gstin" {...form.register("gstin")} maxLength={15} />
-                  {form.formState.errors.gstin ? (
-                    <p className="text-xs text-rose-600">{form.formState.errors.gstin.message}</p>
-                  ) : null}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="whitebooks_gst_username">Customer GST portal username (Recommended)</Label>
-                  <Input
-                    id="whitebooks_gst_username"
-                    {...form.register("whitebooks_gst_username")}
-                    placeholder="Enter the customer's GST portal username"
-                  />
-                  <p className="text-xs text-slate-500">
-                    Recommended for smoother filing access and later filing steps.
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-slate-900">Create GSTIN now</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    Add the GST registration in the same step, or skip it and add GSTIN later from the client workspace.
                   </p>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="state_code">State code</Label>
-                  <Input id="state_code" {...form.register("state_code")} maxLength={2} />
-                  {form.formState.errors.state_code ? (
-                    <p className="text-xs text-rose-600">{form.formState.errors.state_code.message}</p>
-                  ) : null}
-                </div>
-                <div className="space-y-2">
-                  <Label>Registration type</Label>
-                  <Select
-                    value={registrationType || "regular"}
-                    onValueChange={(value) => form.setValue("registration_type", value, { shouldDirty: true, shouldValidate: true })}
-                  >
-                    <SelectTrigger className="h-10 w-full">
-                      <SelectValue placeholder="Registration type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {GST_REGISTRATION_TYPE_OPTIONS.map((option) => (
-                        <SelectItem key={option.value} value={option.value}>
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {!shouldShowGstinSetup ? (
+                  <Button type="button" variant="outline" size="sm" onClick={() => setShowGstinSetup(true)}>
+                    Add GSTIN details
+                  </Button>
+                ) : null}
               </div>
+              {shouldShowGstinSetup ? (
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="gstin">GSTIN</Label>
+                    <Input id="gstin" {...form.register("gstin")} maxLength={15} />
+                    {form.formState.errors.gstin ? (
+                      <p className="text-xs text-rose-600">{form.formState.errors.gstin.message}</p>
+                    ) : null}
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="whitebooks_gst_username">Customer GST portal username (Recommended)</Label>
+                    <Input
+                      id="whitebooks_gst_username"
+                      {...form.register("whitebooks_gst_username")}
+                      placeholder="Enter the customer's GST portal username"
+                    />
+                    <p className="text-xs text-slate-500">
+                      Recommended for smoother filing access and later filing steps.
+                    </p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="state_code">State code</Label>
+                    <Input id="state_code" {...form.register("state_code")} maxLength={2} />
+                    {form.formState.errors.state_code ? (
+                      <p className="text-xs text-rose-600">{form.formState.errors.state_code.message}</p>
+                    ) : null}
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Registration type</Label>
+                    <Select
+                      value={registrationType || "regular"}
+                      onValueChange={(value) => form.setValue("registration_type", value, { shouldDirty: true, shouldValidate: true })}
+                    >
+                      <SelectTrigger className="h-10 w-full">
+                        <SelectValue placeholder="Registration type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {GST_REGISTRATION_TYPE_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-4 text-xs text-slate-500">
+                  Useful when the onboarding team already has GST registration details and wants to avoid a second setup step.
+                </p>
+              )}
             </div>
           ) : null}
           </AppModalBody>
@@ -413,7 +429,7 @@ function ClientFormDialogContent({
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 <ActionLabel kind="cancel" label="Cancel" />
               </Button>
-            <Button type="submit" disabled={isSubmitting}>
+            <Button type="submit" disabled={isSubmitting} data-testid="client-form-submit">
               {isEditing ? "Save changes" : form.getValues("gstin")?.trim() ? "Create client and GSTIN" : "Create client"}
             </Button>
             </div>

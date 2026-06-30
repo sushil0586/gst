@@ -745,7 +745,7 @@ export default function ApprovalsPage() {
                     tab: chooseGstr9ReviewTab(preparedReturn),
                   });
                   return (
-                    <TableRow key={approval.id}>
+                    <TableRow key={approval.id} data-testid={`approval-row-${approval.id}`}>
                       <TableCell>
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
@@ -779,18 +779,18 @@ export default function ApprovalsPage() {
                                 </Link>
                               </Button>
                             ) : (
-                              <Button size="sm" variant="ghost" onClick={() => setPreviewReturnId(preparedReturn.id)}>
+                              <Button size="sm" variant="ghost" data-testid={`approval-preview-${approval.id}`} onClick={() => setPreviewReturnId(preparedReturn.id)}>
                                 <ActionLabel kind="view" label="View return" />
                               </Button>
                             )
                           ) : null}
-                          <Button size="sm" variant="outline" onClick={() => { setSelectedApproval(approval); setActionType("approve"); }} disabled={approval.status !== "pending"}>
+                          <Button size="sm" variant="outline" data-testid={`approval-approve-${approval.id}`} onClick={() => { setSelectedApproval(approval); setActionType("approve"); }} disabled={approval.status !== "pending"}>
                             <ActionLabel kind="approve" label="Approve" />
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => { setSelectedApproval(approval); setActionType("reject"); }} disabled={approval.status !== "pending"}>
+                          <Button size="sm" variant="outline" data-testid={`approval-reject-${approval.id}`} onClick={() => { setSelectedApproval(approval); setActionType("reject"); }} disabled={approval.status !== "pending"}>
                             <ActionLabel kind="reject" label="Reject" />
                           </Button>
-                          <Button size="sm" variant="ghost" onClick={() => { setSelectedApproval(approval); setActionType("cancel"); }} disabled={approval.status !== "pending"}>
+                          <Button size="sm" variant="ghost" data-testid={`approval-cancel-${approval.id}`} onClick={() => { setSelectedApproval(approval); setActionType("cancel"); }} disabled={approval.status !== "pending"}>
                             <ActionLabel kind="cancel" label="Cancel" />
                           </Button>
                         </div>
@@ -803,7 +803,20 @@ export default function ApprovalsPage() {
           </div>
           </div>
         ) : (
-          <EmptyState title="No approvals found" description="Approval requests will appear here when returns or other entities are sent for review." />
+          <EmptyState
+            title="No approvals found"
+            description="Approval requests will appear here when returns or other entities are sent for review."
+            action={
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <Button size="sm" asChild>
+                  <Link href="/returns">Open returns workspace</Link>
+                </Button>
+                <Button size="sm" variant="outline" asChild>
+                  <Link href="/imports">Review imports</Link>
+                </Button>
+              </div>
+            }
+          />
         )}
       </SectionCard>
 

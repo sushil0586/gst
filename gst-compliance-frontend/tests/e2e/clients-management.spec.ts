@@ -66,4 +66,30 @@ test.describe("Clients management", () => {
     await expect(page.getByText("PAN must be 10 characters.")).toBeVisible();
     await expect(page.getByText("Enter a valid email address.")).toBeVisible();
   });
+
+  test("reveals optional GSTIN setup progressively and prefills client details from taxpayer lookup", async ({ page, app }) => {
+    const clientsPage = new ClientsPage(page);
+
+    await app.mockAuthenticatedShell();
+    await app.mockFoundationApis();
+
+    await clientsPage.goto();
+    await clientsPage.openAddClient();
+
+    const createDialog = page.getByRole("dialog", { name: "Create client" });
+    await expect(createDialog).toBeVisible();
+    await expect(createDialog.getByLabel("GSTIN", { exact: true })).toHaveCount(0);
+
+    await createDialog.getByRole("button", { name: "Add GSTIN details", exact: true }).click();
+    await expect(createDialog.getByLabel("GSTIN", { exact: true })).toBeVisible();
+
+    await createDialog.getByPlaceholder("Enter GSTIN").fill("27ABCDE1234F1Z5");
+    await createDialog.getByRole("button", { name: "Fetch taxpayer", exact: true }).click();
+
+    await expect(page.getByText("Taxpayer details fetched. Review and create the client.")).toBeVisible();
+    await expect(createDialog.getByLabel("Legal name")).toHaveValue("Lookup Client Private Limited");
+    await expect(createDialog.getByLabel("Trade name")).toHaveValue("Lookup Client");
+    await expect(createDialog.getByLabel("PAN")).toHaveValue("ABCDE1234F");
+    await expect(createDialog.getByRole("button", { name: "Create client and GSTIN", exact: true })).toBeVisible();
+  });
 });

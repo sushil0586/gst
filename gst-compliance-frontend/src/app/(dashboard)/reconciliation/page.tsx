@@ -1139,7 +1139,7 @@ export default function ReconciliationPage() {
               </TableHeader>
               <TableBody>
                 {runsQuery.data.items.map((entry) => (
-                  <TableRow key={entry.id}>
+                  <TableRow key={entry.id} data-testid={`reconciliation-run-row-${entry.id}`}>
                     <TableCell>
                       <div>
                         <p className="font-medium text-slate-900">{entry.run_type.replace(/_/g, " ")}</p>
@@ -1160,7 +1160,7 @@ export default function ReconciliationPage() {
                     <TableCell>Rs. {formatMoney(entry.total_itc_at_risk)}</TableCell>
                     <TableCell>{formatDateTime(entry.processed_at || entry.created_at)}</TableCell>
                     <TableCell className="text-right">
-                      <Button variant="outline" size="sm" onClick={() => setSelectedRunId(entry.id)}>
+                      <Button variant="outline" size="sm" data-testid={`reconciliation-run-open-${entry.id}`} onClick={() => setSelectedRunId(entry.id)}>
                         <ActionLabel kind="view" label="View run" />
                       </Button>
                     </TableCell>

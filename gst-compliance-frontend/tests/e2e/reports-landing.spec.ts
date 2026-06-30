@@ -30,6 +30,79 @@ test.describe("Reports landing", () => {
     await expect(page.getByText("Normalized GST transactions", { exact: true })).toBeVisible();
   });
 
+  test("surfaces focused deep-link guidance and lets the operator inspect transaction detail", async ({ page, app }) => {
+    await app.mockAuthenticatedShell();
+    await app.mockReportsWorkflowApis();
+
+    await page.goto("/reports?client=client-1&period=period-1&ids=txn-2&focus=missing_hsn&suggest_mode=bulk_correct&suggest_fields=hsn_code");
+
+    await expect(page.getByText("Showing the exact transactions linked to")).toBeVisible();
+    await expect(page.getByText("Suggested bulk fix: fill HSN code").first()).toBeVisible();
+    const bulkDialog = page.getByRole("dialog", { name: "Bulk correct filing metadata" });
+    await expect(bulkDialog).toBeVisible();
+    await bulkDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+
+    await page.getByRole("button", { name: "View detail", exact: true }).nth(1).click();
+
+    const detailDialog = page.getByRole("dialog", { name: "Transaction detail" });
+    await expect(detailDialog).toBeVisible();
+    await expect(detailDialog.getByText("Document summary", { exact: true })).toBeVisible();
+    await expect(detailDialog).toContainText("PUR-002");
+    await expect(detailDialog).toContainText("Vendor Two");
+  });
+
+  test("lets the operator correct transaction metadata from the detail drill-down", async ({ page, app }) => {
+    await app.mockAuthenticatedShell();
+    await app.mockReportsWorkflowApis();
+
+    await page.goto("/reports");
+
+    await page.getByRole("button", { name: "View detail", exact: true }).nth(1).click();
+
+    const detailDialog = page.getByRole("dialog", { name: "Transaction detail" });
+    await expect(detailDialog).toBeVisible();
+    await detailDialog.getByRole("button", { name: "Edit metadata", exact: true }).click();
+
+    const editDialog = page.getByRole("dialog", { name: "Correct transaction metadata" });
+    await expect(editDialog).toBeVisible();
+    await editDialog.locator("input").first().fill("Vendor Two Updated");
+    await editDialog.getByRole("button", { name: "Save corrections", exact: true }).click();
+
+    await expect(page.getByText("Transaction corrections saved.")).toBeVisible();
+    await expect(detailDialog).toContainText("Vendor Two Updated");
+  });
+
+  test("shows a no-results state when the focused transaction set is empty", async ({ page, app }) => {
+    const reportsPage = new ReportsPage(page);
+
+    await app.mockAuthenticatedShell();
+    await app.mockReportsWorkflowApis();
+
+    await page.route(/\/api\/backend\/gst-transactions\/?(?:\?.*)?$/, async (route) => {
+      const url = new URL(route.request().url());
+      if (url.searchParams.get("ids") === "missing-row") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            status: "success",
+            message: "Success",
+            data: [],
+            pagination: { count: 0, next: null, previous: null, page: 1, page_size: 50 },
+          }),
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+    await page.goto("/reports?client=client-1&period=period-1&ids=missing-row&focus=missing_hsn");
+
+    await reportsPage.expectReady();
+    await expect(page.getByText("Showing the exact transactions linked to")).toBeVisible();
+    await expect(page.getByText("No transactions match these filters")).toBeVisible();
+  });
+
   test("explains when client and period context are missing", async ({ page, app }) => {
     const reportsPage = new ReportsPage(page);
 

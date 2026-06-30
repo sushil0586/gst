@@ -105,4 +105,60 @@ test.describe("Transaction review remediation", () => {
     await updatedFollowUpCard.getByRole("button", { name: "Mark completed", exact: true }).click();
     await expect(page.getByText("Follow-up completed.")).toBeVisible();
   });
+
+  test("requires a saved-view name and preserves the dialog when the operator submits it empty", async ({ page, app }) => {
+    await app.mockAuthenticatedShell();
+    await app.mockReportsWorkflowApis();
+
+    await page.goto("/reports");
+
+    await expect(page.getByRole("main").getByRole("heading", { name: "Transaction Review", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Save current view", exact: true }).click();
+
+    const saveViewDialog = page.getByRole("dialog", { name: "Save review view" });
+    await expect(saveViewDialog).toBeVisible();
+    await saveViewDialog.getByRole("button", { name: "Save view", exact: true }).click();
+
+    await expect(page.getByText("Name the saved view before storing it.")).toBeVisible();
+    await expect(saveViewDialog).toBeVisible();
+  });
+
+  test("shows an API error and keeps the follow-up dialog open when follow-up creation fails", async ({ page, app }) => {
+    await app.mockAuthenticatedShell();
+    await app.mockReportsWorkflowApis();
+    await app.mockWorkspaceMembersApis();
+
+    await page.route(/\/api\/backend\/gst-transaction-remediation-follow-ups\/?(?:\?.*)?$/, async (route) => {
+      if (route.request().method() === "POST") {
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "Follow-up service unavailable" }),
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+    await page.goto("/reports");
+
+    await expect(page.getByRole("main").getByRole("heading", { name: "Transaction Review", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Assign bucket", exact: true }).first().click();
+    const assignmentDialog = page.getByRole("dialog", { name: "Assign remediation work" });
+    await assignmentDialog.getByRole("combobox").first().click();
+    await page.getByRole("option", { name: /Filer User/i }).click();
+    await assignmentDialog.getByRole("button", { name: "Create assignment", exact: true }).click();
+    await expect(page.getByText("Remediation assignment created.")).toBeVisible();
+
+    await page.getByRole("button", { name: "Create follow-up", exact: true }).click();
+
+    const followUpDialog = page.getByRole("dialog", { name: "Create follow-up" });
+    await expect(followUpDialog).toBeVisible();
+    await followUpDialog.getByRole("textbox").first().fill("Retry HSN follow-up");
+    await followUpDialog.locator('input[type="datetime-local"]').fill("2026-06-11T10:30");
+    await followUpDialog.getByRole("button", { name: "Create follow-up", exact: true }).click();
+
+    await expect(followUpDialog).toBeVisible();
+    await expect(page.getByText("Follow-up created.")).toHaveCount(0);
+  });
 });

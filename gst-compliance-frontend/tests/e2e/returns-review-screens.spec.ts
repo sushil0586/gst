@@ -96,6 +96,28 @@ test.describe("Return review screens", () => {
     await expect(page.getByText("One monthly source period is missing")).toBeVisible();
   });
 
+  test("lets the user switch GSTR-9 annual tabs and return to the returns workspace", async ({ page, app }) => {
+    const reviewPage = new ReturnReviewPage(page);
+
+    await app.mockAuthenticatedShell();
+    await app.mockReturnReviewApis();
+
+    await page.goto("/returns/gstr9-review?workspace=workspace-1&client=client-1&gstin=gstin-1&period=period-1&returnId=return-gstr9");
+
+    await reviewPage.expectHeading("GSTR-9 Review");
+    await expect(page.getByText("Prepared GSTR-9 snapshot", { exact: true })).toBeVisible();
+
+    await page.getByRole("tab", { name: "ITC", exact: true }).click();
+    await expect(page.getByText("Annual ITC summary", { exact: true })).toBeVisible();
+
+    await page.getByRole("tab", { name: "Exceptions", exact: true }).click();
+    await expect(page.getByText("Annual exception posture", { exact: true })).toBeVisible();
+    await expect(page.getByText("Exception-focused warnings", { exact: true })).toBeVisible();
+
+    await page.getByRole("link", { name: "Return to returns workspace", exact: true }).click();
+    await expect(page).toHaveURL(/\/returns\?workspace=workspace-1&client=client-1&gstin=gstin-1&period=period-1&returnId=return-gstr9$/);
+  });
+
   test("loads GSTR-9C review with annual comparison details", async ({ page, app }) => {
     const reviewPage = new ReturnReviewPage(page);
 
@@ -109,6 +131,25 @@ test.describe("Return review screens", () => {
     await expect(page.getByText("Comparison details")).toBeVisible();
     await expect(page.getByText("Rs. 1,50,000.00")).toBeVisible();
     await expect(page.getByText("Rs. 25,000.00")).toBeVisible();
+  });
+
+  test("lets the user switch GSTR-9C annual comparison tabs", async ({ page, app }) => {
+    const reviewPage = new ReturnReviewPage(page);
+
+    await app.mockAuthenticatedShell();
+    await app.mockReturnReviewApis();
+
+    await page.goto("/returns/gstr9c-review?workspace=workspace-1&client=client-1&gstin=gstin-1&period=period-1&returnId=return-gstr9c");
+
+    await reviewPage.expectHeading("GSTR-9C Review");
+    await expect(page.getByText("Annual comparison summary", { exact: true })).toBeVisible();
+
+    await page.getByRole("tab", { name: "GSTR-9 Base", exact: true }).click();
+    await expect(page.getByText("Anchor GSTR-9 base", { exact: true })).toBeVisible();
+
+    await page.getByRole("tab", { name: "Exceptions", exact: true }).click();
+    await expect(page.getByText("Warnings and blockers", { exact: true })).toBeVisible();
+    await expect(page.getByText("Source dependencies", { exact: true })).toBeVisible();
   });
 
   test("shows a full-context prompt before opening annual review pages", async ({ page, app }) => {

@@ -14,7 +14,7 @@ test.describe("Reconciliation", () => {
     await reconciliationPage.runReconciliation();
 
     await expect(page.getByText("Reconciliation run created.")).toBeVisible();
-    await page.getByRole("button", { name: "View run" }).click();
+    await page.getByTestId("reconciliation-run-open-run-1").click();
     await expect(page.getByText("Vendor One")).toBeVisible();
   });
 
@@ -24,7 +24,8 @@ test.describe("Reconciliation", () => {
 
     await page.goto("/reconciliation");
 
-    await page.getByRole("button", { name: "View run" }).click();
+    await expect(page.getByTestId("reconciliation-run-row-run-1")).toBeVisible();
+    await page.getByTestId("reconciliation-run-open-run-1").click();
     const issueRow = page.getByRole("row").filter({ hasText: "Vendor One" });
     await issueRow.getByRole("button", { name: "Review", exact: true }).click();
 

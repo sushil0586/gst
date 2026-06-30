@@ -1286,7 +1286,7 @@ export default function ImportsPage() {
                       <p className="truncate text-sm text-slate-900">{batch.uploaded_by_name ?? "System"}</p>
                       <p className="text-xs text-slate-500">{formatDateTime(batch.created_at)}</p>
                     </div>
-                    <Button variant="outline" size="sm" onClick={() => setSelectedBatchId(batch.id)}>
+                    <Button variant="outline" size="sm" data-testid={`import-batch-open-${batch.id}`} onClick={() => setSelectedBatchId(batch.id)}>
                       <ActionLabel kind="view" label="View details" />
                     </Button>
                   </div>
@@ -1311,7 +1311,7 @@ export default function ImportsPage() {
                 </TableHeader>
                 <TableBody>
                   {batchesQuery.data.items.map((batch) => (
-                    <TableRow key={batch.id}>
+                    <TableRow key={batch.id} data-testid={`import-batch-row-${batch.id}`}>
                       <TableCell>
                         <div>
                           <p className="font-medium text-slate-900">{batch.file_name}</p>
@@ -1354,7 +1354,7 @@ export default function ImportsPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="outline" size="sm" onClick={() => setSelectedBatchId(batch.id)}>
+                        <Button variant="outline" size="sm" data-testid={`import-batch-open-${batch.id}`} onClick={() => setSelectedBatchId(batch.id)}>
                           <ActionLabel kind="view" label="View details" />
                         </Button>
                       </TableCell>

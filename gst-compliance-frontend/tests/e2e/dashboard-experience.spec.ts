@@ -1,4 +1,6 @@
-import { expect, test, type Page } from "../fixtures/app-fixture";
+import type { Page, Route } from "@playwright/test";
+
+import { expect, test } from "../fixtures/app-fixture";
 import { createCloseManagerReport, createDashboardSummary } from "../fixtures/app-data";
 import { DashboardPage } from "../pages/dashboard-page";
 
@@ -42,7 +44,7 @@ async function mockDashboardSurface(
     filingOperations?: Array<Record<string, unknown>>;
   },
 ) {
-  await page.route(/\/api\/backend\/dashboard\/summary\/?(?:\?.*)?$/, async (route) => {
+  await page.route(/\/api\/backend\/dashboard\/summary\/?(?:\?.*)?$/, async (route: Route) => {
     if (options?.summaryError) {
       await route.fulfill({
         status: 500,
@@ -55,15 +57,15 @@ async function mockDashboardSurface(
     await route.fulfill(jsonSuccess(options?.summary ?? createDashboardSummary()));
   });
 
-  await page.route(/\/api\/backend\/dashboard\/close-manager\/report\/?(?:\?.*)?$/, async (route) => {
+  await page.route(/\/api\/backend\/dashboard\/close-manager\/report\/?(?:\?.*)?$/, async (route: Route) => {
     await route.fulfill(jsonSuccess(createCloseManagerReport()));
   });
 
-  await page.route("**/api/backend/gst-transaction-remediation-digests/**", async (route) => {
+  await page.route("**/api/backend/gst-transaction-remediation-digests/**", async (route: Route) => {
     await route.fulfill(paginated(options?.digests ?? []));
   });
 
-  await page.route("**/api/backend/filings/operations/**", async (route) => {
+  await page.route("**/api/backend/filings/operations/**", async (route: Route) => {
     await route.fulfill(paginated(options?.filingOperations ?? []));
   });
 }

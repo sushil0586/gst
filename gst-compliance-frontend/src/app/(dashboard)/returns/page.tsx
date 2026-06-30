@@ -2364,7 +2364,7 @@ export default function ReturnsPage() {
               </TableHeader>
               <TableBody>
                 {returnsQuery.data.items.map((preparedReturn) => (
-                  <TableRow key={preparedReturn.id}>
+                  <TableRow key={preparedReturn.id} data-testid={`return-row-${preparedReturn.id}`}>
                     <TableCell>
                       <div>
                         <p className="font-medium text-slate-900">{preparedReturn.return_type.toUpperCase()}</p>
@@ -2388,6 +2388,7 @@ export default function ReturnsPage() {
                       <Button
                         variant="outline"
                         size="sm"
+                        data-testid={`return-open-${preparedReturn.id}`}
                         onClick={() => {
                           setFilingActionFeedback(null);
                           setManualSelectedReturnId(preparedReturn.id);

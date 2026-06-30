@@ -44,4 +44,22 @@ test.describe("GSTIN management", () => {
     await expect(page.getByRole("button", { name: "Add GSTIN" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Edit" })).toHaveCount(0);
   });
+
+  test("shows validation feedback before creating a GSTIN", async ({ page, app }) => {
+    const gstinsPage = new GstinsPage(page);
+
+    await app.mockAuthenticatedShell();
+    await app.mockFoundationApis();
+
+    await gstinsPage.goto();
+    await gstinsPage.openAddGstin();
+
+    const createDialog = page.getByRole("dialog", { name: "Create GSTIN" });
+    await createDialog.getByLabel("GSTIN", { exact: true }).fill("123");
+    await createDialog.getByLabel("State code", { exact: true }).fill("2");
+    await createDialog.getByRole("button", { name: "Create GSTIN", exact: true }).click();
+
+    await expect(createDialog.getByText("GSTIN must be 15 characters.")).toBeVisible();
+    await expect(createDialog.getByText("State code is required.")).toBeVisible();
+  });
 });

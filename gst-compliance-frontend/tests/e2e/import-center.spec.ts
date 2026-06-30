@@ -88,6 +88,20 @@ test.describe("Import center", () => {
     await expect(detailsDialog.getByRole("heading", { name: "No row-level issues" })).toBeVisible();
   });
 
+  test("opens import history details from a stable batch action hook", async ({ page, app }) => {
+    await app.mockAuthenticatedShell();
+    await app.mockImportsApis();
+
+    await page.goto("/imports");
+
+    await page.getByTestId("import-batch-row-batch-1").getByTestId("import-batch-open-batch-1").click();
+
+    const detailsDialog = page.getByRole("dialog", { name: "Import batch details" });
+    await expect(detailsDialog).toBeVisible();
+    await expect(page.getByTestId("import-batch-row-batch-1")).toBeVisible();
+    await expect(detailsDialog).toContainText("purchase_standard.csv");
+  });
+
   test("opens batch-level reprocess, replace, and discard dialogs from import details", async ({ page, app }) => {
     const importsPage = new ImportsPage(page);
 
@@ -150,6 +164,6 @@ test.describe("Import center", () => {
     await expect(page.locator("table")).not.toBeVisible();
     await expect(page.getByText("sales_standard.csv").first()).toBeVisible();
     await expect(page.getByText("Valid / Invalid").first()).toBeVisible();
-    await expect(page.getByRole("button", { name: "View details" }).first()).toBeVisible();
+    await expect(page.locator('[data-testid="import-batch-open-batch-1"]:visible').first()).toBeVisible();
   });
 });

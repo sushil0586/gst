@@ -13,8 +13,8 @@ test.describe("Approvals workflow", () => {
     await requestableRow.getByRole("button", { name: "Request approval", exact: true }).click();
     await expect(page.getByText("Approval request created.")).toBeVisible();
 
-    const pendingRow = page.getByRole("row").filter({ hasText: "return preparation" }).filter({ hasText: "return-1" });
-    await pendingRow.getByRole("button", { name: "Approve", exact: true }).click();
+    const pendingRow = page.getByTestId("approval-row-approval-1");
+    await pendingRow.getByTestId("approval-approve-approval-1").click();
     const actionDialog = page.getByRole("dialog", { name: "Approve approval request" });
     await actionDialog.getByLabel("Review remarks").fill("Reviewed and approved for controlled filing.");
     await actionDialog.getByRole("button", { name: "Confirm", exact: true }).click();
@@ -42,8 +42,8 @@ test.describe("Approvals workflow", () => {
 
     await page.goto("/approvals");
 
-    const pendingRow = page.getByRole("row").filter({ hasText: "return preparation" }).filter({ hasText: "return-1" });
-    await pendingRow.getByRole("button", { name: "Reject", exact: true }).click();
+    const pendingRow = page.getByTestId("approval-row-approval-1");
+    await pendingRow.getByTestId("approval-reject-approval-1").click();
 
     const actionDialog = page.getByRole("dialog", { name: "Reject approval request" });
     await expect(actionDialog).toBeVisible();
@@ -67,6 +67,8 @@ test.describe("Approvals workflow", () => {
     await expect(
       page.getByText("Approval requests will appear here when returns or other entities are sent for review."),
     ).toBeVisible();
+    await expect(page.getByRole("link", { name: "Open returns workspace", exact: true })).toHaveAttribute("href", "/returns");
+    await expect(page.getByRole("link", { name: "Review imports", exact: true })).toHaveAttribute("href", "/imports");
   });
 
   test("shows a clear error state when the approval queue cannot be loaded", async ({ page, app }) => {
