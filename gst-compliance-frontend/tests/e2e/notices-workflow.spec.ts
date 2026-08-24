@@ -1,6 +1,12 @@
 import { expect, test } from "../fixtures/app-fixture";
 import { NoticesPage } from "../pages/notices-page";
 
+async function openDialogSelectOption(dialog: ReturnType<NoticesPage["noticeDialog"]>, label: string, optionName: string) {
+  const field = dialog.locator("label").filter({ hasText: label }).first().locator("xpath=..");
+  await field.getByRole("combobox").click();
+  await dialog.page().getByRole("option", { name: optionName, exact: true }).click();
+}
+
 test.describe("Notices workflow", () => {
   test("creates, filters, and updates a notice from the register", async ({ page, app }) => {
     const noticesPage = new NoticesPage(page);
@@ -29,11 +35,9 @@ test.describe("Notices workflow", () => {
     await noticesPage.noticeDialog().getByLabel("Response due date").fill("2026-06-25");
     await noticesPage.noticeDialog().getByLabel("Description").fill("Officer asked for additional registration support documents.");
 
-    await noticesPage.noticeDialog().getByRole("combobox").nth(1).click();
-    await page.getByRole("option", { name: "Escalated" }).click();
+    await openDialogSelectOption(noticesPage.noticeDialog(), "Status", "Escalated");
 
-    await noticesPage.noticeDialog().getByRole("combobox").nth(2).click();
-    await page.getByRole("option", { name: "Senior Reviewer" }).click();
+    await openDialogSelectOption(noticesPage.noticeDialog(), "Owner", "Senior Reviewer");
 
     await noticesPage.noticeDialog().getByRole("button", { name: "Create notice" }).click();
     await expect(page.getByText("Notice created.")).toBeVisible();
@@ -48,8 +52,7 @@ test.describe("Notices workflow", () => {
     await expect(noticesPage.noticeDialog().getByRole("heading", { name: "Update notice" })).toBeVisible();
 
     await noticesPage.noticeDialog().getByLabel("Title").fill("Registration clarification resolved");
-    await noticesPage.noticeDialog().getByRole("combobox").nth(1).click();
-    await page.getByRole("option", { name: "Closed" }).click();
+    await openDialogSelectOption(noticesPage.noticeDialog(), "Status", "Closed");
     await noticesPage.noticeDialog().getByRole("button", { name: "Update notice" }).click();
 
     await expect(page.getByText("Notice updated.")).toBeVisible();
@@ -106,5 +109,41 @@ test.describe("Notices workflow", () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByLabel("Reference number")).toHaveValue("");
     await expect(dialog.getByLabel("Title")).toHaveValue("");
+  });
+
+  test("@launch shows launch-ready notice posture with overdue visibility and live owner reassignment", async ({ page, app }) => {
+    const noticesPage = new NoticesPage(page);
+
+    await app.mockAuthenticatedShell();
+    await app.mockFoundationApis();
+    await app.mockNoticesApis();
+
+    await noticesPage.goto();
+    await noticesPage.expectReady();
+
+    await expect(page.getByText("Operational posture", { exact: true })).toBeVisible();
+    await expect(page.getByText("Use these live metrics to see where notice response work needs immediate attention.")).toBeVisible();
+    await expect(page.getByText("Open notices", { exact: true })).toBeVisible();
+    await expect(page.getByText("Escalated", { exact: true })).toBeVisible();
+    await expect(page.getByText("Assigned owners", { exact: true })).toBeVisible();
+    await expect(page.getByText("Overdue responses", { exact: true })).toBeVisible();
+    await expect(page.getByText("Ownership rule", { exact: true })).toBeVisible();
+
+    const overdueRow = page.getByRole("row", { name: /ASMT-10\/2026\/1184/ });
+    await expect(overdueRow).toBeVisible();
+    await expect(overdueRow).toContainText("Overdue");
+    await expect(overdueRow).toContainText("Filer User");
+
+    await overdueRow.getByRole("button", { name: "Update" }).click();
+    const dialog = noticesPage.noticeDialog();
+    await expect(dialog.getByRole("heading", { name: "Update notice" })).toBeVisible();
+    await expect(dialog.getByText("GSTIN stays locked during updates so the notice history remains traceable.")).toBeVisible();
+
+    await openDialogSelectOption(dialog, "Owner", "Senior Reviewer");
+    await dialog.getByRole("button", { name: "Update notice" }).click();
+
+    await expect(page.getByText("Notice updated.")).toBeVisible();
+    await expect(overdueRow).toContainText("Senior Reviewer");
+    await expect(overdueRow).toContainText("open");
   });
 });

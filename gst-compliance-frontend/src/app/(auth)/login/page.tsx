@@ -62,7 +62,7 @@ export default function LoginPage() {
           </div>
         </CardHeader>
         <CardContent className="px-6 py-6">
-          <form className="space-y-4" onSubmit={onSubmit}>
+          <form className="space-y-4" method="post" action="/api/auth/login" onSubmit={onSubmit}>
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input id="email" {...form.register("email")} />
@@ -77,7 +77,7 @@ export default function LoginPage() {
                 <p className="text-xs text-rose-600">{form.formState.errors.password.message}</p>
               ) : null}
             </div>
-            <Button className="h-10 w-full rounded-xl" type="submit">
+            <Button className="h-10 w-full rounded-xl" type="submit" disabled={form.formState.isSubmitting}>
               {form.formState.isSubmitting ? "Signing in..." : "Sign in"}
             </Button>
             <Button type="button" variant="outline" className="w-full" onClick={() => router.push("/register")}>

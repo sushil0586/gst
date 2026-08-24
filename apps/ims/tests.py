@@ -1,0 +1,300 @@
+from datetime import timedelta
+
+import pytest
+from django.contrib.auth import get_user_model
+from django.utils import timezone
+from rest_framework.test import APIClient
+
+from apps.accounts.models import WorkspaceMembership, WorkspaceRole
+from apps.clients.models import Client
+from apps.filings.models import ProviderAuthSession
+from apps.gstins.models import GSTIN
+from apps.organizations.models import Organization
+from apps.workspaces.models import Workspace
+
+User = get_user_model()
+
+
+@pytest.fixture
+def ims_api_client():
+    return APIClient()
+
+
+@pytest.fixture
+def ims_context(db):
+    owner = User.objects.create_user(
+        username="ims-owner",
+        email="ims-owner@example.com",
+        password="strong-pass-123",
+    )
+    viewer = User.objects.create_user(
+        username="ims-viewer",
+        email="ims-viewer@example.com",
+        password="strong-pass-123",
+    )
+    organization = Organization.objects.create(
+        name="IMS Test Org",
+        code="IMS-ORG",
+        created_by=owner,
+        updated_by=owner,
+    )
+    workspace = Workspace.objects.create(
+        organization=organization,
+        name="IMS Workspace",
+        code="IMS-WS",
+        created_by=owner,
+        updated_by=owner,
+    )
+    WorkspaceMembership.objects.create(
+        user=owner,
+        workspace=workspace,
+        role=WorkspaceRole.OWNER,
+        created_by=owner,
+        updated_by=owner,
+    )
+    WorkspaceMembership.objects.create(
+        user=viewer,
+        workspace=workspace,
+        role=WorkspaceRole.VIEWER,
+        created_by=owner,
+        updated_by=owner,
+    )
+    client = Client.objects.create(
+        workspace=workspace,
+        legal_name="IMS Client Private Limited",
+        trade_name="IMS Client",
+        client_code="IMS001",
+        pan="ABCDE1234K",
+        email="finance@ims.example.com",
+        created_by=owner,
+        updated_by=owner,
+    )
+    gstin = GSTIN.objects.create(
+        client=client,
+        gstin="29ABCDE1234K1Z7",
+        registration_type="regular",
+        state_code="29",
+        whitebooks_gst_username="KA_IMS_USER",
+        created_by=owner,
+        updated_by=owner,
+    )
+    auth_session = ProviderAuthSession.objects.create(
+        workspace=workspace,
+        client=client,
+        gstin=gstin,
+        provider="whitebooks",
+        email="otp@ims.example.com",
+        txn="txn-ims-123",
+        status=ProviderAuthSession.SessionStatus.SESSION_ACTIVE,
+        response_contract_confirmed=True,
+        verified_at=timezone.now(),
+        created_by=owner,
+        updated_by=owner,
+        initiated_by=owner,
+        verified_by=owner,
+    )
+    return {
+        "owner": owner,
+        "viewer": viewer,
+        "workspace": workspace,
+        "client": client,
+        "gstin": gstin,
+        "auth_session": auth_session,
+    }
+
+
+@pytest.fixture
+def ims_owner_client(ims_context):
+    client = APIClient()
+    client.force_authenticate(user=ims_context["owner"])
+    return client
+
+
+@pytest.fixture
+def ims_viewer_client(ims_context):
+    client = APIClient()
+    client.force_authenticate(user=ims_context["viewer"])
+    return client
+
+
+@pytest.mark.django_db
+def test_owner_can_save_ims_payload(ims_owner_client, ims_context, monkeypatch):
+    captured = {}
+
+    def fake_ims_save(self, **kwargs):
+        captured.update(kwargs)
+        return {"status_cd": "1", "message": "saved"}
+
+    monkeypatch.setattr("apps.integrations.whitebooks.client.WhiteBooksClient.ims_save", fake_ims_save)
+
+    response = ims_owner_client.post(
+        "/api/v1/ims/save/",
+        {
+            "workspace": str(ims_context["workspace"].id),
+            "client": str(ims_context["client"].id),
+            "gstin": str(ims_context["gstin"].id),
+            "auth_session": str(ims_context["auth_session"].id),
+            "ret_period": "042026",
+            "invdata": {"b2b": [{"ctin": "29ABCDE1234F1Z5"}]},
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.data["message"] == "IMS draft saved"
+    assert captured["email"] == "otp@ims.example.com"
+    assert captured["gstin"] == "29ABCDE1234K1Z7"
+    assert captured["ret_period"] == "042026"
+    assert captured["txn"] == "txn-ims-123"
+    assert captured["state_code"] == "29"
+    assert captured["gst_username"] == "KA_IMS_USER"
+    assert captured["payload"]["rtin"] == "29ABCDE1234K1Z7"
+    assert captured["payload"]["reqtyp"] == "SAVE"
+    assert captured["payload"]["invdata"]["b2b"][0]["ctin"] == "29ABCDE1234F1Z5"
+
+
+@pytest.mark.django_db
+def test_viewer_cannot_save_ims_payload(ims_viewer_client, ims_context):
+    response = ims_viewer_client.post(
+        "/api/v1/ims/save/",
+        {
+            "workspace": str(ims_context["workspace"].id),
+            "client": str(ims_context["client"].id),
+            "gstin": str(ims_context["gstin"].id),
+            "ret_period": "042026",
+            "invdata": {"b2b": []},
+        },
+        format="json",
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_viewer_can_fetch_ims_invoices_using_latest_auth_session(ims_viewer_client, ims_context, monkeypatch):
+    captured = {}
+
+    def fake_ims_invoices(self, **kwargs):
+        captured.update(kwargs)
+        return {"status_cd": "1", "invoices": [{"inum": "INV-001"}]}
+
+    monkeypatch.setattr("apps.integrations.whitebooks.client.WhiteBooksClient.ims_invoices", fake_ims_invoices)
+
+    response = ims_viewer_client.get(
+        "/api/v1/ims/invoices/",
+        {
+            "workspace": str(ims_context["workspace"].id),
+            "client": str(ims_context["client"].id),
+            "gstin": str(ims_context["gstin"].id),
+            "section": "B2B",
+            "status": "PENDING",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.data["data"]["invoices"][0]["inum"] == "INV-001"
+    assert captured["email"] == "otp@ims.example.com"
+    assert captured["txn"] == "txn-ims-123"
+    assert captured["section"] == "B2B"
+    assert captured["status"] == "PENDING"
+
+
+@pytest.mark.django_db
+def test_ims_status_rejects_stale_auth_session(ims_owner_client, ims_context):
+    ims_context["auth_session"].verified_at = timezone.now() - timedelta(hours=7)
+    ims_context["auth_session"].save(update_fields=["verified_at", "updated_at"])
+
+    response = ims_owner_client.get(
+        "/api/v1/ims/status/",
+        {
+            "workspace": str(ims_context["workspace"].id),
+            "client": str(ims_context["client"].id),
+            "gstin": str(ims_context["gstin"].id),
+            "auth_session": str(ims_context["auth_session"].id),
+            "int_tran_id": "ims-int-001",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "older than" in response.data["errors"]["auth_session"][0]
+
+
+@pytest.mark.django_db
+def test_ims_save_rejects_gstin_from_another_client(ims_owner_client, ims_context):
+    another_client = Client.objects.create(
+        workspace=ims_context["workspace"],
+        legal_name="Another IMS Client",
+        trade_name="Another IMS Client",
+        client_code="IMS002",
+        pan="ABCDE1234L",
+        email="another@ims.example.com",
+        created_by=ims_context["owner"],
+        updated_by=ims_context["owner"],
+    )
+
+    response = ims_owner_client.post(
+        "/api/v1/ims/save/",
+        {
+            "workspace": str(ims_context["workspace"].id),
+            "client": str(another_client.id),
+            "gstin": str(ims_context["gstin"].id),
+            "ret_period": "042026",
+            "invdata": {"b2b": []},
+            "txn": "manual-txn",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.data["errors"]["gstin"][0] == "GSTIN does not belong to the selected client."
+
+
+@pytest.mark.django_db
+def test_ims_supplier_invoices_rejects_invalid_return_period(ims_owner_client, ims_context):
+    response = ims_owner_client.get(
+        "/api/v1/ims/supplier-invoices/",
+        {
+            "workspace": str(ims_context["workspace"].id),
+            "client": str(ims_context["client"].id),
+            "gstin": str(ims_context["gstin"].id),
+            "ret_period": "2026-04",
+            "section": "B2B",
+            "rtn_type": "GSTR1",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.data["errors"]["ret_period"][0] == "ret_period must use WhiteBooks MMYYYY format."
+
+
+@pytest.mark.django_db
+def test_ims_invoices_rejects_invalid_status_code(ims_viewer_client, ims_context):
+    response = ims_viewer_client.get(
+        "/api/v1/ims/invoices/",
+        {
+            "workspace": str(ims_context["workspace"].id),
+            "client": str(ims_context["client"].id),
+            "gstin": str(ims_context["gstin"].id),
+            "section": "B2B",
+            "status": "PROCESSING",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "PROCESSING" in response.data["errors"]["status"][0]
+
+
+@pytest.mark.django_db
+def test_ims_invoice_count_rejects_invalid_goods_type(ims_viewer_client, ims_context):
+    response = ims_viewer_client.get(
+        "/api/v1/ims/invoices-count/",
+        {
+            "workspace": str(ims_context["workspace"].id),
+            "client": str(ims_context["client"].id),
+            "gstin": str(ims_context["gstin"].id),
+            "goods_type": "BOTH",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "BOTH" in response.data["errors"]["goods_type"][0]

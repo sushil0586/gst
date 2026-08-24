@@ -8,17 +8,18 @@ import environ
 from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+TESTING = any("pytest" in arg for arg in sys.argv)
 
 env = environ.Env(
-    DEBUG=(bool, False),
-    USE_SQLITE_FALLBACK=(bool, any("pytest" in arg for arg in sys.argv)),
+    DEBUG=(bool, TESTING),
+    USE_SQLITE_FALLBACK=(bool, TESTING),
     CELERY_TASK_ALWAYS_EAGER=(bool, True),
 )
 environ.Env.read_env(BASE_DIR / ".env")
 
 SECRET_KEY = env("SECRET_KEY", default="change-me-in-env-with-32-plus-chars")
 DEFAULT_JWT_SIGNING_KEY = hashlib.sha256(SECRET_KEY.encode("utf-8")).hexdigest()
-DEBUG = str(os.getenv("DEBUG", "False")).strip().lower() in {"1", "true", "yes", "on"}
+DEBUG = True if TESTING else env.bool("DEBUG", default=False)
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["127.0.0.1", "localhost"])
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=["http://localhost:3000"])
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=[])
@@ -52,6 +53,7 @@ LOCAL_APPS = [
     "apps.workspaces",
     "apps.clients",
     "apps.gstins",
+    "apps.ims",
     "apps.compliance_periods",
     "apps.imports",
     "apps.gst_transactions",
@@ -92,6 +94,14 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = env("SECURE_REFERRER_POLICY", default="strict-origin-when-cross-origin")
 X_FRAME_OPTIONS = env("X_FRAME_OPTIONS", default="DENY")
 
+if TESTING:
+    SECURE_SSL_REDIRECT = False
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
+    SECURE_HSTS_SECONDS = 0
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_PRELOAD = False
+
 if env.bool("USE_X_FORWARDED_PROTO", default=False):
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
@@ -115,7 +125,9 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
-if env("USE_SQLITE_FALLBACK"):
+USE_SQLITE_FALLBACK = True if TESTING else env.bool("USE_SQLITE_FALLBACK", default=False)
+
+if USE_SQLITE_FALLBACK:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
@@ -405,7 +417,7 @@ SECURITY_RETENTION_SCHEDULE_MINUTE = env.int("SECURITY_RETENTION_SCHEDULE_MINUTE
 SECURITY_LOG_LEVEL = env("SECURITY_LOG_LEVEL", default="INFO")
 SECURITY_LOG_FILE = env("SECURITY_LOG_FILE", default="")
 
-if not DEBUG:
+if not DEBUG and not TESTING:
     if SECRET_KEY.startswith("change-me"):
         raise ImproperlyConfigured("SECRET_KEY must be set to a strong production value.")
     if env("JWT_SIGNING_KEY", default=DEFAULT_JWT_SIGNING_KEY).startswith("change-me"):

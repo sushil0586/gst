@@ -34,12 +34,31 @@ The following issues were fixed in source and verified on staging on June 30, 20
 - `/reports/transaction-review` now resolves correctly into the transaction review workspace
 - Full live Playwright Chromium verification passed on June 30, 2026:
   - `13/13` live tests passed against staging
+- Post-deployment rerun on June 30, 2026 also passed cleanly:
+  - `13/13` live tests passed against staging after deployment
+  - one intermediate failure was traced to a hidden/visible duplicate selector in `live-workspaces.spec.ts`, not to a staging application defect
 - Additional local verification on June 30, 2026 confirmed source fixes for:
   - `/reports/transaction-review` redirecting into `/reports`
   - import batch queries waiting for full context before firing
   - corrected approval rejection toast copy
   - mobile import-history cards
   - disabled blocked-return preparation actions
+- Additional local live visual verification completed on July 24, 2026 against `http://localhost:3001`
+- Confirmed with seeded demo account:
+  - email: `demo_admin@example.com`
+  - username: `demo_admin`
+  - password: `demo12345`
+- Live visual Chromium smoke passed locally on July 24, 2026:
+  - `1/1` live visual smoke test passed after creating local seeded baselines
+  - seeded live screenshot coverage now exists for:
+    - dashboard
+    - imports
+    - returns
+    - reports
+    - IMS
+    - settings/team
+- The local live visual baselines were written under:
+  - `gst-compliance-frontend/tests/e2e/live-visual-smoke.spec.ts-snapshots/`
 
 ## Recently fixed
 

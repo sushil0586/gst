@@ -1,6 +1,6 @@
 # GST Compliance Frontend
 
-Professional App Router frontend for the GST Compliance SaaS product. The app now uses the live Django backend for authentication, onboarding, dashboard summaries, imports, reconciliation, returns, approvals, audit trail, and exports, while still keeping mock fallback in a few safe display-only areas.
+Professional App Router frontend for the GST Compliance SaaS product. The app uses the live Django backend for authentication, onboarding, dashboard summaries, imports, reconciliation, returns, approvals, notices, audit trail, settings workflows, IMS operations, and exports.
 
 ## Stack
 
@@ -54,11 +54,11 @@ The project is organized around reusable SaaS shell primitives and feature folde
 - `src/components/status`
   Status badges and workflow visual components.
 - `src/data`
-  Mock workspace, client, GSTIN, period, dashboard, and audit data.
+  Seed and support data used for controlled UI states, demos, and test-friendly display scaffolding.
 - `src/lib/api`
   Centralized Axios client and error helpers.
 - `src/lib/auth`
-  Token storage abstraction and auth service placeholder.
+  Token storage abstraction and frontend auth service utilities.
 - `src/lib/query`
   TanStack Query provider and query key factory.
 - `src/lib/validations`
@@ -90,5 +90,6 @@ The project is organized around reusable SaaS shell primitives and feature folde
 
 - Toasts use `sonner`, not deprecated shadcn toast.
 - API base URL is read from `.env.local`.
-- Pilot checklist is available at `/settings/pilot-readiness`.
-- Backend sample files and the runbook live in `../docs/sample-files/` and `../docs/pilot-runbook.md`.
+- Launch smoke suite runs with `npm run test:e2e:launch`.
+- Launch and release references live in `../docs/launch-scope.md`, `../docs/launch-readiness-gap-matrix.md`, and `../docs/live-release-runbook.md`.
+- Backend sample files and supporting runbooks live in `../docs/sample-files/`.

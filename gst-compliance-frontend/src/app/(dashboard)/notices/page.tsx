@@ -37,6 +37,18 @@ const statusOptions = [
   { value: "closed", label: "Closed" },
 ];
 
+function isOverdue(value?: string | null) {
+  if (!value) return false;
+  const dueDate = new Date(value);
+  if (Number.isNaN(dueDate.getTime())) {
+    return false;
+  }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  dueDate.setHours(0, 0, 0, 0);
+  return dueDate < today;
+}
+
 function formatDateTime(value?: string | null) {
   if (!value) return "Pending";
   return format(new Date(value), "dd MMM yyyy, h:mm a");
@@ -113,6 +125,13 @@ export default function NoticesPage() {
   const createNoticeMutation = useCreateNoticeMutation(filters);
   const updateNoticeMutation = useUpdateNoticeMutation(editingNotice?.id, filters);
   const notices = noticesQuery.data?.items ?? [];
+  const noticeMetrics = useMemo(() => {
+    const openCount = notices.filter((notice) => notice.status === "open").length;
+    const escalatedCount = notices.filter((notice) => notice.status === "escalated").length;
+    const assignedCount = notices.filter((notice) => Boolean(notice.assigned_to)).length;
+    const overdueCount = notices.filter((notice) => notice.status !== "closed" && isOverdue(notice.due_date)).length;
+    return { openCount, escalatedCount, assignedCount, overdueCount };
+  }, [notices]);
 
   useEffect(() => {
     if (queryWorkspaceId && queryWorkspaceId !== selectedWorkspaceId && workspaces.some((workspace) => workspace.id === queryWorkspaceId)) {
@@ -219,7 +238,7 @@ export default function NoticesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Notices"
-        description="Track live government notices, response posture, and due follow-up within the active compliance context."
+        description="Track live government notices, ownership, deadlines, and response posture within the active compliance context."
         actions={canManageNotices ? [{ label: "Add Notice", onClick: handleOpenDialog, disabled: !selectedClientId || availableGstins.length === 0 }] : []}
       />
 
@@ -268,7 +287,42 @@ export default function NoticesPage() {
         </div>
       </SectionCard>
 
+      <SectionCard
+        title="Operational posture"
+        description="Use these live metrics to see where notice response work needs immediate attention."
+      >
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-3xl border border-amber-200 bg-amber-50/70 px-5 py-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-amber-700">Open notices</p>
+            <p className="mt-3 text-3xl font-semibold text-slate-900">{noticeMetrics.openCount}</p>
+            <p className="mt-2 text-sm leading-6 text-slate-700">Active notices still waiting for response or closure.</p>
+          </div>
+          <div className="rounded-3xl border border-rose-200 bg-rose-50/70 px-5 py-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-rose-700">Escalated</p>
+            <p className="mt-3 text-3xl font-semibold text-slate-900">{noticeMetrics.escalatedCount}</p>
+            <p className="mt-2 text-sm leading-6 text-slate-700">Notices already escalated for senior review or immediate intervention.</p>
+          </div>
+          <div className="rounded-3xl border border-indigo-200 bg-indigo-50/70 px-5 py-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-700">Assigned owners</p>
+            <p className="mt-3 text-3xl font-semibold text-slate-900">{noticeMetrics.assignedCount}</p>
+            <p className="mt-2 text-sm leading-6 text-slate-700">Live notices with a named workspace owner for follow-up accountability.</p>
+          </div>
+          <div className="rounded-3xl border border-orange-200 bg-orange-50/70 px-5 py-5">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-orange-700">Overdue responses</p>
+            <p className="mt-3 text-3xl font-semibold text-slate-900">{noticeMetrics.overdueCount}</p>
+            <p className="mt-2 text-sm leading-6 text-slate-700">Open or escalated notices whose due date has already passed.</p>
+          </div>
+        </div>
+      </SectionCard>
+
       <SectionCard title="Notice register" description="Live notices for the active workspace, client, and GSTIN context.">
+        <div className="mb-4 rounded-3xl border border-slate-200 bg-slate-50/80 px-5 py-4">
+          <p className="text-sm font-semibold text-slate-900">Ownership rule</p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            Notice updates stay restricted to users who can manage the GSTIN context. Read-only users can still inspect live notice posture,
+            owners, and deadlines without changing the register.
+          </p>
+        </div>
         {!selectedWorkspaceId ? null : noticesQuery.isLoading ? (
           <LoadingState message="Loading notices..." />
         ) : noticesQuery.isError ? (
@@ -305,7 +359,14 @@ export default function NoticesPage() {
                       <StatusBadge label={notice.status.replace(/_/g, " ")} variant={getNoticeStatusVariant(notice.status)} />
                     </TableCell>
                     <TableCell>{notice.assigned_to_name ?? "Unassigned"}</TableCell>
-                    <TableCell>{formatDate(notice.due_date)}</TableCell>
+                    <TableCell>
+                      <div className="space-y-1">
+                        <p>{formatDate(notice.due_date)}</p>
+                        {notice.status !== "closed" && isOverdue(notice.due_date) ? (
+                          <p className="text-xs font-medium text-orange-700">Overdue</p>
+                        ) : null}
+                      </div>
+                    </TableCell>
                     <TableCell>{formatDateTime(notice.created_at)}</TableCell>
                     {canManageNotices ? (
                       <TableCell className="text-right">

@@ -365,6 +365,182 @@ class WhiteBooksClient:
         )
         return self._normalize_submission_payload(response, default_message="WhiteBooks GSTR-2B generation status check failed.")
 
+    def ims_save(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        ret_period: str,
+        txn: str,
+        payload: dict,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/ims/save",
+            method="PUT",
+            query_params={"email": email},
+            headers=self._filing_headers(
+                gstin=gstin,
+                ret_period=ret_period,
+                txn=txn,
+                state_code=state_code,
+                gst_username=gst_username,
+            ),
+            body=payload,
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks IMS save failed.")
+
+    def ims_reset(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        ret_period: str,
+        txn: str,
+        payload: dict,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/ims/reset",
+            method="PUT",
+            query_params={"email": email},
+            headers=self._filing_headers(
+                gstin=gstin,
+                ret_period=ret_period,
+                txn=txn,
+                state_code=state_code,
+                gst_username=gst_username,
+            ),
+            body=payload,
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks IMS reset failed.")
+
+    def ims_status(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        int_tran_id: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/ims/status",
+            method="GET",
+            query_params={"gstin": gstin, "int_tran_id": int_tran_id, "email": email},
+            headers=self._auth_headers({"txn": txn}, state_code=state_code, gst_username=gst_username),
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks IMS status fetch failed.")
+
+    def ims_invoices(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        section: str,
+        status: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/ims/invoices",
+            method="GET",
+            query_params={"gstin": gstin, "section": section, "email": email, "status": status},
+            headers=self._auth_headers({"txn": txn}, state_code=state_code, gst_username=gst_username),
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks IMS invoices fetch failed.")
+
+    def ims_invoices_count(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        goods_type: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/ims/invoicescount",
+            method="GET",
+            query_params={"gstin": gstin, "goodsType": goods_type, "email": email},
+            headers=self._auth_headers({"txn": txn}, state_code=state_code, gst_username=gst_username),
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks IMS invoice count fetch failed.")
+
+    def ims_supplier_invoices(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        ret_period: str,
+        section: str,
+        rtn_type: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/ims/supplierInvoices",
+            method="GET",
+            query_params={
+                "gstin": gstin,
+                "email": email,
+                "retperiod": ret_period,
+                "section": section,
+                "rtnTyp": rtn_type,
+            },
+            headers=self._auth_headers({"txn": txn}, state_code=state_code, gst_username=gst_username),
+        )
+        return self._normalize_submission_payload(
+            response,
+            default_message="WhiteBooks IMS supplier invoices fetch failed.",
+        )
+
+    def ims_rejected_invoices(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        ret_period: str,
+        section: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/ims/rejectedInvoices",
+            method="GET",
+            query_params={"gstin": gstin, "email": email, "retperiod": ret_period, "section": section},
+            headers=self._auth_headers({"txn": txn}, state_code=state_code, gst_username=gst_username),
+        )
+        return self._normalize_submission_payload(
+            response,
+            default_message="WhiteBooks IMS rejected invoices fetch failed.",
+        )
+
+    def ims_get_file(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        token: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/ims/getfile",
+            method="GET",
+            query_params={"gstin": gstin, "token": token, "email": email},
+            headers=self._auth_headers({"txn": txn}, state_code=state_code, gst_username=gst_username),
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks IMS file fetch failed.")
+
     def fetch_gstr2b_all(
         self,
         *,
@@ -742,9 +918,10 @@ class WhiteBooksClient:
         header = payload.get("header") if isinstance(payload.get("header"), dict) else {}
         resolved_txn = str(header.get("txn") or requested_txn or "")
         auth_success = str(payload.get("status_cd") or "") == "1"
-        session_credentials_present = bool(resolved_txn) or any(
+        session_credentials_present = any(
             payload.get(key) for key in ("auth_token", "token", "sek", "session_key", "access_token")
         )
+        response_contract_confirmed = auth_success and bool(session_credentials_present)
         return WhiteBooksSession(
             mode="live",
             authenticated=True,
@@ -754,11 +931,11 @@ class WhiteBooksClient:
                 "txn": resolved_txn,
                 "status_desc": payload.get("status_desc", ""),
                 "auth_token_exchange_confirmed": True,
-                "response_contract_confirmed": auth_success and bool(resolved_txn),
+                "response_contract_confirmed": response_contract_confirmed,
                 "session_credentials_present": session_credentials_present,
                 "resolution_status": (
                     "txn_valid_for_6_hours"
-                    if auth_success and bool(resolved_txn)
+                    if response_contract_confirmed and bool(resolved_txn)
                     else "session_credentials_missing_from_confirmed_auth_response"
                     if not session_credentials_present
                     else "session_credentials_present_but_submission_contract_unconfirmed"

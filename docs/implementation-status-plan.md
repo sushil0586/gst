@@ -9,7 +9,7 @@ It answers two questions clearly:
 - what has already been implemented
 - what we are going to build next
 
-It is meant to be the simplest current reference for delivery planning, especially as we move the product from pilot mode to SaaS-ready production filing.
+It is meant to be the simplest current reference for delivery planning as we move the product from scoped launch readiness toward broader production-grade filing depth.
 
 Related documents:
 
@@ -38,7 +38,7 @@ Frontend:
 - login, onboarding, dashboard shell, and protected routing
 - clients, GSTINs, compliance periods, imports, reconciliation, returns, approvals, reports, and audit trail screens
 - live API integration through TanStack Query for core flows
-- clearer pilot-shell labeling for routes that are not fully operational yet
+- supported launch surfaces for settings, notices, IMS, and core filing operations
 
 ### 2. Filing domain implemented
 
@@ -184,7 +184,7 @@ These areas exist but are not yet complete enough to treat as production-ready:
 - production observability and alert routing
 - release checklist enforcement
 - stronger UAT automation around filing-specific paths
-- final removal or conversion of remaining pilot-shell pages
+- deeper operational coverage on newly supported launch surfaces
 
 ## What we are going to build
 

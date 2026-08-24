@@ -15,6 +15,7 @@ const navigationItems = [
   { label: "Imports", href: "/imports", purpose: "Upload source files, manage import templates, and inspect import history and row errors." },
   { label: "2B Reconciliation", href: "/reconciliation", purpose: "Run purchase vs GSTR-2B reconciliation and action mismatch items." },
   { label: "Returns", href: "/returns", purpose: "Prepare GSTR-1 and GSTR-3B, review readiness, and export workbooks." },
+  { label: "IMS", href: "/ims", purpose: "Review IMS invoice feeds, supplier/rejected buckets, file payloads, and controlled save or reset requests." },
   { label: "Approvals", href: "/approvals", purpose: "Review and action approval requests." },
   { label: "Notices", href: "/notices", purpose: "Track notice ownership, deadlines, and response status against the active GSTIN context." },
   { label: "Reports", href: "/reports", purpose: "Review transactions, correct metadata, use bulk remediation, and manage ownership and follow-ups." },
@@ -54,7 +55,12 @@ const practicalFlow = [
     links: [{ label: "Open Returns", href: "/returns" }],
   },
   {
-    title: "6. Approve, file, and lock",
+    title: "6. Review IMS workflow",
+    detail: "Use IMS to inspect invoice buckets, supplier responses, rejection segments, and draft payload behavior before final downstream actions.",
+    links: [{ label: "Open IMS", href: "/ims" }],
+  },
+  {
+    title: "7. Approve, file, and lock",
     detail: "Use approvals, mark returns filed, and lock the period once the monthly cycle is complete.",
     links: [
       { label: "Open Approvals", href: "/approvals" },
@@ -62,7 +68,7 @@ const practicalFlow = [
     ],
   },
   {
-    title: "7. Review audit and manager controls",
+    title: "8. Review audit and manager controls",
     detail: "Use audit logs and the dashboard close-manager section for proof, follow-up management, digests, and close reporting.",
     links: [
       { label: "Open Dashboard", href: "/dashboard" },

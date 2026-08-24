@@ -26,13 +26,14 @@
 - The application generally provides useful empty and error states on core workflow pages.
 - This is a strength of the current UI and should be preserved as the suite expands.
 - One improvement area is making destructive-action feedback more explicit, especially for membership changes and future filing actions.
-- Live staging checks on June 30, 2026 reinforced this as a product strength: `Notices`, `Approvals`, `Operations`, `Follow-ups`, and filtered `Audit Trail` all explain empty or no-match states clearly enough for an operator to understand what to do next.
+- Live staging checks on June 30, 2026 reinforced this as a product strength: `Notices`, `Approvals`, `Operations`, `Follow-ups`, filtered `Audit Trail`, and the import/return workspace empty-state paths all explain no-match or blocked states clearly enough for an operator to understand what to do next.
 
 ## Mobile Behavior
 
 - Core auth and import layouts remain readable at mobile width.
 - The biggest mobile concern is still discoverability and accessibility of navigation controls rather than raw layout breakage, but the app now exposes a stable mobile navigation trigger hook for QA coverage.
 - The imports page remains readable on mobile overall, and the history section now uses stacked cards on small screens, which materially improves scanability on staging.
+- Post-deployment staging verification on June 30, 2026 kept the mobile smoke slice green, which suggests the recent UI changes did not introduce obvious mobile regressions in auth, navigation, or workspace switching.
 
 ## Return Review Screens
 
@@ -46,3 +47,4 @@
 
 - The return history area is much clearer once the row action explicitly signals that approval and filing actions live inside the workflow modal.
 - Blocked return actions such as `Prepare GSTR-3B` now render disabled and explain the blocker inline near the action area, which reduces hesitation and makes the state feel more deliberate on staging.
+- The latest staging rerun also confirmed that the blocked-return guidance remains understandable in a real signed-in environment and routes users cleanly toward `Imports` and `Reconciliation` when preparation is not yet possible.

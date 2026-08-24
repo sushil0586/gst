@@ -4,6 +4,10 @@
 
 Use this runbook before enabling or expanding live provider filing for a tenant.
 
+Frontend launch-gate reference:
+
+- [frontend-launch-verification-summary.md](/Users/ansh/Documents/Gst-Compliance/docs/frontend-launch-verification-summary.md:1)
+
 ## Pre-Release Checks
 
 1. Environment flags are correct:
@@ -87,34 +91,41 @@ Run this before any first production release decision:
    - `FILING_ENFORCE_MAKER_CHECKER=True`
    - `APP_FRONTEND_URL` matches the real staging browser URL
    - `EMAIL_*` values are real and working
-3. Run the auth smoke path:
+3. Run the frontend launch-regression gate from `gst-compliance-frontend/`:
+   - `npm run test:e2e:launch`
+   This must cover the supported release surfaces:
+   - returns launch and recovery flows
+   - notices operational posture
+   - settings administration hub
+   - IMS operator surface
+4. Run the auth smoke path:
    - login
    - logout
    - change password
    - forgot-password
    - reset-password from the received email
-4. Run the customer user-management path:
+5. Run the customer user-management path:
    - add a workspace member
    - assign the intended role
    - sign in as that member
    - confirm access is limited to the expected workflow
-5. Run the notices path:
+6. Run the notices path:
    - create a notice
    - assign owner
    - set due date
    - update status
-6. Run the live-data path:
+7. Run the live-data path:
    - create client
    - create GSTIN
    - create compliance period
    - confirm registers load live data with no mock fallback
-7. Run the filing control path:
+8. Run the filing control path:
    - create or verify provider auth session
    - confirm the auth session is fresh
    - prepare return
    - approve return
    - attempt filing only if rollout policy allows it
-8. Capture evidence for signoff:
+9. Capture evidence for signoff:
    - screenshots of auth reset flow
    - screenshot of workspace team role assignment
    - screenshot of notice update flow

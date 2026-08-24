@@ -111,4 +111,14 @@ export const queryKeys = {
     list: (filters?: Record<string, string | undefined>) => queryKeys.providerAuthSessions.list(filters),
     detail: (sessionId: string) => queryKeys.providerAuthSessions.detail(sessionId),
   },
+  ims: {
+    status: (filters?: Record<string, string | undefined>) => ["ims", "status", filters ?? {}] as const,
+    invoices: (filters?: Record<string, string | undefined>) => ["ims", "invoices", filters ?? {}] as const,
+    invoicesCount: (filters?: Record<string, string | undefined>) => ["ims", "invoices-count", filters ?? {}] as const,
+    supplierInvoices: (filters?: Record<string, string | undefined>) =>
+      ["ims", "supplier-invoices", filters ?? {}] as const,
+    rejectedInvoices: (filters?: Record<string, string | undefined>) =>
+      ["ims", "rejected-invoices", filters ?? {}] as const,
+    file: (filters?: Record<string, string | undefined>) => ["ims", "file", filters ?? {}] as const,
+  },
 };

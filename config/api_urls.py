@@ -16,6 +16,7 @@ from apps.gst_transactions.views import (
     TransactionReviewSnapshotViewSet,
 )
 from apps.gstins.views import GSTINViewSet
+from apps.ims.views import IMSViewSet
 from apps.imports.views import ImportBatchViewSet, ImportTemplateViewSet
 from apps.notices.views import NoticeViewSet
 from apps.organizations.views import OrganizationViewSet
@@ -41,6 +42,7 @@ router.register("workspaces", WorkspaceViewSet, basename="workspace")
 router.register("clients", ClientViewSet, basename="client")
 router.register("client-contacts", ClientContactViewSet, basename="client-contact")
 router.register("gstins", GSTINViewSet, basename="gstin")
+router.register("ims", IMSViewSet, basename="ims")
 router.register("compliance-periods", CompliancePeriodViewSet, basename="compliance-period")
 router.register("import-templates", ImportTemplateViewSet, basename="import-template")
 router.register("imports/batches", ImportBatchViewSet, basename="import-batch")

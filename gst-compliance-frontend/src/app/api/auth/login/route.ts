@@ -6,7 +6,11 @@ import { setSessionCookies } from "@/lib/server/session";
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000/api/v1";
 
 export async function POST(request: Request) {
-  const body = await request.json();
+  const contentType = request.headers.get("content-type") ?? "";
+  const isFormRequest = contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data");
+  const body = isFormRequest
+    ? Object.fromEntries((await request.formData()).entries())
+    : await request.json();
   const backendResponse = await fetch(
     `${process.env.NEXT_PUBLIC_API_BASE_URL ?? DEFAULT_API_BASE_URL}/auth/token/`,
     {
@@ -37,5 +41,9 @@ export async function POST(request: Request) {
   }
 
   await setSessionCookies(String(payload.access), typeof payload.refresh === "string" ? payload.refresh : null);
+  if (isFormRequest) {
+    const origin = request.headers.get("origin") ?? new URL(request.url).origin;
+    return NextResponse.redirect(new URL("/dashboard", origin), { status: 303 });
+  }
   return NextResponse.json({ user: payload.user });
 }

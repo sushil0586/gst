@@ -9,10 +9,65 @@ on:
     paths:
       - "gst-compliance-frontend/**"
       - ".github/workflows/frontend-playwright.yml"
+  schedule:
+    - cron: "0 2 * * 1"
   workflow_dispatch:
+    inputs:
+      run_live_visual:
+        description: "Run the live visual smoke job with configured staging secrets"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
-  e2e:
+  launch-e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gst-compliance-frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: gst-compliance-frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Lint frontend
+        run: npm run lint -- src tests
+
+      - name: Run Playwright launch regression suite
+        env:
+          CI: "true"
+        run: npm run test:e2e:launch
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-launch
+          path: gst-compliance-frontend/playwright-report
+          retention-days: 14
+
+      - name: Upload Playwright results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results-launch
+          path: gst-compliance-frontend/test-results
+          retention-days: 14
+
+  functional-e2e:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -47,7 +102,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-functional
           path: gst-compliance-frontend/playwright-report
           retention-days: 14
 
@@ -55,6 +110,161 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-test-results
+          name: playwright-test-results-functional
+          path: gst-compliance-frontend/test-results
+          retention-days: 14
+
+  visual-e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gst-compliance-frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: gst-compliance-frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Lint frontend
+        run: npm run lint -- src tests
+
+      - name: Run Playwright visual suite
+        env:
+          CI: "true"
+        run: npm run test:e2e:visual
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-visual
+          path: gst-compliance-frontend/playwright-report
+          retention-days: 14
+
+      - name: Upload Playwright results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results-visual
+          path: gst-compliance-frontend/test-results
+          retention-days: 14
+
+  visual-smoke-e2e:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: gst-compliance-frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: gst-compliance-frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps firefox webkit
+
+      - name: Lint frontend
+        run: npm run lint -- src tests
+
+      - name: Run Playwright cross-browser visual smoke suite
+        env:
+          CI: "true"
+        run: npm run test:e2e:visual:smoke
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-visual-smoke
+          path: gst-compliance-frontend/playwright-report
+          retention-days: 14
+
+      - name: Upload Playwright results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results-visual-smoke
+          path: gst-compliance-frontend/test-results
+          retention-days: 14
+
+  live-visual-smoke-e2e:
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.run_live_visual) }}
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: gst-compliance-frontend
+
+    env:
+      PLAYWRIGHT_BASE_URL: ${{ secrets.PLAYWRIGHT_BASE_URL }}
+      PLAYWRIGHT_LIVE_EMAIL: ${{ secrets.PLAYWRIGHT_LIVE_EMAIL }}
+      PLAYWRIGHT_LIVE_PASSWORD: ${{ secrets.PLAYWRIGHT_LIVE_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: gst-compliance-frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Lint frontend
+        run: npm run lint -- src tests
+
+      - name: Verify live visual secrets are present
+        run: |
+          test -n "$PLAYWRIGHT_BASE_URL"
+          test -n "$PLAYWRIGHT_LIVE_EMAIL"
+          test -n "$PLAYWRIGHT_LIVE_PASSWORD"
+
+      - name: Run Playwright live visual smoke suite
+        env:
+          CI: "true"
+        run: npm run test:e2e:live:visual
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-live-visual-smoke
+          path: gst-compliance-frontend/playwright-report
+          retention-days: 14
+
+      - name: Upload Playwright results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-test-results-live-visual-smoke
           path: gst-compliance-frontend/test-results
           retention-days: 14

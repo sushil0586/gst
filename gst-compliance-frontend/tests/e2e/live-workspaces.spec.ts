@@ -23,7 +23,7 @@ test.describe("Live workspaces", () => {
     const sampleLink = page.getByRole("link", { name: "Download sample CSV", exact: true });
     await expect(sampleLink).toHaveAttribute("href", "/sample-files/import-template-sample.csv");
 
-    await page.locator('[data-testid^="import-batch-open-"]').first().click();
+    await page.locator('[data-testid^="import-batch-open-"]:visible').first().click();
 
     const detailsDialog = page.getByRole("dialog", { name: "Import batch details" });
     await expect(detailsDialog).toBeVisible();

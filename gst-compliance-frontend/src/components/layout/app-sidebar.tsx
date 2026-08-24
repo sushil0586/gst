@@ -16,7 +16,7 @@ const navSections = [
   },
   {
     label: "Execution",
-    items: ["/imports", "/reconciliation", "/returns", "/operations", "/approvals"],
+    items: ["/imports", "/reconciliation", "/returns", "/ims", "/operations", "/approvals"],
   },
   {
     label: "Controls",

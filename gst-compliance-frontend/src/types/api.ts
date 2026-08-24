@@ -205,6 +205,52 @@ export type GSTINTaxpayerProfileRecord = {
   raw_payload: Record<string, unknown>;
 };
 
+export type IMSBaseRequest = {
+  workspace: string;
+  client: string;
+  gstin: string;
+  auth_session?: string;
+  txn?: string;
+  email?: string;
+};
+
+export type IMSSaveRequest = IMSBaseRequest & {
+  ret_period: string;
+  invdata: Record<string, unknown>;
+};
+
+export type IMSResetRequest = IMSSaveRequest;
+
+export type IMSStatusRequest = IMSBaseRequest & {
+  int_tran_id: string;
+};
+
+export type IMSInvoicesRequest = IMSBaseRequest & {
+  section: string;
+  status: string;
+};
+
+export type IMSInvoicesCountRequest = IMSBaseRequest & {
+  goods_type: string;
+};
+
+export type IMSSupplierInvoicesRequest = IMSBaseRequest & {
+  ret_period: string;
+  section: string;
+  rtn_type: string;
+};
+
+export type IMSRejectedInvoicesRequest = IMSBaseRequest & {
+  ret_period: string;
+  section: string;
+};
+
+export type IMSFileRequest = IMSBaseRequest & {
+  token: string;
+};
+
+export type IMSApiResponse = Record<string, unknown>;
+
 export type ClientBootstrapResult = {
   client: ClientRecord;
   gstin: GSTINRecordApi | null;

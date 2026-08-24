@@ -294,27 +294,27 @@ def enqueue_return_filing_status_sync(*, filing, actor):
         sync_return_filing_status(filing_id=filing.id, actor_id=actor.id if actor else None)
 
 
-@transaction.atomic
 def process_return_filing(*, filing_id, actor_id=None):
     actor = User.objects.filter(pk=actor_id).first() if actor_id else None
-    filing = (
-        ReturnFiling.objects.select_for_update(of=("self",))
-        .select_related("workspace", "client", "gstin", "compliance_period", "prepared_return", "approval_request")
-        .get(pk=filing_id)
-    )
-    latest_attempt = filing.attempts.order_by("-attempt_number").first()
-    if latest_attempt is None:
-        raise serializers.ValidationError("No filing attempt exists for this filing.")
-    if latest_attempt.status not in {
-        ReturnFilingAttempt.AttemptStatus.CREATED,
-        ReturnFilingAttempt.AttemptStatus.QUEUED,
-    }:
-        return {"filing_id": str(filing.id), "status": filing.status}
+    with transaction.atomic():
+        filing = (
+            ReturnFiling.objects.select_for_update(of=("self",))
+            .select_related("workspace", "client", "gstin", "compliance_period", "prepared_return", "approval_request")
+            .get(pk=filing_id)
+        )
+        latest_attempt = filing.attempts.order_by("-attempt_number").first()
+        if latest_attempt is None:
+            raise serializers.ValidationError("No filing attempt exists for this filing.")
+        if latest_attempt.status not in {
+            ReturnFilingAttempt.AttemptStatus.CREATED,
+            ReturnFilingAttempt.AttemptStatus.QUEUED,
+        }:
+            return {"filing_id": str(filing.id), "status": filing.status}
 
-    provider = get_filing_provider(filing.provider)
-    planned_provider_stage = _get_planned_provider_stage(provider=provider, filing=filing)
-    previous_status = filing.status
-    try:
+        provider = get_filing_provider(filing.provider)
+        planned_provider_stage = _get_planned_provider_stage(provider=provider, filing=filing)
+        previous_status = filing.status
+
         latest_attempt.status = ReturnFilingAttempt.AttemptStatus.IN_PROGRESS
         latest_attempt.started_at = latest_attempt.started_at or timezone.now()
         latest_attempt.updated_by = actor
@@ -352,223 +352,254 @@ def process_return_filing(*, filing_id, actor_id=None):
             provider_stage=planned_provider_stage,
         )
 
-        payload, result = provider.submit_return(filing)
-        filing.status = ReturnFiling.FilingStatus.SUBMITTED
-        filing.provider_reference_id = result.provider_reference_id
-        filing.provider_acknowledgement_id = result.provider_acknowledgement_id
-        filing.submitted_at = timezone.now()
-        filing.last_status_sync_at = filing.submitted_at
-        filing.filed_by = actor or filing.filed_by
-        filing.updated_by = actor
-        filing.error_summary = {}
-        filing.save(
-            update_fields=[
-                "status",
-                "provider_reference_id",
-                "provider_acknowledgement_id",
-                "submitted_at",
-                "last_status_sync_at",
-                "filed_by",
-                "updated_by",
-                "error_summary",
-                "updated_at",
-            ]
-        )
+        try:
+            payload, result = provider.submit_return(filing)
+        except (
+            FilingProviderStepError,
+            FilingProviderTemporaryError,
+            FilingProviderSessionLimitError,
+            FilingProviderAuthenticationError,
+            FilingProviderConfigurationError,
+            FilingProviderError,
+        ) as exc:
+            failure = {
+                "provider_name": filing.provider,
+                "attempt_id": latest_attempt.id,
+                "previous_status": previous_status,
+                "planned_provider_stage": planned_provider_stage,
+                "exception": exc,
+            }
+        else:
+            filing.status = ReturnFiling.FilingStatus.SUBMITTED
+            filing.provider_reference_id = result.provider_reference_id
+            filing.provider_acknowledgement_id = result.provider_acknowledgement_id
+            filing.submitted_at = timezone.now()
+            filing.last_status_sync_at = filing.submitted_at
+            filing.filed_by = actor or filing.filed_by
+            filing.updated_by = actor
+            filing.error_summary = {}
+            filing.save(
+                update_fields=[
+                    "status",
+                    "provider_reference_id",
+                    "provider_acknowledgement_id",
+                    "submitted_at",
+                    "last_status_sync_at",
+                    "filed_by",
+                    "updated_by",
+                    "error_summary",
+                    "updated_at",
+                ]
+            )
 
-        latest_attempt.status = (
-            ReturnFilingAttempt.AttemptStatus.AWAITING_STATUS
-            if result.provider_stage == "file_requested"
-            else ReturnFilingAttempt.AttemptStatus.SUBMITTED_TO_PROVIDER
-        )
-        latest_attempt.submitted_at = filing.submitted_at
-        latest_attempt.request_payload_hash = str(hash(str(payload)))
-        latest_attempt.request_summary = {
-            "return_type": filing.return_type,
-            "provider": filing.provider,
-            "prepared_return_id": str(filing.prepared_return_id),
-            "provider_stage": result.provider_stage or "submitted",
-        }
-        latest_attempt.response_summary = sanitize_json(result.raw_response)
-        latest_attempt.provider_request_id = result.provider_reference_id
-        latest_attempt.provider_status_raw = sanitize_json(result.raw_response)
-        latest_attempt.updated_by = actor
-        latest_attempt.save(
-            update_fields=[
-                "status",
-                "submitted_at",
-                "request_payload_hash",
-                "request_summary",
-                "response_summary",
-                "provider_request_id",
-                "provider_status_raw",
-                "updated_by",
-                "updated_at",
-            ]
-        )
-        ReturnFilingEvent.objects.create(
-            return_filing=filing,
-            filing_attempt=latest_attempt,
-            event_type="filing.submitted",
-            old_status=previous_status,
-            new_status=filing.status,
-            actor=actor,
-            metadata={
-                "provider_reference_id": filing.provider_reference_id,
-                "provider_acknowledgement_id": filing.provider_acknowledgement_id,
+            latest_attempt.status = (
+                ReturnFilingAttempt.AttemptStatus.AWAITING_STATUS
+                if result.provider_stage == "file_requested"
+                else ReturnFilingAttempt.AttemptStatus.SUBMITTED_TO_PROVIDER
+            )
+            latest_attempt.submitted_at = filing.submitted_at
+            latest_attempt.request_payload_hash = str(hash(str(payload)))
+            latest_attempt.request_summary = {
+                "return_type": filing.return_type,
+                "provider": filing.provider,
+                "prepared_return_id": str(filing.prepared_return_id),
                 "provider_stage": result.provider_stage or "submitted",
-            },
-        )
-        _record_completed_provider_stage_events(
-            filing=filing,
-            attempt=latest_attempt,
-            actor=actor,
-            previous_status=previous_status,
-            provider_reference_id=filing.provider_reference_id,
-            completed_stages=provider.completed_stages_from_result(result),
-        )
-        record_audit_log(
-            actor=actor,
-            action="return_filing.submitted",
-            entity=filing,
-            workspace_id=filing.workspace_id,
-            client_id=filing.client_id,
-            gstin_id=filing.gstin_id,
-            compliance_period_id=filing.compliance_period_id,
-            metadata={
+            }
+            latest_attempt.response_summary = sanitize_json(result.raw_response)
+            latest_attempt.provider_request_id = result.provider_reference_id
+            latest_attempt.provider_status_raw = sanitize_json(result.raw_response)
+            latest_attempt.updated_by = actor
+            latest_attempt.save(
+                update_fields=[
+                    "status",
+                    "submitted_at",
+                    "request_payload_hash",
+                    "request_summary",
+                    "response_summary",
+                    "provider_request_id",
+                    "provider_status_raw",
+                    "updated_by",
+                    "updated_at",
+                ]
+            )
+            ReturnFilingEvent.objects.create(
+                return_filing=filing,
+                filing_attempt=latest_attempt,
+                event_type="filing.submitted",
+                old_status=previous_status,
+                new_status=filing.status,
+                actor=actor,
+                metadata={
+                    "provider_reference_id": filing.provider_reference_id,
+                    "provider_acknowledgement_id": filing.provider_acknowledgement_id,
+                    "provider_stage": result.provider_stage or "submitted",
+                },
+            )
+            _record_completed_provider_stage_events(
+                filing=filing,
+                attempt=latest_attempt,
+                actor=actor,
+                previous_status=previous_status,
+                provider_reference_id=filing.provider_reference_id,
+                completed_stages=provider.completed_stages_from_result(result),
+            )
+            record_audit_log(
+                actor=actor,
+                action="return_filing.submitted",
+                entity=filing,
+                workspace_id=filing.workspace_id,
+                client_id=filing.client_id,
+                gstin_id=filing.gstin_id,
+                compliance_period_id=filing.compliance_period_id,
+                metadata={
+                    "provider_reference_id": filing.provider_reference_id,
+                    "provider_acknowledgement_id": filing.provider_acknowledgement_id,
+                    "provider_stage": result.provider_stage or "submitted",
+                    "attempt_number": latest_attempt.attempt_number,
+                },
+            )
+            _record_completed_provider_stage_audits(
+                filing=filing,
+                attempt=latest_attempt,
+                actor=actor,
+                provider_reference_id=filing.provider_reference_id,
+                completed_stages=provider.completed_stages_from_result(result),
+            )
+            enqueue_return_filing_status_sync(filing=filing, actor=actor)
+            return {
+                "filing_id": str(filing.id),
+                "status": filing.status,
                 "provider_reference_id": filing.provider_reference_id,
-                "provider_acknowledgement_id": filing.provider_acknowledgement_id,
-                "provider_stage": result.provider_stage or "submitted",
-                "attempt_number": latest_attempt.attempt_number,
-            },
-        )
-        _record_completed_provider_stage_audits(
-            filing=filing,
-            attempt=latest_attempt,
-            actor=actor,
-            provider_reference_id=filing.provider_reference_id,
-            completed_stages=provider.completed_stages_from_result(result),
-        )
-        enqueue_return_filing_status_sync(filing=filing, actor=actor)
-        return {
-            "filing_id": str(filing.id),
-            "status": filing.status,
-            "provider_reference_id": filing.provider_reference_id,
-        }
-    except FilingProviderStepError as exc:
-        _persist_partial_provider_progress(
-            filing=filing,
-            attempt=latest_attempt,
-            actor=actor,
-            partial_response=exc.partial_response,
-            provider_reference_id=exc.provider_reference_id,
-            provider_acknowledgement_id=exc.provider_acknowledgement_id,
-        )
-        _record_completed_provider_stage_events(
-            filing=filing,
-            attempt=latest_attempt,
-            actor=actor,
-            previous_status=previous_status,
-            provider_reference_id=exc.provider_reference_id or filing.provider_reference_id,
-            completed_stages=exc.completed_stages,
-        )
-        _record_completed_provider_stage_audits(
-            filing=filing,
-            attempt=latest_attempt,
-            actor=actor,
-            provider_reference_id=exc.provider_reference_id or filing.provider_reference_id,
-            completed_stages=exc.completed_stages,
-        )
-        failure_stage = exc.provider_stage or planned_provider_stage
-        filing_status = ReturnFiling.FilingStatus.NEEDS_RETRY if exc.retryable else ReturnFiling.FilingStatus.FAILED
-        event_type, audit_action = provider.failure_markers(failure_stage, retryable=exc.retryable)
-        _mark_filing_failure(
-            filing=filing,
-            attempt=latest_attempt,
-            actor=actor,
-            old_status=previous_status,
-            filing_status=filing_status,
-            error_code=exc.error_code or "provider_step_error",
-            error_message=str(exc),
-            event_type=event_type,
-            audit_action=audit_action,
-            provider_stage=failure_stage,
-        )
-        raise
-    except FilingProviderTemporaryError as exc:
-        event_type, audit_action = provider.failure_markers(planned_provider_stage, retryable=True)
-        _mark_filing_failure(
-            filing=filing,
-            attempt=latest_attempt,
-            actor=actor,
-            old_status=previous_status,
-            filing_status=ReturnFiling.FilingStatus.NEEDS_RETRY,
-            error_code="whitebooks_temporary_error",
-            error_message=str(exc),
-            event_type=event_type,
-            audit_action=audit_action,
-            provider_stage=planned_provider_stage,
-        )
-        raise
-    except FilingProviderSessionLimitError as exc:
-        event_type, audit_action = provider.failure_markers(planned_provider_stage)
-        _mark_filing_failure(
-            filing=filing,
-            attempt=latest_attempt,
-            actor=actor,
-            old_status=previous_status,
-            filing_status=ReturnFiling.FilingStatus.FAILED,
-            error_code="whitebooks_session_limit",
-            error_message=str(exc),
-            event_type=event_type,
-            audit_action=audit_action,
-            provider_stage=planned_provider_stage,
-        )
-        raise
-    except FilingProviderAuthenticationError as exc:
-        event_type, audit_action = provider.failure_markers(planned_provider_stage)
-        _mark_filing_failure(
-            filing=filing,
-            attempt=latest_attempt,
-            actor=actor,
-            old_status=previous_status,
-            filing_status=ReturnFiling.FilingStatus.FAILED,
-            error_code="whitebooks_authentication_error",
-            error_message=str(exc),
-            event_type=event_type,
-            audit_action=audit_action,
-            provider_stage=planned_provider_stage,
-        )
-        raise
-    except FilingProviderConfigurationError as exc:
-        event_type, audit_action = provider.failure_markers(planned_provider_stage)
-        _mark_filing_failure(
-            filing=filing,
-            attempt=latest_attempt,
-            actor=actor,
-            old_status=previous_status,
-            filing_status=ReturnFiling.FilingStatus.FAILED,
-            error_code="whitebooks_configuration_error",
-            error_message=str(exc),
-            event_type=event_type,
-            audit_action=audit_action,
-            provider_stage=planned_provider_stage,
-        )
-        raise
-    except FilingProviderError as exc:
-        event_type, audit_action = provider.failure_markers(planned_provider_stage)
-        _mark_filing_failure(
-            filing=filing,
-            attempt=latest_attempt,
-            actor=actor,
-            old_status=previous_status,
-            filing_status=ReturnFiling.FilingStatus.FAILED,
-            error_code="whitebooks_submission_error",
-            error_message=str(exc),
-            event_type=event_type,
-            audit_action=audit_action,
-            provider_stage=planned_provider_stage,
-        )
-        raise
+            }
+
+    return _persist_and_reraise_filing_failure(
+        filing_id=filing_id,
+        attempt_id=failure["attempt_id"],
+        actor=actor,
+        previous_status=failure["previous_status"],
+        planned_provider_stage=failure["planned_provider_stage"],
+        provider_name=failure["provider_name"],
+        exc=failure["exception"],
+    )
+
+
+def _persist_and_reraise_filing_failure(*, filing_id, attempt_id, actor, previous_status, planned_provider_stage, provider_name, exc):
+    with transaction.atomic():
+        filing = ReturnFiling.objects.select_for_update(of=("self",)).get(pk=filing_id)
+        attempt = filing.attempts.get(pk=attempt_id)
+        provider = get_filing_provider(provider_name)
+
+        if isinstance(exc, FilingProviderStepError):
+            _persist_partial_provider_progress(
+                filing=filing,
+                attempt=attempt,
+                actor=actor,
+                partial_response=exc.partial_response,
+                provider_reference_id=exc.provider_reference_id,
+                provider_acknowledgement_id=exc.provider_acknowledgement_id,
+            )
+            _record_completed_provider_stage_events(
+                filing=filing,
+                attempt=attempt,
+                actor=actor,
+                previous_status=previous_status,
+                provider_reference_id=exc.provider_reference_id or filing.provider_reference_id,
+                completed_stages=exc.completed_stages,
+            )
+            _record_completed_provider_stage_audits(
+                filing=filing,
+                attempt=attempt,
+                actor=actor,
+                provider_reference_id=exc.provider_reference_id or filing.provider_reference_id,
+                completed_stages=exc.completed_stages,
+            )
+            failure_stage = exc.provider_stage or planned_provider_stage
+            filing_status = ReturnFiling.FilingStatus.NEEDS_RETRY if exc.retryable else ReturnFiling.FilingStatus.FAILED
+            event_type, audit_action = provider.failure_markers(failure_stage, retryable=exc.retryable)
+            _mark_filing_failure(
+                filing=filing,
+                attempt=attempt,
+                actor=actor,
+                old_status=previous_status,
+                filing_status=filing_status,
+                error_code=exc.error_code or "provider_step_error",
+                error_message=str(exc),
+                event_type=event_type,
+                audit_action=audit_action,
+                provider_stage=failure_stage,
+            )
+        elif isinstance(exc, FilingProviderTemporaryError):
+            event_type, audit_action = provider.failure_markers(planned_provider_stage, retryable=True)
+            _mark_filing_failure(
+                filing=filing,
+                attempt=attempt,
+                actor=actor,
+                old_status=previous_status,
+                filing_status=ReturnFiling.FilingStatus.NEEDS_RETRY,
+                error_code="whitebooks_temporary_error",
+                error_message=str(exc),
+                event_type=event_type,
+                audit_action=audit_action,
+                provider_stage=planned_provider_stage,
+            )
+        elif isinstance(exc, FilingProviderSessionLimitError):
+            event_type, audit_action = provider.failure_markers(planned_provider_stage)
+            _mark_filing_failure(
+                filing=filing,
+                attempt=attempt,
+                actor=actor,
+                old_status=previous_status,
+                filing_status=ReturnFiling.FilingStatus.FAILED,
+                error_code="whitebooks_session_limit",
+                error_message=str(exc),
+                event_type=event_type,
+                audit_action=audit_action,
+                provider_stage=planned_provider_stage,
+            )
+        elif isinstance(exc, FilingProviderAuthenticationError):
+            event_type, audit_action = provider.failure_markers(planned_provider_stage)
+            _mark_filing_failure(
+                filing=filing,
+                attempt=attempt,
+                actor=actor,
+                old_status=previous_status,
+                filing_status=ReturnFiling.FilingStatus.FAILED,
+                error_code="whitebooks_authentication_error",
+                error_message=str(exc),
+                event_type=event_type,
+                audit_action=audit_action,
+                provider_stage=planned_provider_stage,
+            )
+        elif isinstance(exc, FilingProviderConfigurationError):
+            event_type, audit_action = provider.failure_markers(planned_provider_stage)
+            _mark_filing_failure(
+                filing=filing,
+                attempt=attempt,
+                actor=actor,
+                old_status=previous_status,
+                filing_status=ReturnFiling.FilingStatus.FAILED,
+                error_code="whitebooks_configuration_error",
+                error_message=str(exc),
+                event_type=event_type,
+                audit_action=audit_action,
+                provider_stage=planned_provider_stage,
+            )
+        elif isinstance(exc, FilingProviderError):
+            event_type, audit_action = provider.failure_markers(planned_provider_stage)
+            _mark_filing_failure(
+                filing=filing,
+                attempt=attempt,
+                actor=actor,
+                old_status=previous_status,
+                filing_status=ReturnFiling.FilingStatus.FAILED,
+                error_code="whitebooks_submission_error",
+                error_message=str(exc),
+                event_type=event_type,
+                audit_action=audit_action,
+                provider_stage=planned_provider_stage,
+            )
+
+    raise exc
 
 
 def _mark_filing_failure(*, filing, attempt, actor, old_status, filing_status, error_code, error_message, event_type, audit_action, provider_stage=None):

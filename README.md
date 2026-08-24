@@ -1,11 +1,11 @@
 # GST Compliance
 
-GST Compliance is a split-stack pilot product for GST operations:
+GST Compliance is a split-stack GST operations product:
 
 - A Django + Django REST Framework backend at the repository root
 - A Next.js frontend in `gst-compliance-frontend/`
 
-The project is no longer just a scaffold. Core flows for authentication, client hierarchy, imports, GST transactions, reconciliation, returns, approvals, audit logs, dashboard summaries, and exports are present, with a few UI areas still intentionally operating as pilot shells.
+The project is no longer just a scaffold. Core flows for authentication, client hierarchy, imports, GST transactions, reconciliation, returns, approvals, notices, audit logs, dashboard summaries, exports, and settings-linked administration are present.
 
 ## Repository layout
 
@@ -42,14 +42,19 @@ The project is no longer just a scaffold. Core flows for authentication, client 
 - Live API integration for core flows through TanStack Query
 - Safer fallback behavior for clients, GSTINs, and periods only when live API requests fail
 
-### Pilot-shell pages
+### Visible operations surface
 
-These routes are visible and useful for demos/UAT context, but are not yet fully wired as live operational modules:
+The visible product surface now includes:
 
 - `/notices`
 - `/settings`
+- `/ims`
 
-See the in-app status banners and [docs/technical-project-review.md](/Users/ansh/Documents/Gst-Compliance/docs/technical-project-review.md:1) for the current readiness assessment.
+These routes are part of the active launch-readiness scope and should be treated as supported product surfaces, not placeholder navigation.
+
+Primary frontend launch verification reference:
+
+- [docs/frontend-launch-verification-summary.md](/Users/ansh/Documents/Gst-Compliance/docs/frontend-launch-verification-summary.md:1)
 
 ## Tech stack
 
@@ -125,6 +130,50 @@ After running `python manage.py seed_demo_data`:
 - Username: `demo_admin`
 - Password: `demo12345`
 
+For Playwright live and live-visual runs, prefer the host root as `PLAYWRIGHT_BASE_URL`, not a deep link such as `/dashboard`. For your staging environment, use `https://gst-stage.accerio.in` rather than `https://gst-stage.accerio.in/dashboard`.
+
+Recommended staging live Playwright env:
+
+```bash
+PLAYWRIGHT_BASE_URL=https://gst-stage.accerio.in
+PLAYWRIGHT_LIVE_EMAIL=demo_admin@example.com
+PLAYWRIGHT_LIVE_PASSWORD=demo12345
+```
+
+Recommended local live Playwright env:
+
+```bash
+PLAYWRIGHT_BASE_URL=http://localhost:3001
+PLAYWRIGHT_LIVE_EMAIL=demo_admin@example.com
+PLAYWRIGHT_LIVE_PASSWORD=demo12345
+```
+
+Example staging live visual smoke run:
+
+```bash
+cd gst-compliance-frontend
+PLAYWRIGHT_BASE_URL=https://gst-stage.accerio.in \
+PLAYWRIGHT_LIVE_EMAIL=demo_admin@example.com \
+PLAYWRIGHT_LIVE_PASSWORD=demo12345 \
+npm run test:e2e:live:visual
+```
+
+Example local live visual smoke run:
+
+```bash
+cd gst-compliance-frontend
+PLAYWRIGHT_BASE_URL=http://localhost:3001 \
+PLAYWRIGHT_LIVE_EMAIL=demo_admin@example.com \
+PLAYWRIGHT_LIVE_PASSWORD=demo12345 \
+npm run test:e2e:live:visual
+```
+
+GitHub Actions live-visual secrets should use the same values:
+
+- `PLAYWRIGHT_BASE_URL`: `https://gst-stage.accerio.in` in CI, or `http://localhost:3001` for local-only testing
+- `PLAYWRIGHT_LIVE_EMAIL`: `demo_admin@example.com`
+- `PLAYWRIGHT_LIVE_PASSWORD`: `demo12345`
+
 ## Backend commands
 
 ```bash
@@ -138,6 +187,27 @@ python manage.py enforce_security_retention
 celery -A config worker -l info
 celery -A config beat -l info
 ```
+
+## Backend verification
+
+Local backend verification now runs cleanly with the project test configuration:
+
+```bash
+export DEBUG=true
+export USE_SQLITE_FALLBACK=true
+export SECRET_KEY=local-dev-secret-key-for-checks-1234567890
+export JWT_SIGNING_KEY=local-dev-jwt-signing-key-1234567890
+./venv/bin/python manage.py check
+./venv/bin/python manage.py makemigrations --check --dry-run
+./venv/bin/pytest -q
+```
+
+Notes:
+
+- test runs automatically use the project test-safe settings path
+- pytest uses SQLite fallback during local test execution for stable verification
+- production-only secret enforcement still applies outside test mode
+- `manage.py check` and `makemigrations --check` need non-placeholder secrets unless you are running in test mode, so the example above sets safe local verification env vars first
 
 Production defaults command notes:
 
