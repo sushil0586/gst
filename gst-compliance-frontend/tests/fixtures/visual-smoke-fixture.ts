@@ -20,7 +20,11 @@ async function freezeVisualTime(page: Page) {
           super(fixedNow);
           return;
         }
-        super(...args);
+        if (args.length === 1) {
+          super(args[0]);
+          return;
+        }
+        super(args[0], args[1], args[2], args[3], args[4], args[5], args[6]);
       }
 
       static now() {
