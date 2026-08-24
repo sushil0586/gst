@@ -3,6 +3,10 @@ import type { Page } from "@playwright/test";
 import { test as base } from "./app-fixture";
 
 const FIXED_VISUAL_NOW = "2026-06-29T13:30:00.000Z";
+type MockDateArgs =
+  | []
+  | [value: string | number | Date]
+  | [year: number, monthIndex: number, date?: number, hours?: number, minutes?: number, seconds?: number, ms?: number];
 
 async function freezeVisualTime(page: Page) {
   const now = new Date(FIXED_VISUAL_NOW).valueOf();
@@ -11,12 +15,12 @@ async function freezeVisualTime(page: Page) {
     const RealDate = Date;
 
     class MockDate extends RealDate {
-      constructor(...args: ConstructorParameters<DateConstructor>) {
+      constructor(...args: MockDateArgs) {
         if (args.length === 0) {
           super(fixedNow);
           return;
         }
-        super(args[0]);
+        super(...args);
       }
 
       static now() {
