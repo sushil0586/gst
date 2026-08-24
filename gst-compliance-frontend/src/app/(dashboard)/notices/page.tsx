@@ -124,7 +124,7 @@ export default function NoticesPage() {
   const noticesQuery = useNoticesQuery(filters, Boolean(selectedWorkspaceId));
   const createNoticeMutation = useCreateNoticeMutation(filters);
   const updateNoticeMutation = useUpdateNoticeMutation(editingNotice?.id, filters);
-  const notices = noticesQuery.data?.items ?? [];
+  const notices = useMemo(() => noticesQuery.data?.items ?? [], [noticesQuery.data?.items]);
   const noticeMetrics = useMemo(() => {
     const openCount = notices.filter((notice) => notice.status === "open").length;
     const escalatedCount = notices.filter((notice) => notice.status === "escalated").length;

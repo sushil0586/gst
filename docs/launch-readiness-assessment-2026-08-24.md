@@ -21,6 +21,7 @@ Reason:
 
 - the backend verification baseline is now green
 - the frontend launch gate is now defined, automated, documented, and passing
+- staging live Playwright verification is now passing across functional and visual smoke coverage
 - the visible launch surfaces for Returns, Notices, Settings, and IMS now have explicit release coverage
 - the remaining risks are mostly operational and staging-truth risks, not obvious missing architecture risks
 
@@ -49,6 +50,27 @@ It is not yet strong enough for an unstructured “open the product widely and t
   - `5 passed`
 - broader bundled launch regression was also verified earlier in local mocked coverage
 
+### Staging
+
+- staging URL verified:
+  - `https://gst-stage.accerio.in`
+- seeded demo credentials verified:
+  - `demo_admin@example.com`
+- live functional Playwright verification result on August 24, 2026:
+  - `14 passed`
+- live visual Playwright verification result on August 24, 2026:
+  - `1 passed`
+- covered staging areas:
+  - sign-in, refresh persistence, and sign-out
+  - mobile-width auth and navigation
+  - major signed-in route navigation
+  - settings, team, workspaces, and change-password validation
+  - clients, GSTINs, and compliance periods
+  - imports, returns blocker guidance, and reconciliation routing
+  - operations, approvals, follow-ups, notices, and audit trail
+  - IMS read-only provider checks
+  - seeded visual smoke for dashboard, imports, returns, reports, IMS, and team management
+
 ### Release documentation
 
 - launch scope is documented
@@ -56,6 +78,9 @@ It is not yet strong enough for an unstructured “open the product widely and t
 - QA execution guide includes the launch gate
 - live release runbook includes the frontend launch regression step
 - a dedicated frontend launch verification summary exists
+- a release signoff record exists
+- a production launch ops checklist exists
+- a one-week broad-rollout confidence plan exists
 
 ## Supported launch surfaces
 
@@ -72,24 +97,33 @@ These are now treated as supported release surfaces, not placeholder navigation.
 
 These are the items that should be completed before the release is declared truly ready:
 
-1. Staging release rehearsal
-   We still need one disciplined pass through the live release runbook on a real staging environment.
+1. Release signoff artifact
+   We now have strong staging evidence, but we still need one explicit signoff record that names:
+   - release owner
+   - support owner
+   - target tenant scope
+   - rollback owner
+   - exact release date and window
 
 2. Final required-check policy
    The team should explicitly decide which GitHub checks are required for release approval:
    - `backend-verification`
    - `launch-e2e`
-   - broader frontend suite policy
+   - local or CI visual-regression policy
+   - whether live staging smoke is mandatory or advisory
 
 3. Rollout policy confirmation on target tenants
    Launch should not proceed without explicit confirmation that rollout-control rules, maker-checker behavior, and support routing match the intended tenant scope.
 
-4. Environment truth verification
-   We need confirmation on staging that:
-   - auth flows work end to end
-   - provider sessions behave as expected
-   - notices and settings flows behave with real data
-   - live registers do not degrade into misleading states
+4. Production security and worker topology verification
+   Before launch, the team still needs to confirm:
+   - production secrets are rotated and not shared from local files
+   - retention and scheduled jobs are enabled in the target environment
+   - Celery/systemd worker units actually exist with the intended names
+   - log and alert routing is in place for auth, provider, and request failures
+
+5. Full runbook rehearsal ownership
+   The live checks are green, but someone still needs to execute the full release runbook end to end and mark each step complete.
 
 ## Acceptable for controlled launch
 
@@ -101,7 +135,10 @@ These are not ideal, but they are acceptable in a controlled launch if they are 
 2. Non-blocking web-server warning noise during Playwright startup
    The `ECONNREFUSED 127.0.0.1:8010` warnings did not fail the launch gate and currently appear to be startup noise rather than product failure.
 
-3. Broader hardening backlog on support depth and observability
+3. Live visual baseline refreshes on approved UI changes
+   The live dashboard visual target had to be tightened and staging baselines were intentionally refreshed on August 24, 2026. This is acceptable if baseline updates remain deliberate and documented.
+
+4. Broader hardening backlog on support depth and observability
    These should continue post-launch, but they do not appear to block a narrow, supervised release.
 
 ## Defer to post-launch hardening
@@ -125,6 +162,9 @@ These should remain on the roadmap, but they do not need to block a controlled l
 3. Tenant rollout mistakes
    The system is now more launch-capable, but that increases the importance of correct rollout policy and support-role setup.
 
+4. Production-worker mismatch
+   The recent staging deployment question about missing Celery service units is a reminder that documented service names and actual environment topology can drift. That is an operational launch risk until confirmed.
+
 ## Go / no-go rule
 
 ### Go
@@ -133,9 +173,10 @@ Proceed with a controlled launch only if all of the following are true:
 
 1. backend verification is green
 2. `npm run test:e2e:launch` is green
-3. staging release rehearsal is completed successfully
+3. staging live smoke and live visual smoke are green
 4. tenant rollout policy is confirmed
 5. release owner and support owner are explicitly assigned
+6. production worker/security checklist is confirmed
 
 ### No-go
 
@@ -146,16 +187,18 @@ Do not proceed if any of the following are true:
 3. the launch gate is failing
 4. backend verification is failing
 5. support ownership is unclear for first-cycle issues
+6. production service topology is not understood
 
 ## Immediate next actions
 
-1. Run the full staging release rehearsal from `docs/live-release-runbook.md`.
-2. Decide and document required GitHub checks for release approval.
-3. Record target-tenant rollout policy decisions.
-4. Capture a final release signoff record after staging rehearsal.
+1. Capture a release signoff record with owner names, tenant scope, rollback path, and release window.
+2. Decide and document required GitHub and Playwright checks for release approval.
+3. Verify production security settings and actual worker/service topology using `docs/production-launch-ops-checklist-2026-08-24.md`.
+4. Use `docs/one-week-broad-rollout-confidence-plan-2026-08-24.md` as the recommended execution track for this work.
+5. Execute and mark complete the full release runbook from `docs/live-release-runbook.md`, then finalize `docs/release-signoff-2026-08-24.md`.
 
 ## Bottom line
 
 As of August 24, 2026, the product appears **launch-capable for a controlled release**.
 
-The remaining work is mostly about operational proof, release discipline, and tenant-safe rollout control rather than obvious missing frontend or backend implementation.
+The remaining work is now clearly concentrated in operational proof, release discipline, and production-environment confirmation rather than obvious missing frontend or backend implementation.

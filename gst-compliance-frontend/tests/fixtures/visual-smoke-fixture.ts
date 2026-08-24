@@ -11,7 +11,7 @@ async function freezeVisualTime(page: Page) {
     const RealDate = Date;
 
     class MockDate extends RealDate {
-      constructor(...args: any[]) {
+      constructor(...args: ConstructorParameters<DateConstructor>) {
         if (args.length === 0) {
           super(fixedNow);
           return;

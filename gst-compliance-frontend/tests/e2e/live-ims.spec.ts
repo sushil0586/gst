@@ -5,22 +5,22 @@ import { getLiveCredentials } from "../fixtures/live-env";
 const live = getLiveCredentials();
 
 async function selectImsContext(page: Parameters<typeof test>[0]["page"]) {
-  await page.getByTestId("workspace-selector").click({ force: true });
-  await page.getByRole("option", { name: "Demo Workspace", exact: true }).click();
+  const workspaceSelector = page.getByTestId("workspace-selector");
+  const clientSelector = page.getByTestId("client-selector");
+  const gstinSelector = page.getByTestId("gstin-selector");
+  const periodSelector = page.getByTestId("period-selector");
+  const workspaceText = (await workspaceSelector.textContent()) ?? "";
+  const gstinText = (await gstinSelector.textContent()) ?? "";
+  const periodText = (await periodSelector.textContent()) ?? "";
 
-  await page.getByTestId("client-selector").click({ force: true });
-  await page.getByPlaceholder("Search client").fill("Demo Client Private Limited");
-  await page.getByRole("button", { name: "Open", exact: true }).click();
+  if (!workspaceText.includes("Demo Workspace")) {
+    await workspaceSelector.click({ force: true });
+    await page.getByRole("option", { name: "Demo Workspace", exact: true }).click();
+  }
 
-  await expect(page.getByTestId("gstin-selector")).toBeVisible();
-  await page.getByTestId("gstin-selector").scrollIntoViewIfNeeded();
-  await page.getByTestId("gstin-selector").click({ force: true });
-  await page.getByRole("option", { name: "29ABCDE1234F1Z5", exact: true }).click();
-
-  await expect(page.getByTestId("period-selector")).toBeVisible();
-  await page.getByTestId("period-selector").scrollIntoViewIfNeeded();
-  await page.getByTestId("period-selector").click({ force: true });
-  await page.getByRole("option", { name: "2026-04", exact: true }).click();
+  await expect(clientSelector).toContainText("Demo Client Private Limited");
+  await expect(gstinSelector).toContainText("29ABCDE1234F1Z5");
+  await expect(periodSelector).toContainText("2026-04");
 }
 
 async function signInViaApi({

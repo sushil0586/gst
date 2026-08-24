@@ -8,6 +8,10 @@ Frontend launch-gate reference:
 
 - [frontend-launch-verification-summary.md](/Users/ansh/Documents/Gst-Compliance/docs/frontend-launch-verification-summary.md:1)
 
+Operational closeout reference:
+
+- [production-launch-ops-checklist-2026-08-24.md](/Users/ansh/Documents/Gst-Compliance/docs/production-launch-ops-checklist-2026-08-24.md:1)
+
 ## Pre-Release Checks
 
 1. Environment flags are correct:
@@ -130,6 +134,11 @@ Run this before any first production release decision:
    - screenshot of workspace team role assignment
    - screenshot of notice update flow
    - screenshot of filing status and support evidence
+10. Complete the operational closeout sheet:
+   - security posture confirmation
+   - worker and service topology confirmation
+   - retention, beat, logging, and alert routing confirmation
+   - named-owner approvals
 
 ## Deploy Check Notes
 
@@ -183,3 +192,7 @@ Capture:
 - who approved release
 - who monitored the first cycle
 - any incident notes or evidence packs created during rollout
+
+Record the final decision in:
+
+- [release-signoff-2026-08-24.md](/Users/ansh/Documents/Gst-Compliance/docs/release-signoff-2026-08-24.md:1)

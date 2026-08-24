@@ -1,17 +1,5 @@
 import { expect, test } from "../fixtures/visual-fixture";
 
-function jsonSuccess(data: unknown) {
-  return {
-    status: 200,
-    contentType: "application/json",
-    body: JSON.stringify({
-      status: "success",
-      message: "Success",
-      data,
-    }),
-  };
-}
-
 function buildImsSessionRecord(overrides: Record<string, unknown> = {}) {
   return {
     id: "provider-session-1",

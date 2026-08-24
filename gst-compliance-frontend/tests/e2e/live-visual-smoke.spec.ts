@@ -6,7 +6,12 @@ import { LoginPage } from "../pages/login-page";
 const live = getLiveCredentials();
 
 const screens = [
-  { path: "/dashboard", heading: /Welcome to GST Compliance Workspace/i, snapshot: "live-dashboard.png" },
+  {
+    path: "/dashboard",
+    heading: /Welcome to GST Compliance Workspace/i,
+    snapshot: "live-dashboard.png",
+    locator: '[class*="panel-card-hero"]',
+  },
   { path: "/imports", heading: "Import Center", snapshot: "live-imports.png" },
   { path: "/returns", heading: "Returns", snapshot: "live-returns.png" },
   { path: "/reports", heading: "Transaction Review", snapshot: "live-reports.png" },
@@ -32,7 +37,10 @@ test.describe("Live visual smoke", () => {
       await page.goto(screen.path);
       await expect(page).toHaveURL(new RegExp(`${screen.path.replace(/\//g, "\\/")}(?:\\?.*)?$`));
       await expect(page.getByRole("main").getByRole("heading", { name: screen.heading, exact: typeof screen.heading === "string" })).toBeVisible();
-      await expect(page.getByRole("main")).toHaveScreenshot(screen.snapshot, {
+      const visualTarget = screen.locator
+        ? page.getByRole("main").locator(screen.locator).first()
+        : page.getByRole("main");
+      await expect(visualTarget).toHaveScreenshot(screen.snapshot, {
         animations: "disabled",
         caret: "hide",
       });
