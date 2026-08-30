@@ -15,6 +15,8 @@ from apps.filings.models import ProviderAuthSession, ReturnFiling
 from apps.gst_transactions.models import GSTTransaction
 from apps.gstins.models import GSTIN
 from apps.imports.models import ImportBatch, ImportRowError, ImportTemplate
+from apps.imports.services.parsers.base import IMPORT_BULK_CREATE_BATCH_SIZE
+from apps.imports.services.parsers.sales import SalesImportParser
 from apps.integrations.whitebooks.client import WhiteBooksClient
 from apps.integrations.whitebooks.exceptions import WhiteBooksTemporaryError
 from apps.organizations.models import Organization
@@ -223,6 +225,70 @@ def test_invalid_row_creates_import_row_error(import_authenticated_client, impor
     assert batch.valid_rows == 0
     assert ImportRowError.objects.filter(import_batch=batch, field_name="document_date").exists()
     assert ImportRowError.objects.filter(import_batch=batch, severity=ImportRowError.Severity.WARNING).exists()
+
+
+@pytest.mark.django_db
+def test_import_row_errors_are_bulk_created_in_chunks(import_context, import_user, monkeypatch):
+    batch = ImportBatch.objects.create(
+        workspace=import_context["workspace"],
+        client=import_context["client"],
+        gstin=import_context["gstin"],
+        compliance_period=import_context["compliance_period"],
+        import_type=ImportBatch.ImportType.SALES,
+        source_type=ImportBatch.SourceType.CSV,
+        file_name="chunked-invalid.csv",
+        status=ImportBatch.BatchStatus.UPLOADED,
+        created_by=import_user,
+        updated_by=import_user,
+    )
+
+    parser = SalesImportParser(batch)
+    invalid_row_count = IMPORT_BULK_CREATE_BATCH_SIZE + 5
+    parser.read_file = lambda: [
+        (
+            index + 2,
+            {
+                "invoice_no": f"INV-{index:04d}",
+                "invoice_date": "",
+                "recipient_gstin": "",
+                "counterparty_name": "",
+                "taxable_value": "oops",
+                "cgst_amount": "",
+                "sgst_amount": "",
+                "igst_amount": "",
+                "cess_amount": "",
+                "total_amount": "",
+            },
+        )
+        for index in range(invalid_row_count)
+    ]
+
+    row_error_batches: list[int] = []
+    original_row_error_bulk_create = ImportRowError.objects.bulk_create
+
+    def tracking_row_error_bulk_create(objects, *args, **kwargs):
+        row_error_batches.append(len(objects))
+        return original_row_error_bulk_create(objects, *args, **kwargs)
+
+    monkeypatch.setattr(ImportRowError.objects, "bulk_create", tracking_row_error_bulk_create)
+
+    transaction_batches: list[int] = []
+
+    def tracking_transaction_bulk_create(objects, *args, **kwargs):
+        transaction_batches.append(len(objects))
+        return []
+
+    monkeypatch.setattr("apps.gst_transactions.models.GSTTransaction.objects.bulk_create", tracking_transaction_bulk_create)
+
+    result = parser.process()
+
+    assert result["total_rows"] == invalid_row_count
+    assert result["valid_rows"] == 0
+    assert result["invalid_rows"] == invalid_row_count
+    assert len(row_error_batches) > 1
+    assert all(size <= IMPORT_BULK_CREATE_BATCH_SIZE for size in row_error_batches)
+    assert sum(row_error_batches) == ImportRowError.objects.filter(import_batch=batch).count()
+    assert transaction_batches == []
 
 
 @pytest.mark.django_db

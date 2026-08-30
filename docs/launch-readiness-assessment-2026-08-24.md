@@ -70,6 +70,16 @@ It is not yet strong enough for an unstructured “open the product widely and t
   - operations, approvals, follow-ups, notices, and audit trail
   - IMS read-only provider checks
   - seeded visual smoke for dashboard, imports, returns, reports, IMS, and team management
+- staging incident observed on August 24, 2026:
+  - login temporarily failed with `500 Internal Server Error`
+  - root cause was PostgreSQL cluster `16-main` being down after an OOM-kill event
+  - service was recovered and login returned to `200 OK`
+  - a follow-up auth regression was introduced when `SECURE_SSL_REDIRECT=True` was enabled while the staging frontend still targeted `http://127.0.0.1:8001/api/v1`
+  - this was corrected by updating the staging frontend API base URL to `https://gst-stage.accerio.in/api/v1`, rebuilding the Next.js production bundle, and revalidating login at `200 OK`
+  - later on August 24, 2026, staging host access became unstable again:
+    - SSH to `16.16.166.34` began timing out during banner exchange
+    - an external fetch to `https://gst-stage.accerio.in/login` also timed out during follow-up validation
+    - this is now treated as an environment-availability risk, not a known application-config regression
 
 ### Release documentation
 
@@ -81,6 +91,7 @@ It is not yet strong enough for an unstructured “open the product widely and t
 - a release signoff record exists
 - a production launch ops checklist exists
 - a one-week broad-rollout confidence plan exists
+- a Postgres OOM mitigation plan exists
 
 ## Supported launch surfaces
 
@@ -121,8 +132,17 @@ These are the items that should be completed before the release is declared trul
    - retention and scheduled jobs are enabled in the target environment
    - Celery/systemd worker units actually exist with the intended names
    - log and alert routing is in place for auth, provider, and request failures
+   - production and staging environments remain reachable and stable long enough to complete release validation
 
-5. Full runbook rehearsal ownership
+5. Capacity and recovery hardening
+   The August 24, 2026 staging outage showed that:
+   - PostgreSQL can be OOM-killed during heavy import activity
+   - root disk pressure had already reached unsafe levels before storage expansion
+   - recovery currently depends on manual operator intervention
+   - later connectivity instability suggests there may still be host-level resource, networking, or access-path issues outside the application fix itself
+   This needs explicit mitigation before we raise rollout confidence materially.
+
+6. Full runbook rehearsal ownership
    The live checks are green, but someone still needs to execute the full release runbook end to end and mark each step complete.
 
 ## Acceptable for controlled launch
@@ -141,6 +161,9 @@ These are not ideal, but they are acceptable in a controlled launch if they are 
 4. Broader hardening backlog on support depth and observability
    These should continue post-launch, but they do not appear to block a narrow, supervised release.
 
+5. Manual recovery dependence after database pressure incidents
+   The current staging recovery required manual restart of PostgreSQL after an OOM event. This is acceptable for a controlled launch only if support ownership and escalation are explicit.
+
 ## Defer to post-launch hardening
 
 These should remain on the roadmap, but they do not need to block a controlled launch:
@@ -154,7 +177,7 @@ These should remain on the roadmap, but they do not need to block a controlled l
 ## Main risks if we launch now
 
 1. Staging-only or environment-only regressions
-   The biggest remaining uncertainty is no longer mocked local workflow logic. It is real environment behavior.
+   The biggest remaining uncertainty is no longer mocked local workflow logic. It is real environment behavior, including host reachability and availability drift after otherwise-correct app fixes.
 
 2. Process drift during release
    If the team does not consistently use the release runbook and required gates, the current readiness gains can be bypassed operationally.
@@ -165,6 +188,9 @@ These should remain on the roadmap, but they do not need to block a controlled l
 4. Production-worker mismatch
    The recent staging deployment question about missing Celery service units is a reminder that documented service names and actual environment topology can drift. That is an operational launch risk until confirmed.
 
+5. Database capacity and memory-pressure incidents
+   On August 24, 2026, the staging PostgreSQL cluster was down after an OOM-kill event during heavy import-related activity. The outage was recoverable, but it is evidence that environment capacity and large-import behavior still need hardening.
+
 ## Go / no-go rule
 
 ### Go
@@ -174,31 +200,36 @@ Proceed with a controlled launch only if all of the following are true:
 1. backend verification is green
 2. `npm run test:e2e:launch` is green
 3. staging live smoke and live visual smoke are green
-4. tenant rollout policy is confirmed
-5. release owner and support owner are explicitly assigned
-6. production worker/security checklist is confirmed
+4. staging host access and public availability are stable enough to complete final verification
+5. tenant rollout policy is confirmed
+6. release owner and support owner are explicitly assigned
+7. production worker/security checklist is confirmed
 
 ### No-go
 
 Do not proceed if any of the following are true:
 
 1. staging auth or filing-access flows are unreliable
-2. rollout policy behavior is not understood for the target tenant scope
-3. the launch gate is failing
-4. backend verification is failing
-5. support ownership is unclear for first-cycle issues
-6. production service topology is not understood
+2. staging host access or public staging availability is unstable
+3. rollout policy behavior is not understood for the target tenant scope
+4. the launch gate is failing
+5. backend verification is failing
+6. support ownership is unclear for first-cycle issues
+7. production service topology is not understood
 
 ## Immediate next actions
 
 1. Capture a release signoff record with owner names, tenant scope, rollback path, and release window.
 2. Decide and document required GitHub and Playwright checks for release approval.
-3. Verify production security settings and actual worker/service topology using `docs/production-launch-ops-checklist-2026-08-24.md`.
-4. Use `docs/one-week-broad-rollout-confidence-plan-2026-08-24.md` as the recommended execution track for this work.
-5. Execute and mark complete the full release runbook from `docs/live-release-runbook.md`, then finalize `docs/release-signoff-2026-08-24.md`.
+3. Restore stable staging host access and confirm public staging availability before treating final smoke coverage as complete.
+4. Verify production security settings and actual worker/service topology using `docs/production-launch-ops-checklist-2026-08-24.md`.
+5. Add explicit mitigation for Postgres OOM, disk-pressure risk, and host-availability instability before broader rollout.
+6. Use `docs/one-week-broad-rollout-confidence-plan-2026-08-24.md` as the recommended execution track for this work.
+7. Use `docs/postgres-oom-mitigation-plan-2026-08-24.md` as the runtime-stability remediation track for the August 24 incident.
+8. Execute and mark complete the full release runbook from `docs/live-release-runbook.md`, then finalize `docs/release-signoff-2026-08-24.md`.
 
 ## Bottom line
 
-As of August 24, 2026, the product appears **launch-capable for a controlled release**.
+As of August 24, 2026, the product appears **launch-capable for a controlled release from a product/configuration standpoint**, but final signoff should remain pending until staging availability is stable again.
 
-The remaining work is now clearly concentrated in operational proof, release discipline, and production-environment confirmation rather than obvious missing frontend or backend implementation.
+The remaining work is now clearly concentrated in operational proof, host/environment stability, release discipline, and production-environment confirmation rather than obvious missing frontend or backend implementation.

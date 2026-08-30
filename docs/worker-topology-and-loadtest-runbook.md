@@ -106,6 +106,34 @@ Suggested starting point for a moderate multi-tenant staging environment:
 
 These are not final production numbers. They are a safe first topology for load rehearsal.
 
+### Service topology audit
+
+For public launch, verify that the actual host has the intended services active:
+
+```bash
+bash tools/service_topology_audit.sh
+```
+
+Default required services:
+
+- `gst-backend`
+- `gst-frontend`
+- `postgresql@16-main`
+- `gst-celery-imports`
+- `gst-celery-reconciliation`
+- `gst-celery-filings`
+- `gst-celery-scheduled`
+- `gst-celery-beat`
+
+If production service names differ, pass the exact names:
+
+```bash
+REQUIRED_SYSTEMD_SERVICES="gst-backend,gst-frontend,postgresql@16-main,<imports-worker>,<reconciliation-worker>,<filings-worker>,<scheduled-worker>,<celery-beat>" \
+bash tools/service_topology_audit.sh
+```
+
+This audit is intentionally failing: missing or inactive required services should block public launch until the topology is confirmed or the expected names are corrected.
+
 ## What to watch during scale rehearsal
 
 - queue lag by queue name
@@ -139,7 +167,9 @@ cd /Users/ansh/Documents/Gst-Compliance
   --endpoint "dashboard/summary/?workspace=<workspace-id>&client=<client-id>&gstin=<gstin-id>&compliance_period=<period-id>" \
   --endpoint "returns/readiness/?workspace=<workspace-id>&client=<client-id>&gstin=<gstin-id>&compliance_period=<period-id>" \
   --concurrency 10 \
-  --requests-per-worker 20
+  --requests-per-worker 20 \
+  --max-p95-ms 1500 \
+  --max-error-rate 0
 ```
 
 The script reports:
@@ -152,6 +182,12 @@ The script reports:
 - p50 latency
 - p95 latency
 - max latency
+- error rate
+
+It exits non-zero when:
+
+- an endpoint returns more errors than `--max-error-rate`
+- p95 exceeds `--max-p95-ms` when that threshold is set
 
 Use it as a repeatable before/after check when changing:
 
@@ -208,4 +244,3 @@ Goal:
 - dashboard/context/readiness stay within acceptable latency budget
 - worker memory growth is stable
 - provider-facing flows remain operationally controllable
-

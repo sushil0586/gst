@@ -13,6 +13,8 @@ Use it together with:
 - [production-security-checklist.md](/Users/ansh/Documents/Gst-Compliance/docs/production-security-checklist.md:1)
 - [worker-topology-and-loadtest-runbook.md](/Users/ansh/Documents/Gst-Compliance/docs/worker-topology-and-loadtest-runbook.md:1)
 - [one-week-broad-rollout-confidence-plan-2026-08-24.md](/Users/ansh/Documents/Gst-Compliance/docs/one-week-broad-rollout-confidence-plan-2026-08-24.md:1)
+- [public-launch-blocker-burn-down-2026-08-30.md](/Users/ansh/Documents/Gst-Compliance/docs/public-launch-blocker-burn-down-2026-08-30.md:1)
+- [postgres-oom-mitigation-plan-2026-08-24.md](/Users/ansh/Documents/Gst-Compliance/docs/postgres-oom-mitigation-plan-2026-08-24.md:1)
 
 ## Launch owners
 
@@ -74,10 +76,18 @@ Run these on the target release environment:
 ```bash
 ./venv/bin/python manage.py check
 ./venv/bin/python manage.py check --deploy
-./venv/bin/python manage.py audit_security_posture
+./venv/bin/python manage.py audit_security_posture --fail-on-warn
 ./venv/bin/python manage.py enforce_security_retention --audit-days 1 --filing-days 1 --provider-auth-days 1 --import-days 1
 cd gst-compliance-frontend && npm run lint && npm run build
 ```
+
+For a repeatable public-launch audit, run:
+
+```bash
+bash tools/public_launch_readiness_audit.sh
+```
+
+The helper skips retention enforcement by default because retention mutates old sensitive payloads. Set `RUN_RETENTION_EXERCISE=true` only on an approved target environment.
 
 Record outcomes:
 
@@ -133,11 +143,10 @@ Recommended worksheet:
 Run commands like these on the target host:
 
 ```bash
-systemctl list-unit-files | grep -E 'celery|gst'
-systemctl list-units --type=service | grep -E 'celery|gst'
-ls -1 /etc/systemd/system | grep -E 'celery|gst'
-redis-cli ping
+bash tools/service_topology_audit.sh
 ```
+
+If service names differ from the defaults, set `REQUIRED_SYSTEMD_SERVICES` to the exact comma-separated service names before running the audit.
 
 Record outcomes:
 
@@ -170,6 +179,27 @@ Evidence:
 - Log destination: `TBD`
 - Alerting destination: `TBD`
 - Verified by: `TBD`
+
+### Capacity and recovery checks
+
+- [ ] root disk usage is at a safe operating level after the August 24, 2026 storage incident
+- [ ] PostgreSQL cluster health is confirmed after the August 24, 2026 OOM-kill outage
+- [ ] Postgres recovery steps are documented for the active environment
+- [ ] import workload and large-row-error behavior are reviewed for memory-pressure risk
+- [ ] host SSH access and public app availability remain stable during release validation
+- [ ] frontend production environment variables are aligned with hardened transport settings before rebuilding and restarting services
+
+Evidence:
+
+- Current disk usage: `August 24, 2026 follow-up after root partition/filesystem expansion showed /dev/root at 47% used with 7.8G free on a 15G mounted root volume`
+- Current Postgres cluster status: `online after manual restart of postgresql@16-main`
+- Frontend transport/alignment note: `August 24, 2026 staging login regressed after SECURE_SSL_REDIRECT was enabled because the deployed frontend build still targeted http://127.0.0.1:8001/api/v1; corrected by switching NEXT_PUBLIC_API_BASE_URL to https://gst-stage.accerio.in/api/v1 and rebuilding the frontend`
+- Current availability note: `Later on August 24, 2026, SSH to 16.16.166.34 timed out during banner exchange and follow-up public staging fetches also timed out; staging later recovered and full recovery validation succeeded, including 200 OK public login/auth checks and a passing Playwright live smoke`
+- Browser automation readiness note: `Staging required both npx playwright install chromium and sudo npx playwright install-deps chromium before live smoke could run successfully`
+- Remaining memory-pressure note: `Backend logs still showed a Gunicorn worker timeout and likely OOM-style worker recycle earlier on August 24, 2026; capacity follow-up remains required before broad rollout`
+- Staging sizing/tuning note: `The host has only 1.9 GiB RAM and is also running the Finacc stack; imports and reconciliation concurrency were reduced from 4 to 2 on August 24, 2026, and swap usage improved from roughly 770 MiB to roughly 361 MiB after the change, but a larger or dedicated host is still the stronger broad-rollout option`
+- Recovery owner: `TBD`
+- Incident notes link: `TBD`
 
 ## 5. Release-runbook execution
 

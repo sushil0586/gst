@@ -13,6 +13,7 @@ from apps.common.security import sanitize_json
 from apps.imports.models import ImportRowError
 
 GSTIN_REGEX = re.compile(r"^[0-9]{2}[A-Z0-9]{10}[A-Z0-9]{3}$")
+IMPORT_BULK_CREATE_BATCH_SIZE = 500
 
 COLUMN_ALIASES = {
     "document_number": ["invoice_no", "invoice_number", "document_number", "inv_no", "doc_no", "document_no"],
@@ -395,10 +396,10 @@ class BaseImportParser:
                 self._merge_transaction_group(grouped_transactions[group_key], normalized_row, row_number)
 
         if issues_to_create:
-            ImportRowError.objects.bulk_create(issues_to_create)
+            self._bulk_create_in_chunks(ImportRowError.objects, issues_to_create)
         transactions_to_create = [self._build_transaction(group_data) for group_data in grouped_transactions.values()]
         if transactions_to_create:
-            GSTTransaction.objects.bulk_create(transactions_to_create)
+            self._bulk_create_in_chunks(GSTTransaction.objects, transactions_to_create)
 
         total_rows = len(rows)
         valid_rows = valid_row_count
@@ -640,6 +641,10 @@ class BaseImportParser:
             line_item.get("rate"),
             metadata.get("advance_reference"),
         )
+
+    def _bulk_create_in_chunks(self, manager, objects_to_create):
+        for start in range(0, len(objects_to_create), IMPORT_BULK_CREATE_BATCH_SIZE):
+            manager.bulk_create(objects_to_create[start:start + IMPORT_BULK_CREATE_BATCH_SIZE])
 
     def _initialize_transaction_group(self, normalized_row, row_number):
         return {

@@ -1,9 +1,12 @@
 from decimal import Decimal
 from io import BytesIO
+from io import StringIO
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.db import connection
 from django.test.utils import CaptureQueriesContext, override_settings
 from django.utils import timezone
@@ -561,6 +564,67 @@ def test_health_score_calculation():
         lock_status={"is_locked": False},
     )
     assert score == 20
+
+
+@override_settings(
+    DEBUG=False,
+    SECRET_KEY="production-secret-key-with-32-plus-characters",
+    SIMPLE_JWT={"SIGNING_KEY": "production-jwt-signing-key-with-32-plus-characters"},
+    SECURE_SSL_REDIRECT=True,
+    SESSION_COOKIE_SECURE=True,
+    CSRF_COOKIE_SECURE=True,
+    SECURE_HSTS_SECONDS=31536000,
+    ALLOWED_HOSTS=["gst.accerio.in"],
+    CORS_ALLOWED_ORIGINS=["https://gst.accerio.in"],
+    CSRF_TRUSTED_ORIGINS=["https://gst.accerio.in"],
+    ENABLE_API_DOCS=False,
+    APP_FRONTEND_URL="https://gst.accerio.in",
+    EMAIL_BACKEND="django.core.mail.backends.smtp.EmailBackend",
+    CELERY_TASK_ALWAYS_EAGER=False,
+    WHITEBOOKS_SSL_VERIFY=True,
+    SECURITY_RETENTION_ENABLED=True,
+    FILING_ENFORCE_TENANT_ROLLOUT=True,
+    FILING_ENFORCE_MAKER_CHECKER=True,
+    FILING_ALERT_EMAIL_ENABLED=True,
+    SECURITY_LOG_LEVEL="INFO",
+)
+def test_audit_security_posture_passes_public_launch_posture():
+    output = StringIO()
+
+    call_command("audit_security_posture", "--fail-on-warn", stdout=output)
+
+    assert "All reviewed security posture checks passed." in output.getvalue()
+
+
+@override_settings(
+    DEBUG=True,
+    SECRET_KEY="change-me",
+    SIMPLE_JWT={"SIGNING_KEY": "change-me-jwt-signing-key-with-at-least-32-characters"},
+    SECURE_SSL_REDIRECT=False,
+    SESSION_COOKIE_SECURE=False,
+    CSRF_COOKIE_SECURE=False,
+    SECURE_HSTS_SECONDS=0,
+    ALLOWED_HOSTS=["localhost"],
+    CORS_ALLOWED_ORIGINS=["http://localhost:3000"],
+    CSRF_TRUSTED_ORIGINS=["http://localhost:3000"],
+    ENABLE_API_DOCS=True,
+    APP_FRONTEND_URL="http://localhost:3000",
+    EMAIL_BACKEND="django.core.mail.backends.console.EmailBackend",
+    CELERY_TASK_ALWAYS_EAGER=True,
+    WHITEBOOKS_SSL_VERIFY=True,
+    SECURITY_RETENTION_ENABLED=False,
+    FILING_ENFORCE_TENANT_ROLLOUT=False,
+    FILING_ENFORCE_MAKER_CHECKER=False,
+    FILING_ALERT_EMAIL_ENABLED=False,
+    SECURITY_LOG_LEVEL="INFO",
+)
+def test_audit_security_posture_can_fail_public_launch_gate():
+    output = StringIO()
+
+    with pytest.raises(CommandError):
+        call_command("audit_security_posture", "--fail-on-warn", stdout=output)
+
+    assert "DEBUG disabled" in output.getvalue()
 
 
 @pytest.mark.django_db

@@ -120,6 +120,12 @@ PLAYWRIGHT_LIVE_PASSWORD=demo12345 \
 npm run test:e2e:live:visual:update
 ```
 
+For post-incident staging validation, you can also run the repo helper from the repository root:
+
+```bash
+bash tools/staging_recovery_validation.sh
+```
+
 Live coverage includes:
 
 - `live-smoke.spec.ts`: login, dashboard load, refresh persistence, logout, and mobile-width usability
@@ -132,6 +138,8 @@ Live coverage includes:
 - `live-visual-smoke.spec.ts`: seeded live screenshots for dashboard, imports, returns, reports, IMS, and team management
 
 These tests use no API mocks.
+
+The imports screenshot in `live-visual-smoke.spec.ts` stabilizes volatile live batch status text and focuses on the first-screen import layout, because staging import batches can legitimately move between queued, processed, discarded, and corrected states between visual runs.
 
 ## CI behavior
 

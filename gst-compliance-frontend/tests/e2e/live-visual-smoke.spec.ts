@@ -5,6 +5,41 @@ import { LoginPage } from "../pages/login-page";
 
 const live = getLiveCredentials();
 
+async function stabilizeImportsVisual(page: import("@playwright/test").Page) {
+  await page.waitForLoadState("networkidle");
+  await expect(page.getByRole("main").getByText("Import operations snapshot")).toBeVisible();
+  await expect(page.getByRole("main").getByText("Import history")).toBeVisible();
+
+  const content = page.getByRole("main").locator("> div > div").first();
+  await content.evaluate((node) => {
+    Array.from(node.children).slice(3).forEach((child) => {
+      child.setAttribute("data-live-visual-hidden", "true");
+    });
+  });
+
+  await page.addStyleTag({
+    content: `
+      [data-live-visual-hidden="true"] {
+        display: none !important;
+      }
+    `,
+  });
+
+  const reviewDescription = page
+    .getByText("4. Review processed output")
+    .locator("xpath=following-sibling::p[1]");
+  await reviewDescription.evaluate((node) => {
+    node.textContent = "Latest batch output is visible in the workspace.";
+  });
+
+  const latestStatus = page
+    .getByText("Latest batch status")
+    .locator("xpath=following-sibling::div//span[1]");
+  await latestStatus.evaluate((node) => {
+    node.textContent = "live";
+  });
+}
+
 const screens = [
   {
     path: "/dashboard",
@@ -12,7 +47,12 @@ const screens = [
     snapshot: "live-dashboard.png",
     locator: '[class*="panel-card-hero"]',
   },
-  { path: "/imports", heading: "Import Center", snapshot: "live-imports.png" },
+  {
+    path: "/imports",
+    heading: "Import Center",
+    snapshot: "live-imports.png",
+    stabilize: stabilizeImportsVisual,
+  },
   { path: "/returns", heading: "Returns", snapshot: "live-returns.png" },
   { path: "/reports", heading: "Transaction Review", snapshot: "live-reports.png" },
   { path: "/ims", heading: "IMS", snapshot: "live-ims.png" },
@@ -37,6 +77,9 @@ test.describe("Live visual smoke", () => {
       await page.goto(screen.path);
       await expect(page).toHaveURL(new RegExp(`${screen.path.replace(/\//g, "\\/")}(?:\\?.*)?$`));
       await expect(page.getByRole("main").getByRole("heading", { name: screen.heading, exact: typeof screen.heading === "string" })).toBeVisible();
+      if ("stabilize" in screen) {
+        await screen.stabilize(page);
+      }
       const visualTarget = screen.locator
         ? page.getByRole("main").locator(screen.locator).first()
         : page.getByRole("main");

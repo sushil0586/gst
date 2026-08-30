@@ -174,6 +174,62 @@ GitHub Actions live-visual secrets should use the same values:
 - `PLAYWRIGHT_LIVE_EMAIL`: `demo_admin@example.com`
 - `PLAYWRIGHT_LIVE_PASSWORD`: `demo12345`
 
+## Staging recovery validation helper
+
+When staging access is restored after an incident, run the repeatable validation helper from the repo root:
+
+```bash
+bash tools/staging_recovery_validation.sh
+```
+
+Optional overrides:
+
+- `GST_STAGE_HOST`
+- `GST_STAGE_USER`
+- `GST_STAGE_SSH_KEY`
+- `GST_STAGE_PUBLIC_BASE_URL`
+- `GST_STAGE_LOGIN_EMAIL`
+- `GST_STAGE_LOGIN_PASSWORD`
+
+## Public launch readiness audit
+
+Before approving a public launch, run the repeatable audit helper on the target release environment:
+
+```bash
+bash tools/public_launch_readiness_audit.sh
+```
+
+The helper runs backend/frontend gates, Django deploy checks, a fail-on-warning security posture audit, and host service checks when available. It skips retention enforcement by default because retention mutates old sensitive payloads; set `RUN_RETENTION_EXERCISE=true` only on an approved target.
+
+To verify production service topology directly:
+
+```bash
+bash tools/service_topology_audit.sh
+```
+
+To collect thresholded capacity evidence against authenticated API paths:
+
+```bash
+./venv/bin/python tools/loadtest_api.py \
+  --base-url https://<production-host>/api/v1 \
+  --email <pilot-admin-email> \
+  --password <pilot-admin-password> \
+  --max-p95-ms 1500 \
+  --max-error-rate 0
+```
+
+See:
+
+- [docs/public-launch-blocker-burn-down-2026-08-30.md](/Users/ansh/Documents/Gst-Compliance/docs/public-launch-blocker-burn-down-2026-08-30.md:1)
+
+## Media storage
+
+The project supports both local filesystem media storage and S3-compatible object storage for uploaded files.
+
+See:
+
+- [docs/s3-media-storage-setup.md](/Users/ansh/Documents/Gst-Compliance/docs/s3-media-storage-setup.md:1)
+
 ## Backend commands
 
 ```bash

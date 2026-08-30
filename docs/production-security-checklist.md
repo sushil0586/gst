@@ -58,7 +58,16 @@ Run these before release:
 
 ```bash
 ./venv/bin/python manage.py check
-./venv/bin/python manage.py audit_security_posture
+./venv/bin/python manage.py check --deploy
+./venv/bin/python manage.py audit_security_posture --fail-on-warn
 ./venv/bin/python manage.py enforce_security_retention --audit-days 1 --filing-days 1 --provider-auth-days 1 --import-days 1
 cd gst-compliance-frontend && npm run lint && npm run build
 ```
+
+For public launch, prefer the repeatable wrapper:
+
+```bash
+bash tools/public_launch_readiness_audit.sh
+```
+
+The wrapper skips retention enforcement unless `RUN_RETENTION_EXERCISE=true` is set, because retention changes old sensitive payloads.
