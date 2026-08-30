@@ -12,6 +12,7 @@ from apps.audit_logs.services.audit import record_audit_log
 from apps.compliance_periods.models import CompliancePeriod
 from apps.filings.models import ProviderAuthSession, ReturnFiling
 from apps.filings.services.auth_session_freshness import get_provider_auth_session_freshness
+from apps.gst_transactions.models import GSTTransaction
 from apps.integrations.whitebooks.client import WhiteBooksClient
 from apps.integrations.whitebooks.exceptions import WhiteBooksSubmissionError, WhiteBooksTemporaryError
 from apps.returns.models import ProviderReturnSummarySnapshot, ReturnPreparation
@@ -80,6 +81,45 @@ SUMMARY_CONFIG = {
     },
 }
 
+AUTO_LIABILITY_FIELDS = (
+    ("outward_taxable_value", "Auto-liability taxable value"),
+    ("igst_amount", "Auto-liability IGST"),
+    ("cgst_amount", "Auto-liability CGST"),
+    ("sgst_amount", "Auto-liability SGST"),
+    ("cess_amount", "Auto-liability CESS"),
+    ("outward_tax_liability", "Auto-liability total tax"),
+)
+
+AUTO_LIABILITY_PROVIDER_KEYS = {
+    "outward_taxable_value": (
+        "outward_taxable_value",
+        "total_taxable_value",
+        "totaltaxablevalue",
+        "taxable_value",
+        "taxablevalue",
+        "txval",
+        "ttlval",
+        "ttl_val",
+    ),
+    "igst_amount": ("igst_amount", "igstamount", "igst", "iamt", "igstamt"),
+    "cgst_amount": ("cgst_amount", "cgstamount", "cgst", "camt", "cgstamt"),
+    "sgst_amount": ("sgst_amount", "sgstamount", "sgst", "samt", "sgstamt"),
+    "cess_amount": ("cess_amount", "cessamount", "cess", "csamt", "cessamt"),
+    "outward_tax_liability": (
+        "outward_tax_liability",
+        "total_tax_amount",
+        "totaltaxamount",
+        "tax_amount",
+        "taxamount",
+        "total_liability",
+        "totalliability",
+        "ttl_tax",
+        "ttltax",
+        "ttl_tax_amt",
+        "ttltaxamt",
+    ),
+}
+
 
 def compare_provider_summary(
     *,
@@ -122,7 +162,7 @@ def compare_provider_summary(
     user = actor if getattr(actor, "is_authenticated", False) else None
 
     try:
-        provider_response = client.sanitize_response_payload(
+        return_summary_response = client.sanitize_response_payload(
             _fetch_provider_summary(
                 client=client,
                 return_type=return_type,
@@ -168,13 +208,31 @@ def compare_provider_summary(
         )
         return snapshot
 
-    normalized_provider_summary = _normalize_provider_summary(provider_response, return_type=return_type)
+    provider_response = return_summary_response
+    normalized_provider_summary = _normalize_provider_summary(return_summary_response, return_type=return_type)
     comparison_summary = _build_comparison_summary(
+        compliance_period=compliance_period,
         internal_summary=internal_summary,
         provider_summary=normalized_provider_summary,
         return_type=return_type,
         threshold_amount=threshold_amount,
     )
+    if return_type == ReturnPreparation.ReturnType.GSTR3B:
+        provider_response, normalized_provider_summary, comparison_summary = _add_auto_liability_comparison(
+            client=client,
+            compliance_period=compliance_period,
+            email=settings.WHITEBOOKS_CONTACT_EMAIL,
+            gstin=gstin.gstin,
+            ret_period=ret_period,
+            txn=auth_session.txn,
+            state_code=state_code,
+            gst_username=gst_username,
+            provider_response=provider_response,
+            normalized_provider_summary=normalized_provider_summary,
+            comparison_summary=comparison_summary,
+            internal_summary=internal_summary,
+            threshold_amount=threshold_amount,
+        )
     snapshot = ProviderReturnSummarySnapshot.objects.create(
         compliance_period=compliance_period,
         prepared_return=prepared_return,
@@ -295,9 +353,15 @@ def _build_internal_summary(prepared_return: ReturnPreparation) -> dict[str, str
             "debit_note_tax_amount": _decimal_to_string(_as_decimal(outward_supplies.get("debit_note_tax_amount"))),
         }
     itc_summary = summary.get("itc_summary") if isinstance(summary.get("itc_summary"), dict) else {}
+    reconciliation = summary.get("reconciliation") if isinstance(summary.get("reconciliation"), dict) else {}
     return {
         "prepared_return_id": str(prepared_return.id),
         "prepared_return_status": prepared_return.status,
+        "outward_taxable_value": _decimal_to_string(_as_decimal(outward_supplies.get("outward_taxable_value"))),
+        "igst_amount": _decimal_to_string(_as_decimal(outward_supplies.get("igst_amount"))),
+        "cgst_amount": _decimal_to_string(_as_decimal(outward_supplies.get("cgst_amount"))),
+        "sgst_amount": _decimal_to_string(_as_decimal(outward_supplies.get("sgst_amount"))),
+        "cess_amount": _decimal_to_string(_as_decimal(outward_supplies.get("cess_amount"))),
         "outward_tax_liability": _decimal_to_string(
             _as_decimal(outward_supplies.get("outward_tax_liability") or outward_supplies.get("total_tax_amount"))
         ),
@@ -305,7 +369,80 @@ def _build_internal_summary(prepared_return: ReturnPreparation) -> dict[str, str
             _as_decimal(itc_summary.get("eligible_itc") or itc_summary.get("claim_ready_itc"))
         ),
         "net_tax_payable": _decimal_to_string(_as_decimal(itc_summary.get("net_tax_payable"))),
+        "reconciliation_latest_run_id": str(reconciliation.get("latest_run_id") or ""),
+        "reconciliation_unresolved_mismatch_count": str(reconciliation.get("unresolved_mismatch_count") or 0),
     }
+
+
+def _add_auto_liability_comparison(
+    *,
+    client: WhiteBooksClient,
+    compliance_period: CompliancePeriod,
+    email: str,
+    gstin: str,
+    ret_period: str,
+    txn: str,
+    state_code: str,
+    gst_username: str,
+    provider_response: dict[str, Any],
+    normalized_provider_summary: dict[str, Any],
+    comparison_summary: dict[str, Any],
+    internal_summary: dict[str, str],
+    threshold_amount: Decimal,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    try:
+        auto_liability_response = client.sanitize_response_payload(
+            client.get_gstr3b_auto_liability(
+                email=email,
+                gstin=gstin,
+                ret_period=ret_period,
+                txn=txn,
+                state_code=state_code,
+                gst_username=gst_username,
+            )
+        )
+    except (WhiteBooksSubmissionError, WhiteBooksTemporaryError) as exc:
+        comparison_summary["auto_liability_comparison"] = {
+            "status": ProviderReturnSummarySnapshot.ComparisonStatus.PROVIDER_UNAVAILABLE,
+            "threshold_amount": _decimal_to_string(threshold_amount),
+            "matched_count": 0,
+            "within_threshold_count": 0,
+            "mismatch_count": 0,
+            "compared_fields": [],
+            "rows": [],
+            "source": "live_fetch",
+            "provider_path": "/gstr3b/autoliab",
+            "error_message": str(exc),
+        }
+        comparison_summary["provider_sources"] = ["/gstr3b/retsum", "/gstr3b/autoliab"]
+        comparison_summary["status"] = _combine_comparison_status(
+            comparison_summary["status"],
+            ProviderReturnSummarySnapshot.ComparisonStatus.PROVIDER_UNAVAILABLE,
+        )
+        return (
+            {"return_summary": provider_response, "auto_liability": {}},
+            {**normalized_provider_summary, "auto_liability": {}},
+            comparison_summary,
+        )
+
+    normalized_auto_liability = _normalize_auto_liability_summary(auto_liability_response)
+    auto_comparison = _build_auto_liability_comparison(
+        compliance_period=compliance_period,
+        internal_summary=internal_summary,
+        provider_summary=normalized_auto_liability,
+        threshold_amount=threshold_amount,
+    )
+    comparison_summary["auto_liability_comparison"] = auto_comparison
+    comparison_summary["provider_sources"] = ["/gstr3b/retsum", "/gstr3b/autoliab"]
+    comparison_summary["status"] = _combine_comparison_status(
+        comparison_summary["status"],
+        auto_comparison["status"],
+    )
+    return (
+        {"return_summary": provider_response, "auto_liability": auto_liability_response},
+        {**normalized_provider_summary, "auto_liability": normalized_auto_liability},
+        comparison_summary,
+    )
 
 
 def _normalize_provider_summary(payload: dict[str, Any], *, return_type: str) -> dict[str, str | bool]:
@@ -318,8 +455,25 @@ def _normalize_provider_summary(payload: dict[str, Any], *, return_type: str) ->
     return normalized
 
 
+def _normalize_auto_liability_summary(payload: dict[str, Any]) -> dict[str, str | bool]:
+    normalized: dict[str, str | bool] = {}
+    for field, candidate_keys in AUTO_LIABILITY_PROVIDER_KEYS.items():
+        value = _find_amount(payload, candidate_keys)
+        normalized[field] = _decimal_to_string(_as_decimal(value)) if value is not None else "0.00"
+        normalized[f"{field}_present"] = value is not None
+
+    if not normalized["outward_tax_liability_present"]:
+        head_fields = ("igst_amount", "cgst_amount", "sgst_amount", "cess_amount")
+        head_total = sum((_as_decimal(normalized[field]) for field in head_fields), Decimal("0.00"))
+        if any(bool(normalized.get(f"{field}_present")) for field in head_fields):
+            normalized["outward_tax_liability"] = _decimal_to_string(head_total)
+            normalized["outward_tax_liability_present"] = True
+    return normalized
+
+
 def _build_comparison_summary(
     *,
+    compliance_period: CompliancePeriod,
     internal_summary: dict[str, str],
     provider_summary: dict[str, str | bool],
     return_type: str,
@@ -355,6 +509,12 @@ def _build_comparison_summary(
                 "absolute_difference": _decimal_to_string(absolute_difference),
                 "provider_present": provider_present,
                 "severity": severity,
+                "source_trace": _build_source_trace(
+                    compliance_period=compliance_period,
+                    return_type=return_type,
+                    field=field,
+                    internal_summary=internal_summary,
+                ),
             }
         )
 
@@ -375,6 +535,175 @@ def _build_comparison_summary(
         "rows": rows,
         "source": "live_fetch",
     }
+
+
+def _build_auto_liability_comparison(
+    *,
+    compliance_period: CompliancePeriod | None,
+    internal_summary: dict[str, str],
+    provider_summary: dict[str, str | bool],
+    threshold_amount: Decimal,
+) -> dict[str, Any]:
+    rows = []
+    mismatch_count = 0
+    within_threshold_count = 0
+    matched_count = 0
+
+    for field, label in AUTO_LIABILITY_FIELDS:
+        internal_amount = _as_decimal(internal_summary.get(field))
+        provider_present = bool(provider_summary.get(f"{field}_present"))
+        provider_amount = _as_decimal(provider_summary.get(field))
+        difference_amount = internal_amount - provider_amount
+        absolute_difference = abs(difference_amount)
+        if not provider_present or absolute_difference > threshold_amount:
+            severity = "mismatch"
+            mismatch_count += 1
+        elif absolute_difference > Decimal("0.00"):
+            severity = "within_threshold"
+            within_threshold_count += 1
+        else:
+            severity = "match"
+            matched_count += 1
+        rows.append(
+            {
+                "field": field,
+                "label": label,
+                "internal_amount": _decimal_to_string(internal_amount),
+                "provider_amount": _decimal_to_string(provider_amount),
+                "difference_amount": _decimal_to_string(difference_amount),
+                "absolute_difference": _decimal_to_string(absolute_difference),
+                "provider_present": provider_present,
+                "severity": severity,
+                "source_trace": _build_source_trace(
+                    compliance_period=compliance_period,
+                    return_type=ReturnPreparation.ReturnType.GSTR3B,
+                    field=field,
+                    internal_summary=internal_summary,
+                ),
+            }
+        )
+
+    if mismatch_count:
+        status = ProviderReturnSummarySnapshot.ComparisonStatus.MISMATCH
+    elif within_threshold_count:
+        status = ProviderReturnSummarySnapshot.ComparisonStatus.WITHIN_THRESHOLD
+    else:
+        status = ProviderReturnSummarySnapshot.ComparisonStatus.MATCHED
+
+    return {
+        "status": status,
+        "threshold_amount": _decimal_to_string(threshold_amount),
+        "matched_count": matched_count,
+        "within_threshold_count": within_threshold_count,
+        "mismatch_count": mismatch_count,
+        "compared_fields": [field for field, _label in AUTO_LIABILITY_FIELDS],
+        "rows": rows,
+        "source": "live_fetch",
+        "provider_path": "/gstr3b/autoliab",
+        "error_message": "",
+    }
+
+
+def _combine_comparison_status(current_status: str, next_status: str) -> str:
+    priority = {
+        ProviderReturnSummarySnapshot.ComparisonStatus.MISMATCH: 3,
+        ProviderReturnSummarySnapshot.ComparisonStatus.PROVIDER_UNAVAILABLE: 2,
+        ProviderReturnSummarySnapshot.ComparisonStatus.WITHIN_THRESHOLD: 1,
+        ProviderReturnSummarySnapshot.ComparisonStatus.MATCHED: 0,
+    }
+    return next_status if priority.get(next_status, 0) > priority.get(current_status, 0) else current_status
+
+
+def _build_source_trace(
+    *,
+    compliance_period: CompliancePeriod | None,
+    return_type: str,
+    field: str,
+    internal_summary: dict[str, str],
+) -> dict[str, Any]:
+    if compliance_period is None:
+        return {}
+
+    transaction_types = _source_transaction_types(return_type=return_type, field=field)
+    transactions = GSTTransaction.objects.filter(
+        is_active=True,
+        compliance_period=compliance_period,
+        transaction_type__in=transaction_types,
+    ).select_related("import_batch")
+    transaction_count = transactions.count()
+    import_batches = _summarize_import_batches(transactions)
+    sample_transactions = [
+        {
+            "id": str(transaction.id),
+            "reference_number": transaction.reference_number,
+            "transaction_type": transaction.transaction_type,
+            "document_type": transaction.document_type,
+            "taxable_value": _decimal_to_string(_as_decimal(transaction.taxable_value)),
+            "tax_amount": _decimal_to_string(_as_decimal(transaction.tax_amount)),
+            "import_batch": str(transaction.import_batch_id) if transaction.import_batch_id else None,
+        }
+        for transaction in transactions.order_by("-transaction_date", "-created_at")[:5]
+    ]
+    source_trace = {
+        "source": "local_transactions",
+        "field": field,
+        "return_type": return_type,
+        "transaction_count": transaction_count,
+        "transaction_types": transaction_types,
+        "import_batches": import_batches,
+        "sample_transactions": sample_transactions,
+        "reports_href": _build_reports_href(compliance_period=compliance_period, transaction_types=transaction_types),
+        "prepared_return_status": internal_summary.get("prepared_return_status", ""),
+    }
+    if field in {"eligible_itc", "net_tax_payable"}:
+        source_trace["source"] = "reconciliation_and_local_transactions"
+        source_trace["reconciliation_latest_run_id"] = internal_summary.get("reconciliation_latest_run_id")
+        source_trace["reconciliation_unresolved_mismatch_count"] = internal_summary.get("reconciliation_unresolved_mismatch_count")
+    return source_trace
+
+
+def _source_transaction_types(*, return_type: str, field: str) -> list[str]:
+    if return_type == ReturnPreparation.ReturnType.GSTR1:
+        if field.startswith("b2b") or field.startswith("b2c"):
+            return ["sales"]
+        if field.startswith("credit_note"):
+            return ["credit_note"]
+        if field.startswith("debit_note"):
+            return ["debit_note"]
+        return ["sales", "debit_note", "credit_note", "advance_received", "advance_adjusted"]
+    if field == "eligible_itc":
+        return ["purchase", "gstr_2b"]
+    if field == "net_tax_payable":
+        return ["sales", "debit_note", "credit_note", "purchase", "gstr_2b"]
+    return ["sales", "debit_note", "credit_note"]
+
+
+def _summarize_import_batches(transactions) -> list[dict[str, Any]]:
+    batches: dict[str, dict[str, Any]] = {}
+    for transaction in transactions:
+        batch = transaction.import_batch
+        if batch is None:
+            continue
+        key = str(batch.id)
+        if key not in batches:
+            batches[key] = {
+                "id": key,
+                "file_name": batch.file_name,
+                "import_type": batch.import_type,
+                "source_type": batch.source_type,
+                "status": batch.status,
+                "transaction_count": 0,
+            }
+        batches[key]["transaction_count"] += 1
+    return sorted(batches.values(), key=lambda item: item["file_name"])[:5]
+
+
+def _build_reports_href(*, compliance_period: CompliancePeriod, transaction_types: list[str]) -> str:
+    params = [
+        f"period={compliance_period.id}",
+        f"transaction_type={','.join(transaction_types)}",
+    ]
+    return f"/reports/transaction-review?{'&'.join(params)}"
 
 
 def _find_amount(value: Any, candidate_keys: tuple[str, ...]) -> Any:

@@ -397,6 +397,12 @@ export function createPreparedReturn(overrides: Partial<Record<string, unknown>>
       outward_supplies: {
         total_taxable_value: "850000.00",
         total_tax_amount: "153000.00",
+        outward_taxable_value: "850000.00",
+        outward_tax_liability: "153000.00",
+        igst_amount: "45000.00",
+        cgst_amount: "54000.00",
+        sgst_amount: "54000.00",
+        cess_amount: "0.00",
       },
       itc_summary: {
         eligible_itc: "72000.00",

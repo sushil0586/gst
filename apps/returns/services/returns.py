@@ -1084,6 +1084,10 @@ def prepare_gstr3b(*, compliance_period):
 
     outward_taxable_value = _sum_decimal(outward_transactions, "taxable_value")
     outward_tax_liability = _sum_decimal(outward_transactions, "tax_amount")
+    outward_igst_amount = _sum_decimal(outward_transactions, "igst_amount")
+    outward_cgst_amount = _sum_decimal(outward_transactions, "cgst_amount")
+    outward_sgst_amount = _sum_decimal(outward_transactions, "sgst_amount")
+    outward_cess_amount = _sum_decimal(outward_transactions, "cess_amount")
     net_tax_payable = outward_tax_liability - claim_ready_itc
     if net_tax_payable < Decimal("0.00"):
         net_tax_payable = Decimal("0.00")
@@ -1103,6 +1107,10 @@ def prepare_gstr3b(*, compliance_period):
         "outward_supplies": {
             "outward_taxable_value": str(outward_taxable_value),
             "outward_tax_liability": str(outward_tax_liability),
+            "igst_amount": str(outward_igst_amount),
+            "cgst_amount": str(outward_cgst_amount),
+            "sgst_amount": str(outward_sgst_amount),
+            "cess_amount": str(outward_cess_amount),
         },
         "itc_summary": {
             "books_itc": str(books_itc),

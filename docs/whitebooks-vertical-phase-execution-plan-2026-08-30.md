@@ -216,6 +216,14 @@ WhiteBooks APIs:
 - `GET /gstr3b/retsum`
 - `GET /gstr3b/autoliab`
 
+Completed GSTR-1/GSTR-3B summary slice on 2026-08-30:
+
+- WhiteBooks return summary comparison supports `GSTR-1` and `GSTR-3B`
+- provider summary snapshots store sanitized request evidence and comparison rows
+- Returns UI shows mismatch counts and row-level deltas
+- GSTR-3B comparison also captures `/gstr3b/autoliab` evidence and compares prepared outward liability by tax head
+- comparison rows now include source traces back to local transactions, sample documents, import batches, and the transaction review report
+
 Backend work:
 
 - add missing WhiteBooks client methods if needed
@@ -274,35 +282,41 @@ WhiteBooks APIs:
 Current foundation:
 
 - backend service and serializers exist
-- frontend/operator experience needs launch-level hardening
+- IMS operator workbench exists with read actions, controlled save/reset, and provider response inspection
+
+Completed action-batch hardening slice on 2026-08-30:
+
+- save/reset now creates a local `IMSActionBatch` record before provider submission
+- action batches store sanitized request payloads, payload hashes, provider transaction IDs, response evidence, and failure messages
+- save/reset writes are audited as requested, submitted, or failed
+- `/api/v1/ims/action-batches/` lists recent save/reset evidence for a selected workspace, client, GSTIN, and period
+- IMS UI shows recent action batches and highlights the batch evidence returned from save/reset responses
+- focused mocked backend and frontend tests cover submitted, failed, and recent-batch workflows
+- live WhiteBooks sandbox UAT remains pending because WhiteBooks reported a GST sandbox/government-side outage on 2026-08-30
 
 Backend work:
 
 - add async job handling for long IMS operations
-- store action batch records
-- add per-batch audit trail
+- done: store action batch records
+- done: add per-batch audit trail for save/reset lifecycle
 - normalize invoice count/list responses
-- add partial-state recovery for save/reset
+- add partial-state recovery for save/reset beyond stored failure evidence
 
 Frontend work:
 
-- build operator workbench:
-  - counts
-  - filters
-  - invoice table
-  - action selection
-  - bulk confirmation
-  - status tracking
-- add evidence drawer for provider response
-- prevent accidental bulk actions
+- done: build operator workbench for counts, filters, invoice drill-downs, status checks, file fetch, and draft save/reset
+- done: show provider response evidence and recent action batches
+- prevent accidental bulk actions before expanding beyond pasted JSON draft payloads
 
 QA/UAT:
 
-- fetch counts
-- fetch invoice list
-- save accept/reject/no-action batch
-- reset batch
-- provider timeout and retry
+- done: mocked fetch counts/list/status browser coverage
+- done: mocked save/reset browser coverage
+- done: mocked provider timeout creates a failed action batch
+- pending: live WhiteBooks sandbox fetch counts
+- pending: live WhiteBooks sandbox save accept/reject/no-action batch
+- pending: live WhiteBooks sandbox reset batch
+- pending: provider retry behavior after sandbox recovers
 
 Exit criteria:
 

@@ -59,6 +59,7 @@ import { useSession } from "@/lib/query/session-provider";
 import { getErrorMessage, getFieldErrors } from "@/lib/api/error-handler";
 import { useWorkspaceContext } from "@/store/workspace-context";
 import type {
+  ProviderSummaryComparisonRow,
   ProviderReturnSummarySnapshotRecord,
   ReturnFilingAttemptRecord,
   ReturnFilingRecord,
@@ -177,6 +178,22 @@ function getProviderSummaryStatusLabel(status?: ProviderReturnSummarySnapshotRec
   if (status === "provider_unavailable") return "Provider unavailable";
   if (status === "not_prepared") return "Not prepared";
   return "Not compared";
+}
+
+function formatProviderSourceTrace(row: ProviderSummaryComparisonRow) {
+  const trace = row.source_trace;
+  if (!trace) return null;
+  const sourceNoun = trace.transaction_count === 1 ? "row" : "rows";
+  const sourceLabel = trace.source === "reconciliation_and_local_transactions" ? `reconciliation/source ${sourceNoun}` : `source ${sourceNoun}`;
+  const sampleRefs = trace.sample_transactions
+    .map((transaction) => transaction.reference_number)
+    .filter(Boolean)
+    .slice(0, 3);
+  return {
+    summary: `${trace.transaction_count} ${sourceLabel}`,
+    sample: sampleRefs.length > 0 ? sampleRefs.join(", ") : "",
+    href: trace.reports_href,
+  };
 }
 
 function getProviderMessage(attempt?: ReturnFilingAttemptRecord | null) {
@@ -931,6 +948,8 @@ export default function ReturnsPage() {
   const providerSummarySnapshot =
     providerSummaryResult?.contextKey === providerSummaryContextKey ? providerSummaryResult.snapshot : null;
   const providerSummaryRows = providerSummarySnapshot?.comparison_summary.rows ?? [];
+  const providerAutoLiabilityComparison = providerSummarySnapshot?.comparison_summary.auto_liability_comparison;
+  const providerAutoLiabilityRows = providerAutoLiabilityComparison?.rows ?? [];
   const providerSummaryReturnType =
     activeReturn?.return_type === "gstr1" || activeReturn?.return_type === "gstr3b"
       ? activeReturn.return_type
@@ -2417,36 +2436,149 @@ export default function ReturnsPage() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {providerSummaryRows.map((row) => (
-                            <TableRow key={row.field}>
-                              <TableCell className="font-medium text-slate-900">{row.label}</TableCell>
-                              <TableCell>Rs. {formatMoney(row.internal_amount)}</TableCell>
-                              <TableCell>
-                                {row.provider_present ? `Rs. ${formatMoney(row.provider_amount)}` : "Missing"}
-                              </TableCell>
-                              <TableCell>Rs. {formatSignedMoney(toMoneyNumber(row.difference_amount))}</TableCell>
-                              <TableCell>
-                                <StatusBadge
-                                  label={
-                                    row.severity === "match"
-                                      ? "Match"
-                                      : row.severity === "within_threshold"
-                                        ? "Within threshold"
-                                        : "Mismatch"
-                                  }
-                                  variant={
-                                    row.severity === "match"
-                                      ? "success"
-                                      : row.severity === "within_threshold"
-                                        ? "warning"
-                                        : "danger"
-                                  }
-                                />
-                              </TableCell>
-                            </TableRow>
-                          ))}
+                          {providerSummaryRows.map((row) => {
+                            const sourceTrace = formatProviderSourceTrace(row);
+                            return (
+                              <TableRow key={row.field}>
+                                <TableCell className="font-medium text-slate-900">
+                                  <div>{row.label}</div>
+                                  {sourceTrace ? (
+                                    <div className="mt-1 text-xs font-normal text-slate-500">
+                                      <span>{sourceTrace.summary}</span>
+                                      {sourceTrace.sample ? <span> · {sourceTrace.sample}</span> : null}
+                                      {sourceTrace.href ? (
+                                        <Link className="ml-2 font-medium text-blue-700 hover:text-blue-800" href={sourceTrace.href}>
+                                          Review source rows
+                                        </Link>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
+                                </TableCell>
+                                <TableCell>Rs. {formatMoney(row.internal_amount)}</TableCell>
+                                <TableCell>
+                                  {row.provider_present ? `Rs. ${formatMoney(row.provider_amount)}` : "Missing"}
+                                </TableCell>
+                                <TableCell>Rs. {formatSignedMoney(toMoneyNumber(row.difference_amount))}</TableCell>
+                                <TableCell>
+                                  <StatusBadge
+                                    label={
+                                      row.severity === "match"
+                                        ? "Match"
+                                        : row.severity === "within_threshold"
+                                          ? "Within threshold"
+                                          : "Mismatch"
+                                    }
+                                    variant={
+                                      row.severity === "match"
+                                        ? "success"
+                                        : row.severity === "within_threshold"
+                                          ? "warning"
+                                          : "danger"
+                                    }
+                                  />
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
                         </TableBody>
                       </Table>
+                    </div>
+                  ) : null}
+
+                  {providerAutoLiabilityComparison ? (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">GSTR-3B auto-liability evidence</p>
+                          <p className="mt-1 text-sm text-slate-600">
+                            Compare prepared outward liability with WhiteBooks `/gstr3b/autoliab`.
+                          </p>
+                        </div>
+                        <StatusBadge
+                          label={getProviderSummaryStatusLabel(providerAutoLiabilityComparison.status)}
+                          variant={getProviderSummaryStatusVariant(providerAutoLiabilityComparison.status)}
+                        />
+                      </div>
+                      <div className="mt-3 grid gap-3 text-sm text-slate-700 md:grid-cols-2">
+                        <div className="rounded-xl border border-slate-200 bg-white p-3">
+                          <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">Provider path</p>
+                          <p className="mt-2 font-semibold text-slate-900">
+                            {providerAutoLiabilityComparison.provider_path ?? "/gstr3b/autoliab"}
+                          </p>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-white p-3">
+                          <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">Auto mismatches</p>
+                          <p className="mt-2 font-semibold text-slate-900">
+                            {providerAutoLiabilityComparison.mismatch_count ?? 0}
+                          </p>
+                        </div>
+                      </div>
+                      {providerAutoLiabilityComparison.error_message ? (
+                        <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
+                          {providerAutoLiabilityComparison.error_message}
+                        </p>
+                      ) : null}
+                      {providerAutoLiabilityRows.length > 0 ? (
+                        <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Field</TableHead>
+                                <TableHead>Prepared</TableHead>
+                                <TableHead>Auto-liability</TableHead>
+                                <TableHead>Delta</TableHead>
+                                <TableHead>Status</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {providerAutoLiabilityRows.map((row) => {
+                                const sourceTrace = formatProviderSourceTrace(row);
+                                return (
+                                  <TableRow key={`auto-liability-${row.field}`}>
+                                    <TableCell className="font-medium text-slate-900">
+                                      <div>{row.label}</div>
+                                      {sourceTrace ? (
+                                        <div className="mt-1 text-xs font-normal text-slate-500">
+                                          <span>{sourceTrace.summary}</span>
+                                          {sourceTrace.sample ? <span> · {sourceTrace.sample}</span> : null}
+                                          {sourceTrace.href ? (
+                                            <Link className="ml-2 font-medium text-blue-700 hover:text-blue-800" href={sourceTrace.href}>
+                                              Review source rows
+                                            </Link>
+                                          ) : null}
+                                        </div>
+                                      ) : null}
+                                    </TableCell>
+                                    <TableCell>Rs. {formatMoney(row.internal_amount)}</TableCell>
+                                    <TableCell>
+                                      {row.provider_present ? `Rs. ${formatMoney(row.provider_amount)}` : "Missing"}
+                                    </TableCell>
+                                    <TableCell>Rs. {formatSignedMoney(toMoneyNumber(row.difference_amount))}</TableCell>
+                                    <TableCell>
+                                      <StatusBadge
+                                        label={
+                                          row.severity === "match"
+                                            ? "Match"
+                                            : row.severity === "within_threshold"
+                                              ? "Within threshold"
+                                              : "Mismatch"
+                                        }
+                                        variant={
+                                          row.severity === "match"
+                                            ? "success"
+                                            : row.severity === "within_threshold"
+                                              ? "warning"
+                                              : "danger"
+                                        }
+                                      />
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>

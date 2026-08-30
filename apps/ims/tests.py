@@ -6,9 +6,11 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import WorkspaceMembership, WorkspaceRole
+from apps.audit_logs.models import AuditLog
 from apps.clients.models import Client
 from apps.filings.models import ProviderAuthSession
 from apps.gstins.models import GSTIN
+from apps.ims.models import IMSActionBatch
 from apps.organizations.models import Organization
 from apps.workspaces.models import Workspace
 
@@ -123,7 +125,7 @@ def test_owner_can_save_ims_payload(ims_owner_client, ims_context, monkeypatch):
 
     def fake_ims_save(self, **kwargs):
         captured.update(kwargs)
-        return {"status_cd": "1", "message": "saved"}
+        return {"status_cd": "1", "message": "saved", "int_tran_id": "ims-int-save-001"}
 
     monkeypatch.setattr("apps.integrations.whitebooks.client.WhiteBooksClient.ims_save", fake_ims_save)
 
@@ -142,6 +144,9 @@ def test_owner_can_save_ims_payload(ims_owner_client, ims_context, monkeypatch):
 
     assert response.status_code == 200
     assert response.data["message"] == "IMS draft saved"
+    assert response.data["data"]["action_batch"]["status"] == "submitted"
+    assert response.data["data"]["action_batch"]["action_type"] == "save"
+    assert response.data["data"]["action_batch"]["provider_transaction_id"] == "ims-int-save-001"
     assert captured["email"] == "otp@ims.example.com"
     assert captured["gstin"] == "29ABCDE1234K1Z7"
     assert captured["ret_period"] == "042026"
@@ -151,6 +156,89 @@ def test_owner_can_save_ims_payload(ims_owner_client, ims_context, monkeypatch):
     assert captured["payload"]["rtin"] == "29ABCDE1234K1Z7"
     assert captured["payload"]["reqtyp"] == "SAVE"
     assert captured["payload"]["invdata"]["b2b"][0]["ctin"] == "29ABCDE1234F1Z5"
+    batch = IMSActionBatch.objects.get(pk=response.data["data"]["action_batch"]["id"])
+    assert batch.status == IMSActionBatch.BatchStatus.SUBMITTED
+    assert batch.provider_transaction_id == "ims-int-save-001"
+    assert batch.auth_session == ims_context["auth_session"]
+    assert batch.request_payload_hash
+    assert batch.request_payload["rtin"] == "29******1Z7"
+    assert batch.response_payload["int_tran_id"] == "ims-int-save-001"
+    assert AuditLog.objects.filter(action="ims.save_requested", entity_id=batch.id).exists()
+    assert AuditLog.objects.filter(action="ims.save_submitted", entity_id=batch.id).exists()
+
+
+@pytest.mark.django_db
+def test_ims_reset_failure_creates_failed_action_batch(ims_owner_client, ims_context, monkeypatch):
+    from apps.integrations.whitebooks.exceptions import WhiteBooksTemporaryError
+
+    def fake_ims_reset(self, **kwargs):
+        raise WhiteBooksTemporaryError("IMS provider timeout.")
+
+    monkeypatch.setattr("apps.integrations.whitebooks.client.WhiteBooksClient.ims_reset", fake_ims_reset)
+
+    response = ims_owner_client.post(
+        "/api/v1/ims/reset/",
+        {
+            "workspace": str(ims_context["workspace"].id),
+            "client": str(ims_context["client"].id),
+            "gstin": str(ims_context["gstin"].id),
+            "auth_session": str(ims_context["auth_session"].id),
+            "ret_period": "042026",
+            "invdata": {"b2b": []},
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    batch = IMSActionBatch.objects.get()
+    assert batch.action_type == IMSActionBatch.ActionType.RESET
+    assert batch.status == IMSActionBatch.BatchStatus.FAILED
+    assert batch.error_message == "IMS provider timeout."
+    assert AuditLog.objects.filter(action="ims.reset_requested", entity_id=batch.id).exists()
+    assert AuditLog.objects.filter(action="ims.reset_failed", entity_id=batch.id).exists()
+
+
+@pytest.mark.django_db
+def test_owner_can_list_recent_ims_action_batches(ims_owner_client, ims_context):
+    matching = IMSActionBatch.objects.create(
+        workspace=ims_context["workspace"],
+        client=ims_context["client"],
+        gstin=ims_context["gstin"],
+        auth_session=ims_context["auth_session"],
+        action_type=IMSActionBatch.ActionType.SAVE,
+        ret_period="042026",
+        status=IMSActionBatch.BatchStatus.SUBMITTED,
+        provider_transaction_id="ims-int-list-001",
+        request_payload_hash="hash-list-001",
+        created_by=ims_context["owner"],
+        updated_by=ims_context["owner"],
+        requested_by=ims_context["owner"],
+    )
+    IMSActionBatch.objects.create(
+        workspace=ims_context["workspace"],
+        client=ims_context["client"],
+        gstin=ims_context["gstin"],
+        action_type=IMSActionBatch.ActionType.RESET,
+        ret_period="052026",
+        status=IMSActionBatch.BatchStatus.SUBMITTED,
+        created_by=ims_context["owner"],
+        updated_by=ims_context["owner"],
+    )
+
+    response = ims_owner_client.get(
+        "/api/v1/ims/action-batches/",
+        {
+            "workspace": str(ims_context["workspace"].id),
+            "client": str(ims_context["client"].id),
+            "gstin": str(ims_context["gstin"].id),
+            "ret_period": "042026",
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(response.data["data"]) == 1
+    assert response.data["data"][0]["id"] == str(matching.id)
+    assert response.data["data"][0]["provider_transaction_id"] == "ims-int-list-001"
 
 
 @pytest.mark.django_db

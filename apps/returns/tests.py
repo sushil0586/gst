@@ -599,7 +599,14 @@ def test_portal_filing_readiness_uses_latest_saved_snapshot_when_live_fetch_is_u
         return_type="gstr3b",
         status=ReturnPreparation.PreparationStatus.READY_FOR_REVIEW,
         summary_snapshot={
-            "outward_supplies": {"outward_tax_liability": "1500.00"},
+            "outward_supplies": {
+                "outward_taxable_value": "10000.00",
+                "outward_tax_liability": "1500.00",
+                "igst_amount": "500.00",
+                "cgst_amount": "500.00",
+                "sgst_amount": "500.00",
+                "cess_amount": "0.00",
+            },
             "itc_summary": {"eligible_itc": "500.00", "net_tax_payable": "1000.00"},
         },
         created_by=returns_context["user"],
@@ -698,12 +705,29 @@ def test_provider_summary_compare_fetches_and_stores_gstr3b_snapshot(
 ):
     returns_context["gstin"].whitebooks_gst_username = "TN_NT2.152383"
     returns_context["gstin"].save(update_fields=["whitebooks_gst_username"])
+    create_transaction(
+        context=returns_context,
+        transaction_type="sales",
+        reference_number="S-SUM-001",
+        taxable_value="10000.00",
+        cgst_amount="500.00",
+        sgst_amount="500.00",
+        igst_amount="500.00",
+        total_amount="11500.00",
+    )
     prepared_return = ReturnPreparation.objects.create(
         compliance_period=returns_context["compliance_period"],
         return_type="gstr3b",
         status=ReturnPreparation.PreparationStatus.READY_FOR_REVIEW,
         summary_snapshot={
-            "outward_supplies": {"outward_tax_liability": "1500.00"},
+            "outward_supplies": {
+                "outward_taxable_value": "10000.00",
+                "outward_tax_liability": "1500.00",
+                "igst_amount": "500.00",
+                "cgst_amount": "500.00",
+                "sgst_amount": "500.00",
+                "cess_amount": "0.00",
+            },
             "itc_summary": {"eligible_itc": "500.00", "net_tax_payable": "1000.00"},
         },
         created_by=returns_context["user"],
@@ -729,7 +753,26 @@ def test_provider_summary_compare_fetches_and_stores_gstr3b_snapshot(
             },
         }
 
+    def mock_auto_liability(self, **kwargs):
+        assert kwargs["email"] == "ops@example.com"
+        assert kwargs["gstin"] == returns_context["gstin"].gstin
+        assert kwargs["ret_period"] == "042026"
+        assert kwargs["txn"] == "txn-summary-001"
+        assert kwargs["state_code"] == "29"
+        assert kwargs["gst_username"] == "TN_NT2.152383"
+        return {
+            "status_cd": "1",
+            "data": {
+                "txval": "10000.00",
+                "iamt": "500.00",
+                "camt": "490.00",
+                "samt": "500.00",
+                "csamt": "0.00",
+            },
+        }
+
     monkeypatch.setattr(WhiteBooksClient, "get_gstr3b_return_summary", mock_return_summary)
+    monkeypatch.setattr(WhiteBooksClient, "get_gstr3b_auto_liability", mock_auto_liability)
 
     response = returns_authenticated_client.post(
         "/api/v1/returns/provider-summary-compare/",
@@ -754,6 +797,19 @@ def test_provider_summary_compare_fetches_and_stores_gstr3b_snapshot(
     assert outward_row["internal_amount"] == "1500.00"
     assert outward_row["provider_amount"] == "1510.00"
     assert outward_row["difference_amount"] == "-10.00"
+    assert outward_row["source_trace"]["source"] == "local_transactions"
+    assert outward_row["source_trace"]["transaction_count"] == 1
+    assert outward_row["source_trace"]["sample_transactions"][0]["reference_number"] == "S-SUM-001"
+    assert "/reports/transaction-review" in outward_row["source_trace"]["reports_href"]
+    assert payload["normalized_provider_summary"]["auto_liability"]["outward_tax_liability"] == "1490.00"
+    auto_comparison = payload["comparison_summary"]["auto_liability_comparison"]
+    assert auto_comparison["provider_path"] == "/gstr3b/autoliab"
+    assert auto_comparison["mismatch_count"] == 2
+    cgst_row = next(row for row in auto_comparison["rows"] if row["field"] == "cgst_amount")
+    assert cgst_row["internal_amount"] == "500.00"
+    assert cgst_row["provider_amount"] == "490.00"
+    assert cgst_row["severity"] == "mismatch"
+    assert cgst_row["source_trace"]["transaction_count"] == 1
 
     snapshot = ProviderReturnSummarySnapshot.objects.get(pk=payload["id"])
     assert snapshot.prepared_return == prepared_return
@@ -828,6 +884,15 @@ def test_provider_summary_compare_fetches_and_stores_gstr1_snapshot(
 ):
     returns_context["gstin"].whitebooks_gst_username = "TN_NT2.152383"
     returns_context["gstin"].save(update_fields=["whitebooks_gst_username"])
+    create_transaction(
+        context=returns_context,
+        transaction_type="sales",
+        reference_number="S-GSTR1-001",
+        taxable_value="3000.00",
+        cgst_amount="270.00",
+        sgst_amount="270.00",
+        total_amount="3540.00",
+    )
     prepared_return = ReturnPreparation.objects.create(
         compliance_period=returns_context["compliance_period"],
         return_type="gstr1",
@@ -909,6 +974,8 @@ def test_provider_summary_compare_fetches_and_stores_gstr1_snapshot(
     assert b2c_row["internal_amount"] == "180.00"
     assert b2c_row["provider_amount"] == "190.00"
     assert b2c_row["severity"] == "mismatch"
+    assert b2c_row["source_trace"]["transaction_count"] == 1
+    assert b2c_row["source_trace"]["sample_transactions"][0]["reference_number"] == "S-GSTR1-001"
     snapshot = ProviderReturnSummarySnapshot.objects.get(pk=payload["id"])
     assert snapshot.return_type == ReturnPreparation.ReturnType.GSTR1
     assert AuditLog.objects.filter(action="provider_summary.compare_completed", entity_id=snapshot.id).exists()

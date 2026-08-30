@@ -1506,7 +1506,39 @@ class QaAppMock {
     await this.page.route("**/api/backend/returns/provider-summary-compare/", async (route) => {
       const payload = route.request().postDataJSON() as Record<string, string>;
       const returnType = payload.return_type === "gstr1" ? "gstr1" : "gstr3b";
-      const comparisonRows = returnType === "gstr1"
+      const buildSourceTrace = (field: string, source: "local_transactions" | "reconciliation_and_local_transactions" = "local_transactions") => ({
+        source,
+        field,
+        return_type: returnType,
+        transaction_count: returnType === "gstr1" ? 1 : source === "reconciliation_and_local_transactions" ? 18 : 24,
+        transaction_types: returnType === "gstr1" ? ["sales"] : source === "reconciliation_and_local_transactions" ? ["purchase", "gstr_2b"] : ["sales", "debit_note", "credit_note"],
+        import_batches: [
+          {
+            id: returnType === "gstr1" ? "batch-sales-1" : "batch-gstr3b-1",
+            file_name: returnType === "gstr1" ? "sales_may_2026.xlsx" : "gstr3b_sources_may_2026.xlsx",
+            import_type: returnType === "gstr1" ? "sales" : "sales",
+            source_type: "excel",
+            status: "processed",
+            transaction_count: returnType === "gstr1" ? 1 : 24,
+          },
+        ],
+        sample_transactions: [
+          {
+            id: returnType === "gstr1" ? "txn-gstr1-1" : "txn-gstr3b-1",
+            reference_number: returnType === "gstr1" ? "S-GSTR1-001" : source === "reconciliation_and_local_transactions" ? "P-GSTR3B-001" : "S-GSTR3B-001",
+            transaction_type: returnType === "gstr1" ? "sales" : source === "reconciliation_and_local_transactions" ? "purchase" : "sales",
+            document_type: "invoice",
+            taxable_value: returnType === "gstr1" ? "3000.00" : "850000.00",
+            tax_amount: returnType === "gstr1" ? "540.00" : "153000.00",
+            import_batch: returnType === "gstr1" ? "batch-sales-1" : "batch-gstr3b-1",
+          },
+        ],
+        reports_href: `/reports/transaction-review?period=period-1&transaction_type=${returnType === "gstr1" ? "sales" : "sales,debit_note,credit_note"}`,
+        prepared_return_status: "ready_for_review",
+        reconciliation_latest_run_id: source === "reconciliation_and_local_transactions" ? "reconciliation-run-1" : "",
+        reconciliation_unresolved_mismatch_count: source === "reconciliation_and_local_transactions" ? "0" : "",
+      });
+      const comparisonRows = (returnType === "gstr1"
         ? [
             {
               field: "total_taxable_value",
@@ -1570,7 +1602,15 @@ class QaAppMock {
               provider_present: true,
               severity: "mismatch",
             },
-          ];
+          ]).map((row) => ({
+            ...row,
+            source_trace: buildSourceTrace(
+              row.field,
+              row.field === "eligible_itc" || row.field === "net_tax_payable"
+                ? "reconciliation_and_local_transactions"
+                : "local_transactions",
+            ),
+          }));
       await route.fulfill(jsonSuccess({
         id: "provider-summary-snapshot-1",
         workspace: "workspace-1",
@@ -1594,7 +1634,19 @@ class QaAppMock {
           : { status_cd: "1", data: { outward_tax_liability: "153000.00", eligible_itc: "71980.00", net_tax_payable: "81020.00" } },
         normalized_provider_summary: returnType === "gstr1"
           ? { total_taxable_value: "3000.00", total_tax_amount: "550.00", b2c_tax_amount: "190.00" }
-          : { outward_tax_liability: "153000.00", eligible_itc: "71980.00", net_tax_payable: "81020.00" },
+          : {
+              outward_tax_liability: "153000.00",
+              eligible_itc: "71980.00",
+              net_tax_payable: "81020.00",
+              auto_liability: {
+                outward_taxable_value: "850000.00",
+                igst_amount: "45000.00",
+                cgst_amount: "53990.00",
+                sgst_amount: "54000.00",
+                cess_amount: "0.00",
+                outward_tax_liability: "152990.00",
+              },
+            },
         comparison_summary: {
           status: "mismatch",
           threshold_amount: "1.00",
@@ -1603,7 +1655,98 @@ class QaAppMock {
           mismatch_count: 2,
           compared_fields: comparisonRows.map((row) => row.field),
           source: "live_fetch",
+          provider_sources: returnType === "gstr3b" ? ["/gstr3b/retsum", "/gstr3b/autoliab"] : ["/gstr1/retsum"],
           rows: comparisonRows,
+          ...(returnType === "gstr3b"
+            ? {
+                auto_liability_comparison: {
+                  status: "mismatch",
+                  threshold_amount: "1.00",
+                  matched_count: 4,
+                  within_threshold_count: 0,
+                  mismatch_count: 2,
+                  compared_fields: [
+                    "outward_taxable_value",
+                    "igst_amount",
+                    "cgst_amount",
+                    "sgst_amount",
+                    "cess_amount",
+                    "outward_tax_liability",
+                  ],
+                  source: "live_fetch",
+                  provider_path: "/gstr3b/autoliab",
+                  error_message: "",
+                  rows: [
+                    {
+                      field: "outward_taxable_value",
+                      label: "Auto-liability taxable value",
+                      internal_amount: "850000.00",
+                      provider_amount: "850000.00",
+                      difference_amount: "0.00",
+                      absolute_difference: "0.00",
+                      provider_present: true,
+                      severity: "match",
+                      source_trace: buildSourceTrace("outward_taxable_value"),
+                    },
+                    {
+                      field: "igst_amount",
+                      label: "Auto-liability IGST",
+                      internal_amount: "45000.00",
+                      provider_amount: "45000.00",
+                      difference_amount: "0.00",
+                      absolute_difference: "0.00",
+                      provider_present: true,
+                      severity: "match",
+                      source_trace: buildSourceTrace("igst_amount"),
+                    },
+                    {
+                      field: "cgst_amount",
+                      label: "Auto-liability CGST",
+                      internal_amount: "54000.00",
+                      provider_amount: "53990.00",
+                      difference_amount: "10.00",
+                      absolute_difference: "10.00",
+                      provider_present: true,
+                      severity: "mismatch",
+                      source_trace: buildSourceTrace("cgst_amount"),
+                    },
+                    {
+                      field: "sgst_amount",
+                      label: "Auto-liability SGST",
+                      internal_amount: "54000.00",
+                      provider_amount: "54000.00",
+                      difference_amount: "0.00",
+                      absolute_difference: "0.00",
+                      provider_present: true,
+                      severity: "match",
+                      source_trace: buildSourceTrace("sgst_amount"),
+                    },
+                    {
+                      field: "cess_amount",
+                      label: "Auto-liability CESS",
+                      internal_amount: "0.00",
+                      provider_amount: "0.00",
+                      difference_amount: "0.00",
+                      absolute_difference: "0.00",
+                      provider_present: true,
+                      severity: "match",
+                      source_trace: buildSourceTrace("cess_amount"),
+                    },
+                    {
+                      field: "outward_tax_liability",
+                      label: "Auto-liability total tax",
+                      internal_amount: "153000.00",
+                      provider_amount: "152990.00",
+                      difference_amount: "10.00",
+                      absolute_difference: "10.00",
+                      provider_present: true,
+                      severity: "mismatch",
+                      source_trace: buildSourceTrace("outward_tax_liability"),
+                    },
+                  ],
+                },
+              }
+            : {}),
         },
         error_message: "",
         created_at: "2026-06-05T09:35:00Z",

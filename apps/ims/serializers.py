@@ -5,6 +5,7 @@ from apps.clients.models import Client
 from apps.filings.models import ProviderAuthSession, ReturnFiling
 from apps.filings.services.auth_session_freshness import get_provider_auth_session_freshness
 from apps.gstins.models import GSTIN
+from apps.ims.models import IMSActionBatch
 from apps.workspaces.models import Workspace
 
 IMS_RETURN_PERIOD_REGEX = r"^(0[1-9]|1[0-2])\d{4}$"
@@ -96,6 +97,45 @@ class IMSSaveSerializer(IMSBaseSerializer):
 
 class IMSResetSerializer(IMSSaveSerializer):
     pass
+
+
+class IMSActionBatchListRequestSerializer(IMSBaseSerializer):
+    ret_period = serializers.RegexField(
+        IMS_RETURN_PERIOD_REGEX,
+        required=False,
+        allow_blank=True,
+        error_messages={"invalid": "ret_period must use WhiteBooks MMYYYY format."},
+    )
+
+
+class IMSActionBatchSerializer(serializers.ModelSerializer):
+    workspace = serializers.UUIDField(source="workspace_id", read_only=True)
+    client = serializers.UUIDField(source="client_id", read_only=True)
+    gstin = serializers.UUIDField(source="gstin_id", read_only=True)
+    auth_session = serializers.UUIDField(source="auth_session_id", read_only=True)
+
+    class Meta:
+        model = IMSActionBatch
+        fields = [
+            "id",
+            "workspace",
+            "client",
+            "gstin",
+            "auth_session",
+            "provider",
+            "action_type",
+            "ret_period",
+            "status",
+            "provider_transaction_id",
+            "request_payload_hash",
+            "error_message",
+            "requested_by",
+            "submitted_at",
+            "completed_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
 
 
 class IMSStatusSerializer(IMSBaseSerializer):

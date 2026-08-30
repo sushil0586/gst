@@ -120,5 +120,6 @@ export const queryKeys = {
     rejectedInvoices: (filters?: Record<string, string | undefined>) =>
       ["ims", "rejected-invoices", filters ?? {}] as const,
     file: (filters?: Record<string, string | undefined>) => ["ims", "file", filters ?? {}] as const,
+    actionBatches: (filters?: Record<string, string | undefined>) => ["ims", "action-batches", filters ?? {}] as const,
   },
 };

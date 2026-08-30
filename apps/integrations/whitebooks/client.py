@@ -378,6 +378,33 @@ class WhiteBooksClient:
             default_message="WhiteBooks GSTR-3B return summary fetch failed.",
         )
 
+    def get_gstr3b_auto_liability(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        ret_period: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/gstr3b/autoliab",
+            method="GET",
+            query_params={"gstin": gstin, "retperiod": ret_period, "email": email},
+            headers=self._filing_headers(
+                gstin=gstin,
+                ret_period=ret_period,
+                txn=txn,
+                state_code=state_code,
+                gst_username=gst_username,
+            ),
+        )
+        return self._normalize_submission_payload(
+            response,
+            default_message="WhiteBooks GSTR-3B auto-liability fetch failed.",
+        )
+
     def offset_gstr3b_liability(self, *, email: str, gstin: str, ret_period: str, txn: str, payload: dict) -> dict:
         response = self._request_json(
             "/gstr3b/retoffset",

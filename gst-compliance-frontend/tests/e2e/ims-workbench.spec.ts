@@ -50,6 +50,29 @@ function jsonSuccess(data: unknown) {
   };
 }
 
+function buildActionBatch(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "ims-batch-existing-1",
+    workspace: "workspace-1",
+    client: "client-1",
+    gstin: "gstin-1",
+    auth_session: "provider-session-1",
+    provider: "whitebooks",
+    action_type: "save",
+    ret_period: "052026",
+    status: "submitted",
+    provider_transaction_id: "ims-int-existing-001",
+    request_payload_hash: "hash-existing-001",
+    error_message: "",
+    requested_by: 1,
+    submitted_at: "2026-06-20T10:00:00Z",
+    completed_at: "2026-06-20T10:00:00Z",
+    created_at: "2026-06-20T10:00:00Z",
+    updated_at: "2026-06-20T10:00:00Z",
+    ...overrides,
+  };
+}
+
 test.describe("IMS workbench", () => {
   test("renders the IMS operator workbench and fetches invoice and status drill-down data", async ({ page, app }) => {
     await app.mockAuthenticatedShell();
@@ -66,6 +89,10 @@ test.describe("IMS workbench", () => {
           pagination: { count: 1, next: null, previous: null, page: 1, page_size: 50 },
         }),
       });
+    });
+
+    await page.route(/\/api\/backend\/ims\/action-batches\/?(?:\?.*)?$/, async (route) => {
+      await route.fulfill(jsonSuccess([buildActionBatch()]));
     });
 
     await page.route(/\/api\/backend\/ims\/invoices\/?(?:\?.*)?$/, async (route) => {
@@ -97,6 +124,8 @@ test.describe("IMS workbench", () => {
     await expect(page.getByText("Manage IMS investigation, provider response checks", { exact: false })).toBeVisible();
     await expect(page.getByText("ims-ops@example.com", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("contract confirmed", { exact: true })).toBeVisible();
+    await expect(page.getByText("Recent IMS action batches", { exact: true })).toBeVisible();
+    await expect(page.getByText("ims-int-existing-001", { exact: true })).toBeVisible();
 
     await page.getByRole("tab", { name: "Invoices", exact: true }).click();
     await page.getByRole("button", { name: "Fetch invoices", exact: true }).click();
@@ -111,7 +140,7 @@ test.describe("IMS workbench", () => {
     await page.getByPlaceholder("ims-int-001").fill("ims-int-789");
     await page.getByRole("button", { name: "Fetch status", exact: true }).click();
     await expect(page.getByText("ims-int-789", { exact: true })).toBeVisible();
-    await expect(page.getByRole("paragraph").filter({ hasText: "COMPLETED" })).toBeVisible();
+    await expect(page.getByRole("paragraph").filter({ hasText: /^COMPLETED$/ })).toBeVisible();
   });
 
   test("keeps draft save and reset disabled for users without filing permission", async ({ page, app }) => {
@@ -131,6 +160,10 @@ test.describe("IMS workbench", () => {
       });
     });
 
+    await page.route(/\/api\/backend\/ims\/action-batches\/?(?:\?.*)?$/, async (route) => {
+      await route.fulfill(jsonSuccess([]));
+    });
+
     await page.goto("/ims");
 
     await page.getByRole("tab", { name: "Draft save/reset", exact: true }).click();
@@ -143,6 +176,7 @@ test.describe("IMS workbench", () => {
     const writePermissions = [...sessionPayload.permissions_summary.codes, "file_return"];
     let savedPayload: Record<string, unknown> | null = null;
     let resetPayload: Record<string, unknown> | null = null;
+    let actionBatches = [buildActionBatch()];
 
     await app.mockAuthenticatedShell({ customPermissions: writePermissions });
     await app.mockFoundationApis();
@@ -160,24 +194,54 @@ test.describe("IMS workbench", () => {
       });
     });
 
+    await page.route(/\/api\/backend\/ims\/action-batches\/?(?:\?.*)?$/, async (route) => {
+      await route.fulfill(jsonSuccess(actionBatches));
+    });
+
     await page.route(/\/api\/backend\/ims\/save\/?$/, async (route) => {
       savedPayload = route.request().postDataJSON() as Record<string, unknown>;
+      const batch = buildActionBatch({
+        id: "ims-batch-save-1",
+        action_type: "save",
+        provider_transaction_id: "ims-int-save-001",
+        request_payload_hash: "hash-save-001",
+        submitted_at: "2026-06-20T10:15:00Z",
+        completed_at: "2026-06-20T10:15:00Z",
+        created_at: "2026-06-20T10:15:00Z",
+        updated_at: "2026-06-20T10:15:00Z",
+      });
+      actionBatches = [batch, ...actionBatches];
       await route.fulfill(
         jsonSuccess({
           status_cd: "1",
           request_type: "SAVE",
+          int_tran_id: "ims-int-save-001",
           accepted: true,
+          action_batch: batch,
         }),
       );
     });
 
     await page.route(/\/api\/backend\/ims\/reset\/?$/, async (route) => {
       resetPayload = route.request().postDataJSON() as Record<string, unknown>;
+      const batch = buildActionBatch({
+        id: "ims-batch-reset-1",
+        action_type: "reset",
+        provider_transaction_id: "ims-int-reset-001",
+        request_payload_hash: "hash-reset-001",
+        submitted_at: "2026-06-20T10:20:00Z",
+        completed_at: "2026-06-20T10:20:00Z",
+        created_at: "2026-06-20T10:20:00Z",
+        updated_at: "2026-06-20T10:20:00Z",
+      });
+      actionBatches = [batch, ...actionBatches];
       await route.fulfill(
         jsonSuccess({
           status_cd: "1",
           request_type: "RESET",
+          int_tran_id: "ims-int-reset-001",
           accepted: true,
+          action_batch: batch,
         }),
       );
     });
@@ -203,6 +267,10 @@ test.describe("IMS workbench", () => {
 
     await page.getByRole("button", { name: "Save IMS draft", exact: true }).click();
     await expect(page.getByText("SAVE", { exact: true })).toBeVisible();
+    await expect(page.getByText("IMS action batch evidence", { exact: true })).toBeVisible();
+    await expect(page.getByText("ims-batch-save-1", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("ims-int-save-001", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("Payload hash: hash-save-001", { exact: true }).first()).toBeVisible();
     await expect.poll(() => savedPayload).not.toBeNull();
     await expect(savedPayload).toMatchObject({
       workspace: "workspace-1",
@@ -213,6 +281,9 @@ test.describe("IMS workbench", () => {
 
     await page.getByRole("button", { name: "Reset IMS draft", exact: true }).click();
     await expect(page.getByText("RESET", { exact: true })).toBeVisible();
+    await expect(page.getByText("ims-batch-reset-1", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("ims-int-reset-001", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("Payload hash: hash-reset-001", { exact: true }).first()).toBeVisible();
     await expect.poll(() => resetPayload).not.toBeNull();
     await expect(resetPayload).toMatchObject({
       workspace: "workspace-1",

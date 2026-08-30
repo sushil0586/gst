@@ -249,7 +249,33 @@ export type IMSFileRequest = IMSBaseRequest & {
   token: string;
 };
 
-export type IMSApiResponse = Record<string, unknown>;
+export type IMSActionBatchListRequest = IMSBaseRequest & {
+  ret_period?: string;
+};
+
+export type IMSActionBatchRecord = {
+  id: string;
+  workspace: string;
+  client: string;
+  gstin: string | null;
+  auth_session: string | null;
+  provider: "whitebooks" | "demo_gsp";
+  action_type: "save" | "reset";
+  ret_period: string;
+  status: "requested" | "submitted" | "failed";
+  provider_transaction_id: string;
+  request_payload_hash: string;
+  error_message: string;
+  requested_by: number | string | null;
+  submitted_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type IMSApiResponse = Record<string, unknown> & {
+  action_batch?: IMSActionBatchRecord;
+};
 
 export type ClientBootstrapResult = {
   client: ClientRecord;
@@ -1044,6 +1070,39 @@ export type PortalChallanRecord = {
   updated_at: string;
 };
 
+export type ProviderSummaryImportBatchTrace = {
+  id: string;
+  file_name: string;
+  import_type: string;
+  source_type: string;
+  status: string;
+  transaction_count: number;
+};
+
+export type ProviderSummaryTransactionTrace = {
+  id: string;
+  reference_number: string;
+  transaction_type: string;
+  document_type: string;
+  taxable_value: string;
+  tax_amount: string;
+  import_batch: string | null;
+};
+
+export type ProviderSummarySourceTrace = {
+  source: "local_transactions" | "reconciliation_and_local_transactions" | string;
+  field: string;
+  return_type: ReturnPreparationRecord["return_type"];
+  transaction_count: number;
+  transaction_types: string[];
+  import_batches: ProviderSummaryImportBatchTrace[];
+  sample_transactions: ProviderSummaryTransactionTrace[];
+  reports_href: string;
+  prepared_return_status: string;
+  reconciliation_latest_run_id?: string;
+  reconciliation_unresolved_mismatch_count?: string;
+};
+
 export type ProviderSummaryComparisonRow = {
   field: string;
   label: string;
@@ -1053,9 +1112,23 @@ export type ProviderSummaryComparisonRow = {
   absolute_difference: string;
   provider_present: boolean;
   severity: "match" | "within_threshold" | "mismatch";
+  source_trace?: ProviderSummarySourceTrace;
 };
 
 export type ProviderReturnSummarySnapshotStatus = "matched" | "within_threshold" | "mismatch" | "provider_unavailable" | "not_prepared";
+
+export type ProviderAutoLiabilityComparison = {
+  status: ProviderReturnSummarySnapshotStatus;
+  threshold_amount: string;
+  matched_count?: number;
+  within_threshold_count?: number;
+  mismatch_count?: number;
+  compared_fields?: string[];
+  rows?: ProviderSummaryComparisonRow[];
+  source?: string;
+  provider_path?: string;
+  error_message?: string;
+};
 
 export type ProviderReturnSummarySnapshotRecord = {
   id: string;
@@ -1084,6 +1157,8 @@ export type ProviderReturnSummarySnapshotRecord = {
     compared_fields?: string[];
     rows?: ProviderSummaryComparisonRow[];
     source?: string;
+    provider_sources?: string[];
+    auto_liability_comparison?: ProviderAutoLiabilityComparison;
   };
   error_message: string;
   created_at: string;

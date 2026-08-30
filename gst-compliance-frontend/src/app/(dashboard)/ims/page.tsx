@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useCompliancePeriodsQuery } from "@/features/compliance-periods";
 import { useProviderAuthSessionsQuery } from "@/features/filings";
 import {
+  useIMSActionBatchesQuery,
   useIMSFileQuery,
   useIMSInvoicesCountQuery,
   useIMSInvoicesQuery,
@@ -31,6 +32,7 @@ import { hasPermission, permissions } from "@/lib/permissions";
 import { useSession } from "@/lib/query/session-provider";
 import { useWorkspaceContext } from "@/store/workspace-context";
 import type {
+  IMSActionBatchRecord,
   IMSFileRequest,
   IMSInvoicesCountRequest,
   IMSInvoicesRequest,
@@ -127,6 +129,19 @@ function getStatusVariantFromPayload(record: Record<string, unknown>) {
   const statusCode = getStringField(record, "status_cd", "status_code");
   if (statusCode === "1" || statusCode.toUpperCase() === "SUCCESS") return "success" as const;
   if (statusCode || record.error) return "danger" as const;
+  return "neutral" as const;
+}
+
+function asIMSActionBatch(value: unknown): IMSActionBatchRecord | null {
+  const record = asRecord(value);
+  if (!record.id || !record.action_type || !record.status) return null;
+  return record as unknown as IMSActionBatchRecord;
+}
+
+function getActionBatchStatusVariant(status?: string) {
+  if (status === "submitted") return "success" as const;
+  if (status === "failed") return "danger" as const;
+  if (status === "requested") return "warning" as const;
   return "neutral" as const;
 }
 
@@ -257,8 +272,13 @@ export default function IMSPage() {
     fileFilters ?? { workspace: "", client: "", gstin: "", token: "" },
     { enabled: Boolean(fileFilters) },
   );
+  const actionBatchesQuery = useIMSActionBatchesQuery(
+    baseFilters ? { ...baseFilters, ret_period: derivedRetPeriod || undefined } : { workspace: "", client: "", gstin: "" },
+    { enabled: Boolean(baseFilters) },
+  );
   const saveMutation = useIMSSaveMutation();
   const resetMutation = useIMSResetMutation();
+  const recentActionBatches = actionBatchesQuery.data ?? [];
 
   const responseMap = {
     status: statusQuery.data,
@@ -286,10 +306,17 @@ export default function IMSPage() {
   const liveError = responseSource ? errorMap[responseSource] ?? null : null;
   const liveResponseRecord = asRecord(liveResponse);
   const liveErrorRecord = liveError instanceof Error ? { message: liveError.message } : asRecord(liveError);
+  const liveActionBatch = asIMSActionBatch(liveResponseRecord.action_batch);
   const actionState = getActionStateSummary(canWrite, selectedSession ?? null);
   const responseSummaryCards = liveResponse
     ? [
         { label: "Source", value: responseSource?.replace(/_/g, " ") ?? "Unavailable" },
+        ...(liveActionBatch
+          ? [
+              { label: "Action batch", value: liveActionBatch.id },
+              { label: "Batch status", value: liveActionBatch.status.replace(/_/g, " ") },
+            ]
+          : []),
         { label: "Status code", value: getStringField(liveResponseRecord, "status_cd", "status_code") || "Unavailable" },
         {
           label: "Provider status",
@@ -306,7 +333,10 @@ export default function IMSPage() {
         { label: "Message", value: getStringField(liveResponseRecord, "message", "status_desc") || "Unavailable" },
         {
           label: "Transaction ID",
-          value: getStringField(liveResponseRecord, "int_tran_id", "txn", "transaction_id") || "Unavailable",
+          value:
+            liveActionBatch?.provider_transaction_id
+            || getStringField(liveResponseRecord, "int_tran_id", "txn", "transaction_id")
+            || "Unavailable",
         },
         {
           label: "Section",
@@ -373,6 +403,7 @@ export default function IMSPage() {
         ret_period: derivedRetPeriod,
         invdata,
       });
+      await actionBatchesQuery.refetch();
       toast.success("IMS save completed.");
     } catch {
       toast.error("IMS save failed.");
@@ -397,6 +428,7 @@ export default function IMSPage() {
         ret_period: derivedRetPeriod,
         invdata,
       });
+      await actionBatchesQuery.refetch();
       toast.success("IMS reset completed.");
     } catch {
       toast.error("IMS reset failed.");
@@ -845,6 +877,57 @@ export default function IMSPage() {
         </Tabs>
       </SectionCard>
 
+      <SectionCard
+        title="Recent IMS action batches"
+        description="Local save/reset evidence for the selected context, including provider transaction IDs and payload hashes for recovery."
+        action={
+          <Button variant="outline" size="sm" onClick={() => actionBatchesQuery.refetch()} disabled={actionBatchesQuery.isFetching}>
+            {actionBatchesQuery.isFetching ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+            <span className="ml-2">Refresh batches</span>
+          </Button>
+        }
+      >
+        {actionBatchesQuery.isLoading ? <LoadingState message="Loading IMS action batches..." /> : null}
+        {!actionBatchesQuery.isLoading && recentActionBatches.length > 0 ? (
+          <div className="grid gap-3 xl:grid-cols-2">
+            {recentActionBatches.map((batch) => (
+              <div key={batch.id} className="rounded-lg border border-slate-200 px-4 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">{batch.action_type.toUpperCase()} · {batch.ret_period}</p>
+                    <p className="mt-1 break-all text-xs text-slate-500">{batch.id}</p>
+                  </div>
+                  <StatusBadge
+                    label={batch.status.replace(/_/g, " ")}
+                    variant={getActionBatchStatusVariant(batch.status)}
+                  />
+                </div>
+                <div className="mt-3 grid gap-3 text-sm text-slate-700 md:grid-cols-2">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Provider transaction</p>
+                    <p className="mt-1 break-all font-medium text-slate-900">{batch.provider_transaction_id || "Pending"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Completed</p>
+                    <p className="mt-1 font-medium text-slate-900">{formatDateTime(batch.completed_at)}</p>
+                  </div>
+                </div>
+                <p className="mt-3 break-all text-xs text-slate-500">Payload hash: {batch.request_payload_hash || "Unavailable"}</p>
+                {batch.error_message ? (
+                  <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">{batch.error_message}</p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {!actionBatchesQuery.isLoading && recentActionBatches.length === 0 ? (
+          <EmptyState
+            title="No IMS action batches yet"
+            description="Run a save or reset action to create local provider evidence for this context."
+          />
+        ) : null}
+      </SectionCard>
+
       <SectionCard title={responseTitle} description="Raw provider response for the latest IMS action so operations and QA can inspect the exact payload returned.">
         {isBusy ? <LoadingState message="Waiting for IMS response..." /> : null}
         {liveError ? <ErrorState title="IMS request failed" description={getStringField(liveErrorRecord, "message") || "The IMS request failed."} /> : null}
@@ -879,6 +962,43 @@ export default function IMSPage() {
                   || "The provider returned a response without a display-ready message. Use the debug payload below for exact fields."}
               </p>
             </div>
+
+            {liveActionBatch ? (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 px-4 py-4">
+                <div className="flex flex-wrap items-center gap-3">
+                  <p className="text-sm font-semibold text-slate-900">IMS action batch evidence</p>
+                  <StatusBadge
+                    label={liveActionBatch.status.replace(/_/g, " ")}
+                    variant={getActionBatchStatusVariant(liveActionBatch.status)}
+                  />
+                  <StatusBadge label={liveActionBatch.action_type} variant="primary" />
+                </div>
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <div className="rounded-lg border border-emerald-100 bg-white/80 px-3 py-3">
+                    <p className="text-xs uppercase tracking-[0.16em] text-emerald-700">Batch ID</p>
+                    <p className="mt-1 break-all text-sm font-medium text-slate-900">{liveActionBatch.id}</p>
+                  </div>
+                  <div className="rounded-lg border border-emerald-100 bg-white/80 px-3 py-3">
+                    <p className="text-xs uppercase tracking-[0.16em] text-emerald-700">Provider transaction</p>
+                    <p className="mt-1 break-all text-sm font-medium text-slate-900">
+                      {liveActionBatch.provider_transaction_id || "Pending"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-emerald-100 bg-white/80 px-3 py-3">
+                    <p className="text-xs uppercase tracking-[0.16em] text-emerald-700">Completed</p>
+                    <p className="mt-1 text-sm font-medium text-slate-900">{formatDateTime(liveActionBatch.completed_at)}</p>
+                  </div>
+                </div>
+                <p className="mt-3 break-all text-xs text-emerald-900">
+                  Payload hash: {liveActionBatch.request_payload_hash || "Unavailable"}
+                </p>
+                {liveActionBatch.error_message ? (
+                  <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+                    {liveActionBatch.error_message}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
 
             {liveResponseRecord.error ? (
               <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4">

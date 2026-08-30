@@ -30,6 +30,28 @@ function buildSessionRecord(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function buildActionBatch() {
+  return {
+    id: "ims-batch-launch-1",
+    workspace: "workspace-1",
+    client: "client-1",
+    gstin: "gstin-1",
+    auth_session: "provider-session-launch-1",
+    provider: "whitebooks",
+    action_type: "save",
+    ret_period: "052026",
+    status: "submitted",
+    provider_transaction_id: "ims-int-launch-001",
+    request_payload_hash: "hash-launch-001",
+    error_message: "",
+    requested_by: 1,
+    submitted_at: "2026-06-20T10:00:00Z",
+    completed_at: "2026-06-20T10:00:00Z",
+    created_at: "2026-06-20T10:00:00Z",
+    updated_at: "2026-06-20T10:00:00Z",
+  };
+}
+
 test.describe("IMS launch smoke", () => {
   test("@launch shows IMS as a supported operator surface with control posture, live context, and action tabs", async ({ page, app }) => {
     await app.mockAuthenticatedShell({
@@ -46,6 +68,18 @@ test.describe("IMS launch smoke", () => {
           message: "Success",
           data: [buildSessionRecord()],
           pagination: { count: 1, next: null, previous: null, page: 1, page_size: 50 },
+        }),
+      });
+    });
+
+    await page.route(/\/api\/backend\/ims\/action-batches\/?(?:\?.*)?$/, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "success",
+          message: "Success",
+          data: [buildActionBatch()],
         }),
       });
     });
@@ -77,6 +111,8 @@ test.describe("IMS launch smoke", () => {
     await expect(main.getByText("contract confirmed", { exact: true })).toBeVisible();
     await expect(main.getByText("Operator guidance", { exact: true })).toBeVisible();
     await expect(main.getByText("Read actions are safe for investigation and drill-down workflows.", { exact: true })).toBeVisible();
+    await expect(main.getByText("Recent IMS action batches", { exact: true })).toBeVisible();
+    await expect(main.getByText("ims-int-launch-001", { exact: true })).toBeVisible();
 
     await expect(main.getByText("IMS actions", { exact: true })).toBeVisible();
     await expect(main.getByRole("tab", { name: "Invoices", exact: true })).toBeVisible();

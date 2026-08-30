@@ -162,7 +162,15 @@ test.describe("Returns workflow", () => {
     await expect(page.getByText("Internal vs WhiteBooks return summary")).toBeVisible();
     await expect(page.getByText("Mismatch").first()).toBeVisible();
     await expect(page.getByRole("row", { name: /Eligible ITC/ })).toContainText("71,980.00");
+    await expect(page.getByRole("row", { name: /Eligible ITC/ })).toContainText("18 reconciliation/source rows");
+    await expect(page.getByRole("row", { name: /Eligible ITC/ })).toContainText("P-GSTR3B-001");
     await expect(page.getByRole("row", { name: /Net tax payable/ })).toContainText("-20.00");
+    await expect(page.getByText("GSTR-3B auto-liability evidence")).toBeVisible();
+    await expect(page.getByText("/gstr3b/autoliab").first()).toBeVisible();
+    await expect(page.getByRole("row", { name: /Auto-liability CGST/ })).toContainText("53,990.00");
+    await expect(page.getByRole("row", { name: /Auto-liability CGST/ })).toContainText("24 source rows");
+    await expect(page.getByRole("row", { name: /Auto-liability CGST/ })).toContainText("S-GSTR3B-001");
+    await expect(page.getByRole("row", { name: /Auto-liability total tax/ })).toContainText("10.00");
 
     await returnsPage.openPortalLedgers();
 
@@ -186,6 +194,8 @@ test.describe("Returns workflow", () => {
     await expect(page.getByText("Provider summary mismatch found. Review the comparison rows.")).toBeVisible();
     await expect(page.getByRole("row", { name: /Total tax amount/ })).toContainText("550.00");
     await expect(page.getByRole("row", { name: /B2C tax amount/ })).toContainText("-10.00");
+    await expect(page.getByRole("row", { name: /B2C tax amount/ })).toContainText("1 source row");
+    await expect(page.getByRole("row", { name: /B2C tax amount/ })).toContainText("S-GSTR1-001");
   });
 
   test("validates and generates a portal challan from the returns workspace", async ({ page, app }) => {

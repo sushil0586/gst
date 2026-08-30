@@ -5,6 +5,8 @@ import { unwrapApiData } from "@/lib/api/helpers";
 import { queryKeys } from "@/lib/query/query-keys";
 import type {
   IMSApiResponse,
+  IMSActionBatchListRequest,
+  IMSActionBatchRecord,
   IMSFileRequest,
   IMSInvoicesCountRequest,
   IMSInvoicesRequest,
@@ -95,6 +97,18 @@ export function useIMSFileQuery(filters: IMSFileRequest, options?: IMSQueryOptio
     queryFn: async () => {
       const response = await apiClient.get("/ims/file/", { params });
       return unwrapApiData<IMSApiResponse>(response);
+    },
+  });
+}
+
+export function useIMSActionBatchesQuery(filters: IMSActionBatchListRequest, options?: IMSQueryOptions) {
+  const params = normalizeIMSParams(filters);
+  return useQuery({
+    queryKey: queryKeys.ims.actionBatches(params),
+    enabled: options?.enabled ?? Boolean(filters.workspace && filters.client && filters.gstin),
+    queryFn: async () => {
+      const response = await apiClient.get("/ims/action-batches/", { params });
+      return unwrapApiData<IMSActionBatchRecord[]>(response);
     },
   });
 }
