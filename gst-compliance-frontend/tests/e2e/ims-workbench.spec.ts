@@ -172,6 +172,101 @@ test.describe("IMS workbench", () => {
     await expect(page.getByText("save and reset remain disabled because this role does not have filing permission")).toBeVisible();
   });
 
+  test("lets filing operators retry failed batches and refresh provider status", async ({ page, app }) => {
+    const writePermissions = [...sessionPayload.permissions_summary.codes, "file_return"];
+    let retryPayload: Record<string, unknown> | null = null;
+    let statusPayload: Record<string, unknown> | null = null;
+    let actionBatches = [
+      buildActionBatch(),
+      buildActionBatch({
+        id: "ims-batch-failed-1",
+        status: "failed",
+        provider_transaction_id: "",
+        request_payload_hash: "hash-failed-001",
+        error_message: "IMS provider timeout.",
+        completed_at: "2026-06-20T10:10:00Z",
+        created_at: "2026-06-20T10:10:00Z",
+        updated_at: "2026-06-20T10:10:00Z",
+      }),
+    ];
+
+    await app.mockAuthenticatedShell({ customPermissions: writePermissions });
+    await app.mockFoundationApis();
+
+    await page.route("**/api/backend/provider-auth-sessions/**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "success",
+          message: "Success",
+          data: [buildSessionRecord()],
+          pagination: { count: 1, next: null, previous: null, page: 1, page_size: 50 },
+        }),
+      });
+    });
+
+    await page.route(/\/api\/backend\/ims\/action-batches\/?(?:\?.*)?$/, async (route) => {
+      await route.fulfill(jsonSuccess(actionBatches));
+    });
+
+    await page.route(/\/api\/backend\/ims\/action-batches\/ims-batch-existing-1\/status\/?$/, async (route) => {
+      statusPayload = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill(
+        jsonSuccess({
+          status_cd: "1",
+          int_tran_id: "ims-int-existing-001",
+          processing_status: "COMPLETED",
+          action_batch: actionBatches[0],
+        }),
+      );
+    });
+
+    await page.route(/\/api\/backend\/ims\/action-batches\/ims-batch-failed-1\/retry\/?$/, async (route) => {
+      retryPayload = route.request().postDataJSON() as Record<string, unknown>;
+      const batch = buildActionBatch({
+        id: "ims-batch-retry-1",
+        provider_transaction_id: "ims-int-retry-001",
+        request_payload_hash: "hash-retry-001",
+        submitted_at: "2026-06-20T10:30:00Z",
+        completed_at: "2026-06-20T10:30:00Z",
+        created_at: "2026-06-20T10:30:00Z",
+        updated_at: "2026-06-20T10:30:00Z",
+      });
+      actionBatches = [batch, ...actionBatches];
+      await route.fulfill(
+        jsonSuccess({
+          status_cd: "1",
+          message: "retried",
+          int_tran_id: "ims-int-retry-001",
+          action_batch: batch,
+        }),
+      );
+    });
+
+    await page.goto("/ims");
+
+    await expect(page.getByText("IMS provider timeout.", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Refresh status", exact: true }).first().click();
+    await expect(page.getByText("COMPLETED", { exact: true }).first()).toBeVisible();
+    await expect.poll(() => statusPayload).not.toBeNull();
+    await expect(statusPayload).toMatchObject({
+      workspace: "workspace-1",
+      client: "client-1",
+      gstin: "gstin-1",
+    });
+
+    await page.locator('button:has-text("Retry batch"):not(:disabled)').click();
+    await expect(page.getByText("ims-batch-retry-1", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("ims-int-retry-001", { exact: true }).first()).toBeVisible();
+    await expect.poll(() => retryPayload).not.toBeNull();
+    await expect(retryPayload).toMatchObject({
+      workspace: "workspace-1",
+      client: "client-1",
+      gstin: "gstin-1",
+    });
+  });
+
   test("allows users with filing permission to submit save and reset payloads", async ({ page, app }) => {
     const writePermissions = [...sessionPayload.permissions_summary.codes, "file_return"];
     let savedPayload: Record<string, unknown> | null = null;

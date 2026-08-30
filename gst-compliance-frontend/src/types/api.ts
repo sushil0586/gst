@@ -217,6 +217,7 @@ export type IMSBaseRequest = {
 export type IMSSaveRequest = IMSBaseRequest & {
   ret_period: string;
   invdata: Record<string, unknown>;
+  allow_duplicate_action?: boolean;
 };
 
 export type IMSResetRequest = IMSSaveRequest;
@@ -251,6 +252,13 @@ export type IMSFileRequest = IMSBaseRequest & {
 
 export type IMSActionBatchListRequest = IMSBaseRequest & {
   ret_period?: string;
+  action_type?: string;
+  status?: string;
+};
+
+export type IMSActionBatchOperationRequest = IMSBaseRequest & {
+  action_batch: string;
+  allow_duplicate_action?: boolean;
 };
 
 export type IMSActionBatchRecord = {

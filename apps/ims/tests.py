@@ -242,6 +242,138 @@ def test_owner_can_list_recent_ims_action_batches(ims_owner_client, ims_context)
 
 
 @pytest.mark.django_db
+def test_ims_save_blocks_duplicate_submitted_payload(ims_owner_client, ims_context, monkeypatch):
+    provider_call_count = 0
+
+    def fake_ims_save(self, **kwargs):
+        nonlocal provider_call_count
+        provider_call_count += 1
+        return {"status_cd": "1", "message": "saved", "int_tran_id": f"ims-int-dup-{provider_call_count}"}
+
+    monkeypatch.setattr("apps.integrations.whitebooks.client.WhiteBooksClient.ims_save", fake_ims_save)
+
+    payload = {
+        "workspace": str(ims_context["workspace"].id),
+        "client": str(ims_context["client"].id),
+        "gstin": str(ims_context["gstin"].id),
+        "auth_session": str(ims_context["auth_session"].id),
+        "ret_period": "042026",
+        "invdata": {"b2b": [{"ctin": "29ABCDE1234F1Z5"}]},
+    }
+
+    first_response = ims_owner_client.post("/api/v1/ims/save/", payload, format="json")
+    second_response = ims_owner_client.post("/api/v1/ims/save/", payload, format="json")
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 400
+    assert provider_call_count == 1
+    assert IMSActionBatch.objects.count() == 1
+    batch = IMSActionBatch.objects.get()
+    assert AuditLog.objects.filter(action="ims.save_duplicate_blocked", entity_id=batch.id).exists()
+    assert "allow_duplicate_action" in second_response.data["errors"]
+
+
+@pytest.mark.django_db
+def test_owner_can_retry_failed_ims_action_batch(ims_owner_client, ims_context, monkeypatch):
+    captured = {}
+    failed_batch = IMSActionBatch.objects.create(
+        workspace=ims_context["workspace"],
+        client=ims_context["client"],
+        gstin=ims_context["gstin"],
+        auth_session=ims_context["auth_session"],
+        action_type=IMSActionBatch.ActionType.RESET,
+        ret_period="042026",
+        status=IMSActionBatch.BatchStatus.FAILED,
+        request_payload_hash="failed-hash",
+        request_payload={
+            "rtin": "29******1Z7",
+            "reqtyp": "RESET",
+            "invdata": {"b2b": [{"ctin": "29******1Z5"}]},
+        },
+        error_message="IMS provider timeout.",
+        created_by=ims_context["owner"],
+        updated_by=ims_context["owner"],
+        requested_by=ims_context["owner"],
+    )
+
+    def fake_ims_reset(self, **kwargs):
+        captured.update(kwargs)
+        return {"status_cd": "1", "message": "retried", "int_tran_id": "ims-int-retry-001"}
+
+    monkeypatch.setattr("apps.integrations.whitebooks.client.WhiteBooksClient.ims_reset", fake_ims_reset)
+
+    response = ims_owner_client.post(
+        f"/api/v1/ims/action-batches/{failed_batch.id}/retry/",
+        {
+            "workspace": str(ims_context["workspace"].id),
+            "client": str(ims_context["client"].id),
+            "gstin": str(ims_context["gstin"].id),
+            "auth_session": str(ims_context["auth_session"].id),
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.data["data"]["action_batch"]["status"] == "submitted"
+    assert response.data["data"]["action_batch"]["action_type"] == "reset"
+    assert response.data["data"]["action_batch"]["provider_transaction_id"] == "ims-int-retry-001"
+    assert captured["payload"]["rtin"] == "29ABCDE1234K1Z7"
+    assert captured["payload"]["reqtyp"] == "RESET"
+    assert captured["payload"]["invdata"]["b2b"][0]["ctin"] == "29******1Z5"
+    assert IMSActionBatch.objects.count() == 2
+    retry_batch = IMSActionBatch.objects.exclude(pk=failed_batch.id).get()
+    assert retry_batch.status == IMSActionBatch.BatchStatus.SUBMITTED
+    assert AuditLog.objects.filter(action="ims.reset_retry_requested", entity_id=failed_batch.id).exists()
+    assert AuditLog.objects.filter(action="ims.reset_submitted", entity_id=retry_batch.id).exists()
+
+
+@pytest.mark.django_db
+def test_owner_can_refresh_ims_action_batch_status(ims_owner_client, ims_context, monkeypatch):
+    captured = {}
+    batch = IMSActionBatch.objects.create(
+        workspace=ims_context["workspace"],
+        client=ims_context["client"],
+        gstin=ims_context["gstin"],
+        auth_session=ims_context["auth_session"],
+        action_type=IMSActionBatch.ActionType.SAVE,
+        ret_period="042026",
+        status=IMSActionBatch.BatchStatus.SUBMITTED,
+        provider_transaction_id="ims-int-status-001",
+        request_payload_hash="status-hash",
+        response_payload={"status_cd": "1", "message": "saved"},
+        created_by=ims_context["owner"],
+        updated_by=ims_context["owner"],
+        requested_by=ims_context["owner"],
+    )
+
+    def fake_ims_status(self, **kwargs):
+        captured.update(kwargs)
+        return {"status_cd": "1", "int_tran_id": "ims-int-status-001", "processing_status": "COMPLETED"}
+
+    monkeypatch.setattr("apps.integrations.whitebooks.client.WhiteBooksClient.ims_status", fake_ims_status)
+
+    response = ims_owner_client.post(
+        f"/api/v1/ims/action-batches/{batch.id}/status/",
+        {
+            "workspace": str(ims_context["workspace"].id),
+            "client": str(ims_context["client"].id),
+            "gstin": str(ims_context["gstin"].id),
+            "auth_session": str(ims_context["auth_session"].id),
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.data["data"]["processing_status"] == "COMPLETED"
+    assert response.data["data"]["action_batch"]["id"] == str(batch.id)
+    assert captured["int_tran_id"] == "ims-int-status-001"
+    batch.refresh_from_db()
+    assert batch.response_payload["status_checks"][0]["payload"]["processing_status"] == "COMPLETED"
+    assert batch.error_message == ""
+    assert AuditLog.objects.filter(action="ims.batch_status_checked", entity_id=batch.id).exists()
+
+
+@pytest.mark.django_db
 def test_viewer_cannot_save_ims_payload(ims_viewer_client, ims_context):
     response = ims_viewer_client.post(
         "/api/v1/ims/save/",

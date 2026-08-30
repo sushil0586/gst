@@ -6,6 +6,7 @@ import { queryKeys } from "@/lib/query/query-keys";
 import type {
   IMSApiResponse,
   IMSActionBatchListRequest,
+  IMSActionBatchOperationRequest,
   IMSActionBatchRecord,
   IMSFileRequest,
   IMSInvoicesCountRequest,
@@ -126,6 +127,26 @@ export function useIMSResetMutation() {
   return useMutation({
     mutationFn: async (payload: IMSResetRequest) => {
       const response = await apiClient.post("/ims/reset/", payload);
+      return unwrapApiData<IMSApiResponse>(response);
+    },
+  });
+}
+
+export function useIMSActionBatchRetryMutation() {
+  return useMutation({
+    mutationFn: async (payload: IMSActionBatchOperationRequest) => {
+      const { action_batch: actionBatch, ...body } = payload;
+      const response = await apiClient.post(`/ims/action-batches/${actionBatch}/retry/`, body);
+      return unwrapApiData<IMSApiResponse>(response);
+    },
+  });
+}
+
+export function useIMSActionBatchStatusMutation() {
+  return useMutation({
+    mutationFn: async (payload: IMSActionBatchOperationRequest) => {
+      const { action_batch: actionBatch, ...body } = payload;
+      const response = await apiClient.post(`/ims/action-batches/${actionBatch}/status/`, body);
       return unwrapApiData<IMSApiResponse>(response);
     },
   });

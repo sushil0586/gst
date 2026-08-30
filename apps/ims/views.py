@@ -10,6 +10,7 @@ from apps.gstins.models import GSTIN
 from apps.ims.serializers import (
     IMSFileSerializer,
     IMSActionBatchListRequestSerializer,
+    IMSActionBatchOperationSerializer,
     IMSActionBatchSerializer,
     IMSInvoicesCountSerializer,
     IMSInvoicesSerializer,
@@ -29,8 +30,14 @@ from apps.ims.services import (
     ims_status,
     ims_supplier_invoices,
     list_ims_action_batches,
+    refresh_ims_action_batch_status,
+    retry_ims_action_batch,
 )
-from apps.integrations.whitebooks.exceptions import WhiteBooksAuthenticationError, WhiteBooksSubmissionError, WhiteBooksTemporaryError
+from apps.integrations.whitebooks.exceptions import (
+    WhiteBooksAuthenticationError,
+    WhiteBooksSubmissionError,
+    WhiteBooksTemporaryError,
+)
 from apps.workspaces.models import Workspace
 
 
@@ -46,6 +53,8 @@ class IMSViewSet(GenericViewSet):
             return IMSStatusSerializer
         if self.action == "action_batches":
             return IMSActionBatchListRequestSerializer
+        if self.action in {"retry_action_batch", "refresh_action_batch_status"}:
+            return IMSActionBatchOperationSerializer
         if self.action == "invoices":
             return IMSInvoicesSerializer
         if self.action == "invoices_count":
@@ -59,7 +68,7 @@ class IMSViewSet(GenericViewSet):
         return IMSSaveSerializer
 
     def get_permission_code(self, request):
-        if self.action in {"save", "reset"}:
+        if self.action in {"save", "reset", "retry_action_batch"}:
             return "file_return"
         return "view_client"
 
@@ -117,6 +126,30 @@ class IMSViewSet(GenericViewSet):
         batches = list_ims_action_batches(validated_data=serializer.validated_data)
         output = IMSActionBatchSerializer(batches, many=True)
         return Response(api_response(data=output.data, message="IMS action batches fetched"))
+
+    @action(detail=False, methods=["post"], url_path=r"action-batches/(?P<batch_id>[^/.]+)/retry")
+    def retry_action_batch(self, request, batch_id=None, *args, **kwargs):
+        data = request.data.copy()
+        data["action_batch"] = batch_id
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            payload = retry_ims_action_batch(validated_data=serializer.validated_data, actor=request.user)
+        except (WhiteBooksAuthenticationError, WhiteBooksSubmissionError, WhiteBooksTemporaryError) as exc:
+            raise ValidationError({"provider": str(exc)}) from exc
+        return Response(api_response(data=payload, message="IMS action batch retried"))
+
+    @action(detail=False, methods=["post"], url_path=r"action-batches/(?P<batch_id>[^/.]+)/status")
+    def refresh_action_batch_status(self, request, batch_id=None, *args, **kwargs):
+        data = request.data.copy()
+        data["action_batch"] = batch_id
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            payload = refresh_ims_action_batch_status(validated_data=serializer.validated_data, actor=request.user)
+        except (WhiteBooksAuthenticationError, WhiteBooksSubmissionError, WhiteBooksTemporaryError) as exc:
+            raise ValidationError({"provider": str(exc)}) from exc
+        return Response(api_response(data=payload, message="IMS action batch status refreshed"))
 
     @action(detail=False, methods=["get"], url_path="invoices")
     def invoices(self, request, *args, **kwargs):

@@ -18,6 +18,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useCompliancePeriodsQuery } from "@/features/compliance-periods";
 import { useProviderAuthSessionsQuery } from "@/features/filings";
 import {
+  useIMSActionBatchRetryMutation,
+  useIMSActionBatchStatusMutation,
   useIMSActionBatchesQuery,
   useIMSFileQuery,
   useIMSInvoicesCountQuery,
@@ -179,7 +181,7 @@ function getActionStateSummary(canWrite: boolean, selectedSession: IMSSelectedSe
 }
 
 export default function IMSPage() {
-  type ResponseSource = "status" | "invoices" | "count" | "supplier" | "rejected" | "file" | "save" | "reset" | null;
+  type ResponseSource = "status" | "invoices" | "count" | "supplier" | "rejected" | "file" | "save" | "reset" | "retry" | "batch_status" | null;
 
   const { permissions: sessionPermissions } = useSession();
   const {
@@ -222,6 +224,8 @@ export default function IMSPage() {
   const [supplierReturnType, setSupplierReturnType] = useState("GSTR1");
   const [rejectedSection, setRejectedSection] = useState("B2B");
   const [fileToken, setFileToken] = useState("");
+  const [actionBatchActionFilter, setActionBatchActionFilter] = useState("all");
+  const [actionBatchStatusFilter, setActionBatchStatusFilter] = useState("all");
 
   const [statusFilters, setStatusFilters] = useState<IMSStatusRequest | null>(null);
   const [invoiceFilters, setInvoiceFilters] = useState<IMSInvoicesRequest | null>(null);
@@ -273,11 +277,20 @@ export default function IMSPage() {
     { enabled: Boolean(fileFilters) },
   );
   const actionBatchesQuery = useIMSActionBatchesQuery(
-    baseFilters ? { ...baseFilters, ret_period: derivedRetPeriod || undefined } : { workspace: "", client: "", gstin: "" },
+    baseFilters
+      ? {
+          ...baseFilters,
+          ret_period: derivedRetPeriod || undefined,
+          action_type: actionBatchActionFilter === "all" ? undefined : actionBatchActionFilter,
+          status: actionBatchStatusFilter === "all" ? undefined : actionBatchStatusFilter,
+        }
+      : { workspace: "", client: "", gstin: "" },
     { enabled: Boolean(baseFilters) },
   );
   const saveMutation = useIMSSaveMutation();
   const resetMutation = useIMSResetMutation();
+  const retryMutation = useIMSActionBatchRetryMutation();
+  const batchStatusMutation = useIMSActionBatchStatusMutation();
   const recentActionBatches = actionBatchesQuery.data ?? [];
 
   const responseMap = {
@@ -289,6 +302,8 @@ export default function IMSPage() {
     file: fileQuery.data,
     save: saveMutation.data,
     reset: resetMutation.data,
+    retry: retryMutation.data,
+    batch_status: batchStatusMutation.data,
   } as const;
 
   const errorMap = {
@@ -300,6 +315,8 @@ export default function IMSPage() {
     file: fileQuery.error,
     save: saveMutation.error,
     reset: resetMutation.error,
+    retry: retryMutation.error,
+    batch_status: batchStatusMutation.error,
   } as const;
 
   const liveResponse = responseSource ? responseMap[responseSource] ?? null : null;
@@ -366,7 +383,9 @@ export default function IMSPage() {
     || rejectedInvoicesQuery.isFetching
     || fileQuery.isFetching
     || saveMutation.isPending
-    || resetMutation.isPending;
+    || resetMutation.isPending
+    || retryMutation.isPending
+    || batchStatusMutation.isPending;
 
   function ensureBaseFilters() {
     if (!baseFilters) {
@@ -432,6 +451,48 @@ export default function IMSPage() {
       toast.success("IMS reset completed.");
     } catch {
       toast.error("IMS reset failed.");
+    }
+  }
+
+  async function handleRetryActionBatch(batch: IMSActionBatchRecord) {
+    const filters = ensureBaseFilters();
+    if (!filters) {
+      return;
+    }
+    setResponseTitle(`IMS ${batch.action_type} retry response`);
+    setResponseSource("retry");
+    try {
+      await retryMutation.mutateAsync({
+        ...filters,
+        action_batch: batch.id,
+      });
+      await actionBatchesQuery.refetch();
+      toast.success("IMS action batch retry submitted.");
+    } catch {
+      toast.error("IMS action batch retry failed.");
+    }
+  }
+
+  async function handleRefreshActionBatchStatus(batch: IMSActionBatchRecord) {
+    const filters = ensureBaseFilters();
+    if (!filters) {
+      return;
+    }
+    if (!batch.provider_transaction_id) {
+      toast.error("Provider transaction ID is required before status refresh.");
+      return;
+    }
+    setResponseTitle("IMS action batch status response");
+    setResponseSource("batch_status");
+    try {
+      await batchStatusMutation.mutateAsync({
+        ...filters,
+        action_batch: batch.id,
+      });
+      await actionBatchesQuery.refetch();
+      toast.success("IMS action batch status refreshed.");
+    } catch {
+      toast.error("IMS action batch status refresh failed.");
     }
   }
 
@@ -887,6 +948,35 @@ export default function IMSPage() {
           </Button>
         }
       >
+        <div className="mb-4 grid gap-3 md:grid-cols-2">
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Action</p>
+            <Select value={actionBatchActionFilter} onValueChange={setActionBatchActionFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="All actions" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All actions</SelectItem>
+                <SelectItem value="save">Save</SelectItem>
+                <SelectItem value="reset">Reset</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Status</p>
+            <Select value={actionBatchStatusFilter} onValueChange={setActionBatchStatusFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="All statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="requested">Requested</SelectItem>
+                <SelectItem value="submitted">Submitted</SelectItem>
+                <SelectItem value="failed">Failed</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
         {actionBatchesQuery.isLoading ? <LoadingState message="Loading IMS action batches..." /> : null}
         {!actionBatchesQuery.isLoading && recentActionBatches.length > 0 ? (
           <div className="grid gap-3 xl:grid-cols-2">
@@ -916,6 +1006,26 @@ export default function IMSPage() {
                 {batch.error_message ? (
                   <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">{batch.error_message}</p>
                 ) : null}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleRefreshActionBatchStatus(batch)}
+                    disabled={!batch.provider_transaction_id || batchStatusMutation.isPending}
+                  >
+                    {batchStatusMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
+                    <span className="ml-2">Refresh status</span>
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleRetryActionBatch(batch)}
+                    disabled={!canWrite || batch.status !== "failed" || retryMutation.isPending}
+                  >
+                    {retryMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <RotateCcw className="size-4" />}
+                    <span className="ml-2">Retry batch</span>
+                  </Button>
+                </div>
               </div>
             ))}
           </div>

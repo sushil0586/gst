@@ -69,7 +69,9 @@ class IMSBaseSerializer(serializers.Serializer):
                     {"auth_session": "Auth session does not belong to the selected workspace and client."}
                 )
             if auth_session.gstin_id and auth_session.gstin_id != gstin.id:
-                raise serializers.ValidationError({"auth_session": "Auth session does not belong to the selected GSTIN."})
+                raise serializers.ValidationError(
+                    {"auth_session": "Auth session does not belong to the selected GSTIN."}
+                )
             freshness = get_provider_auth_session_freshness(auth_session=auth_session)
             if freshness["is_stale"]:
                 raise serializers.ValidationError({"auth_session": freshness["stale_reason"]})
@@ -88,6 +90,7 @@ class IMSSaveSerializer(IMSBaseSerializer):
         error_messages={"invalid": "ret_period must use WhiteBooks MMYYYY format."},
     )
     invdata = serializers.JSONField()
+    allow_duplicate_action = serializers.BooleanField(required=False, default=False)
 
     def validate_invdata(self, value):
         if not isinstance(value, dict):
@@ -106,6 +109,34 @@ class IMSActionBatchListRequestSerializer(IMSBaseSerializer):
         allow_blank=True,
         error_messages={"invalid": "ret_period must use WhiteBooks MMYYYY format."},
     )
+    action_type = serializers.ChoiceField(
+        choices=IMSActionBatch.ActionType.choices,
+        required=False,
+        allow_blank=True,
+    )
+    status = serializers.ChoiceField(
+        choices=IMSActionBatch.BatchStatus.choices,
+        required=False,
+        allow_blank=True,
+    )
+
+
+class IMSActionBatchOperationSerializer(IMSBaseSerializer):
+    action_batch = serializers.PrimaryKeyRelatedField(
+        queryset=IMSActionBatch.objects.select_related("workspace", "client", "gstin", "auth_session")
+    )
+    allow_duplicate_action = serializers.BooleanField(required=False, default=False)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        batch = attrs["action_batch"]
+        if batch.workspace_id != attrs["workspace"].id or batch.client_id != attrs["client"].id:
+            raise serializers.ValidationError(
+                {"action_batch": "Action batch does not belong to the selected workspace and client."}
+            )
+        if batch.gstin_id and batch.gstin_id != attrs["gstin"].id:
+            raise serializers.ValidationError({"action_batch": "Action batch does not belong to the selected GSTIN."})
+        return attrs
 
 
 class IMSActionBatchSerializer(serializers.ModelSerializer):

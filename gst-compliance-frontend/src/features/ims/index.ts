@@ -1,4 +1,6 @@
 export {
+  useIMSActionBatchRetryMutation,
+  useIMSActionBatchStatusMutation,
   useIMSActionBatchesQuery,
   useIMSFileQuery,
   useIMSInvoicesCountQuery,

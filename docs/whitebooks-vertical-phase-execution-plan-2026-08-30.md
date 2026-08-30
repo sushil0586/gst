@@ -294,18 +294,31 @@ Completed action-batch hardening slice on 2026-08-30:
 - focused mocked backend and frontend tests cover submitted, failed, and recent-batch workflows
 - live WhiteBooks sandbox UAT remains pending because WhiteBooks reported a GST sandbox/government-side outage on 2026-08-30
 
+Completed recovery hardening slice on 2026-08-30:
+
+- duplicate save/reset payloads are blocked when an identical submitted or in-progress batch already exists for the same GSTIN and period
+- failed action batches can be retried through a recovery endpoint that creates a fresh tracked batch
+- submitted action batches with provider transaction IDs can refresh provider status and store status-check evidence
+- IMS action batch list supports action and status filters
+- IMS UI exposes action/status filters, retry controls for failed batches, and provider status refresh controls for submitted batches
+- mocked backend and frontend tests cover duplicate protection, retry, and provider status refresh
+
 Backend work:
 
 - add async job handling for long IMS operations
 - done: store action batch records
 - done: add per-batch audit trail for save/reset lifecycle
+- done: add duplicate save/reset protection for identical in-progress/submitted action batches
+- done: add failed-batch retry endpoint
+- done: add provider status refresh endpoint for submitted batches
 - normalize invoice count/list responses
-- add partial-state recovery for save/reset beyond stored failure evidence
+- done: add partial-state recovery for save/reset through failed-batch retry and stored status-check evidence
 
 Frontend work:
 
 - done: build operator workbench for counts, filters, invoice drill-downs, status checks, file fetch, and draft save/reset
 - done: show provider response evidence and recent action batches
+- done: add action/status filters and recovery controls to recent IMS action batches
 - prevent accidental bulk actions before expanding beyond pasted JSON draft payloads
 
 QA/UAT:
@@ -313,6 +326,9 @@ QA/UAT:
 - done: mocked fetch counts/list/status browser coverage
 - done: mocked save/reset browser coverage
 - done: mocked provider timeout creates a failed action batch
+- done: mocked duplicate-action protection
+- done: mocked failed-batch retry
+- done: mocked action-batch provider status refresh
 - pending: live WhiteBooks sandbox fetch counts
 - pending: live WhiteBooks sandbox save accept/reject/no-action batch
 - pending: live WhiteBooks sandbox reset batch
