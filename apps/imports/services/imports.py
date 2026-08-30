@@ -17,7 +17,6 @@ from apps.imports.services.correction_policy import (
     get_relevant_return_types_for_import,
 )
 from apps.imports.services.parsers import PARSER_REGISTRY
-from apps.common.security import sanitize_json
 from apps.integrations.whitebooks.client import WhiteBooksClient
 from apps.integrations.whitebooks.exceptions import WhiteBooksAuthenticationError, WhiteBooksSubmissionError, WhiteBooksTemporaryError
 from apps.reconciliation.models import ReconciliationItem, ReconciliationRun
@@ -66,27 +65,50 @@ def fetch_gstr2b_import_batch(*, validated_data, user):
         provider=provider_code,
     )
 
-    import_batch = ImportBatch.objects.create(
-        workspace=validated_data["workspace_instance"],
-        client=validated_data["client_instance"],
-        gstin=gstin,
-        compliance_period=compliance_period,
-        import_type=ImportBatch.ImportType.GSTR_2B,
-        source_type=ImportBatch.SourceType.PROVIDER,
-        file_name=_build_provider_import_filename(gstin.gstin, compliance_period.period),
-        source_metadata={
+    import_batch = _get_pending_provider_gstr2b_batch(
+        workspace_id=validated_data["workspace_instance"].id,
+        client_id=validated_data["client_instance"].id,
+        gstin_id=gstin.id,
+        compliance_period_id=compliance_period.id,
+        provider=provider_code,
+    )
+    is_retry = import_batch is not None
+    if import_batch is None:
+        import_batch = ImportBatch.objects.create(
+            workspace=validated_data["workspace_instance"],
+            client=validated_data["client_instance"],
+            gstin=gstin,
+            compliance_period=compliance_period,
+            import_type=ImportBatch.ImportType.GSTR_2B,
+            source_type=ImportBatch.SourceType.PROVIDER,
+            file_name=_build_provider_import_filename(gstin.gstin, compliance_period.period),
+            source_metadata={
+                "provider": provider_code,
+                "fetch_status": "requested",
+                "auth_session_id": str(auth_session.id),
+                "txn": auth_session.txn,
+                "attempt_count": 1,
+            },
+            status=ImportBatch.BatchStatus.UPLOADED,
+            created_by=user,
+            updated_by=user,
+        )
+    else:
+        existing_metadata = import_batch.source_metadata if isinstance(import_batch.source_metadata, dict) else {}
+        import_batch.source_metadata = {
+            **existing_metadata,
             "provider": provider_code,
-            "fetch_status": "requested",
+            "fetch_status": "retry_requested",
             "auth_session_id": str(auth_session.id),
             "txn": auth_session.txn,
-        },
-        status=ImportBatch.BatchStatus.UPLOADED,
-        created_by=user,
-        updated_by=user,
-    )
+            "attempt_count": int(existing_metadata.get("attempt_count") or 1) + 1,
+        }
+        import_batch.error_summary = {}
+        import_batch.updated_by = user
+        import_batch.save(update_fields=["source_metadata", "error_summary", "updated_by", "updated_at"])
     record_audit_log(
         actor=user,
-        action="import.provider_fetch_requested",
+        action="import.provider_fetch_retry_requested" if is_retry else "import.provider_fetch_requested",
         entity=import_batch,
         workspace_id=import_batch.workspace_id,
         client_id=import_batch.client_id,
@@ -98,15 +120,19 @@ def fetch_gstr2b_import_batch(*, validated_data, user):
     client = WhiteBooksClient()
     try:
         period_code = _to_whitebooks_period(compliance_period.period)
-        generate_response = client.generate_gstr2b(
-            email=auth_session.email,
-            gstin=gstin.gstin,
-            ret_period=period_code,
-            txn=auth_session.txn,
-            state_code=gstin.state_code,
-            gst_username=gstin.whitebooks_gst_username,
-        )
-        int_tran_id = _extract_first_non_empty(generate_response, "int_tran_id", "intr_tran_id", "intTranId", "reference_id", "ref_id")
+        existing_metadata = import_batch.source_metadata if isinstance(import_batch.source_metadata, dict) else {}
+        int_tran_id = _extract_first_non_empty(existing_metadata, "int_tran_id", "intr_tran_id", "intTranId", "reference_id", "ref_id")
+        generate_response = existing_metadata.get("generate_response") if isinstance(existing_metadata.get("generate_response"), dict) else {}
+        if not int_tran_id:
+            generate_response = client.generate_gstr2b(
+                email=auth_session.email,
+                gstin=gstin.gstin,
+                ret_period=period_code,
+                txn=auth_session.txn,
+                state_code=gstin.state_code,
+                gst_username=gstin.whitebooks_gst_username,
+            )
+            int_tran_id = _extract_first_non_empty(generate_response, "int_tran_id", "intr_tran_id", "intTranId", "reference_id", "ref_id")
         if not int_tran_id:
             raise WhiteBooksSubmissionError("WhiteBooks 2B generation did not return an internal transaction reference.")
         status_response = client.get_gstr2b_generate_status(
@@ -119,9 +145,17 @@ def fetch_gstr2b_import_batch(*, validated_data, user):
         )
         filenum = _extract_first_non_empty(status_response, "filenum", "file_num", "fileNo", "fileno")
         if not filenum:
-            raise WhiteBooksSubmissionError(
-                "WhiteBooks 2B generation is not ready yet. Retry the fetch once the provider finishes preparing the 2B file."
+            _mark_provider_gstr2b_waiting(
+                import_batch=import_batch,
+                user=user,
+                provider=provider_code,
+                auth_session=auth_session,
+                int_tran_id=str(int_tran_id),
+                generate_response=generate_response,
+                status_response=status_response,
+                client=client,
             )
+            return import_batch
         all_response = client.fetch_gstr2b_all(
             email=auth_session.email,
             gstin=gstin.gstin,
@@ -137,12 +171,13 @@ def fetch_gstr2b_import_batch(*, validated_data, user):
             "fetch_status": "fetched",
             "auth_session_id": str(auth_session.id),
             "txn": auth_session.txn,
+            "attempt_count": int(existing_metadata.get("attempt_count") or 1),
             "int_tran_id": str(int_tran_id),
             "filenum": str(filenum),
             "generate_response": client.sanitize_response_payload(generate_response),
             "status_response": client.sanitize_response_payload(status_response),
             "all_response": client.sanitize_response_payload(all_response),
-            "normalized_rows": sanitize_json(normalized_rows, max_items=50),
+            "normalized_rows": normalized_rows,
         }
         import_batch.updated_by = user
         import_batch.save(update_fields=["source_metadata", "updated_by", "updated_at"])
@@ -256,6 +291,50 @@ def enqueue_import_processing(*, import_batch, actor):
         if settings.CELERY_STRICT_PRODUCTION_ASYNC and not settings.DEBUG:
             raise RuntimeError("Import processing worker is unavailable. Heavy jobs cannot fall back to inline execution in production.")
         process_import_batch(import_batch_id=import_batch.id, actor_id=actor.id if actor else None)
+
+
+def poll_provider_gstr2b_import_batch(*, import_batch_id, actor_id=None):
+    import_batch = (
+        ImportBatch.objects.select_related("workspace", "client", "gstin", "compliance_period")
+        .filter(pk=import_batch_id)
+        .first()
+    )
+    if import_batch is None:
+        return {"status": "missing", "import_batch_id": str(import_batch_id)}
+    metadata = import_batch.source_metadata if isinstance(import_batch.source_metadata, dict) else {}
+    if (
+        import_batch.import_type != ImportBatch.ImportType.GSTR_2B
+        or import_batch.source_type != ImportBatch.SourceType.PROVIDER
+        or metadata.get("fetch_status") != "waiting_for_provider"
+    ):
+        return {
+            "status": "skipped",
+            "import_batch_id": str(import_batch.id),
+            "fetch_status": str(metadata.get("fetch_status") or ""),
+        }
+
+    actor = User.objects.filter(pk=actor_id).first() if actor_id else import_batch.updated_by or import_batch.created_by
+    provider = str(metadata.get("provider") or ReturnFiling.Provider.WHITEBOOKS)
+    return_batch = fetch_gstr2b_import_batch(
+        validated_data={
+            "workspace_instance": import_batch.workspace,
+            "client_instance": import_batch.client,
+            "gstin_instance": import_batch.gstin,
+            "compliance_period_instance": import_batch.compliance_period,
+            "provider": provider,
+        },
+        user=actor,
+    )
+    return {
+        "status": "polled",
+        "import_batch_id": str(return_batch.id),
+        "fetch_status": str(
+            return_batch.source_metadata.get("fetch_status")
+            if isinstance(return_batch.source_metadata, dict)
+            else ""
+        ),
+        "batch_status": return_batch.status,
+    }
 
 
 def correct_import_batch_row(*, import_batch, row_number, raw_row, user, exception_context=None):
@@ -650,6 +729,143 @@ def process_import_batch(*, import_batch_id, actor_id=None):
             metadata={"error": str(exc)},
         )
         raise
+
+
+def _get_pending_provider_gstr2b_batch(*, workspace_id, client_id, gstin_id, compliance_period_id, provider):
+    candidates = ImportBatch.objects.filter(
+        workspace_id=workspace_id,
+        client_id=client_id,
+        gstin_id=gstin_id,
+        compliance_period_id=compliance_period_id,
+        import_type=ImportBatch.ImportType.GSTR_2B,
+        source_type=ImportBatch.SourceType.PROVIDER,
+        status__in=[
+            ImportBatch.BatchStatus.UPLOADED,
+            ImportBatch.BatchStatus.QUEUED,
+            ImportBatch.BatchStatus.PROCESSING,
+        ],
+    ).order_by("-created_at")
+    for batch in candidates:
+        metadata = batch.source_metadata if isinstance(batch.source_metadata, dict) else {}
+        if metadata.get("provider") == provider and metadata.get("fetch_status") in {
+            "requested",
+            "retry_requested",
+            "waiting_for_provider",
+        }:
+            return batch
+    return None
+
+
+def _mark_provider_gstr2b_waiting(
+    *,
+    import_batch,
+    user,
+    provider,
+    auth_session,
+    int_tran_id,
+    generate_response,
+    status_response,
+    client,
+):
+    existing_metadata = import_batch.source_metadata if isinstance(import_batch.source_metadata, dict) else {}
+    attempt_count = _safe_positive_int(existing_metadata.get("attempt_count"), default=1)
+    max_attempts = max(_safe_positive_int(getattr(settings, "WHITEBOOKS_GSTR2B_POLL_MAX_ATTEMPTS", 5), default=5), 1)
+    message = (
+        "WhiteBooks is still preparing GSTR-2B. Retry the fetch after a short interval; "
+        "the existing provider request will be reused."
+    )
+    max_attempts_reached = attempt_count >= max_attempts
+    if max_attempts_reached:
+        message = (
+            "WhiteBooks did not return a GSTR-2B file reference within the configured polling window. "
+            "Start a fresh provider fetch after confirming the provider status."
+        )
+    import_batch.status = ImportBatch.BatchStatus.FAILED if max_attempts_reached else ImportBatch.BatchStatus.QUEUED
+    import_batch.error_summary = (
+        {
+            "errors": 1,
+            "warnings": 0,
+            "by_field": {"provider": 1},
+            "message": message,
+        }
+        if max_attempts_reached
+        else {
+            "errors": 0,
+            "warnings": 1,
+            "by_field": {"provider": 1},
+            "message": message,
+        }
+    )
+    import_batch.source_metadata = {
+        **existing_metadata,
+        "provider": provider,
+        "fetch_status": "failed" if max_attempts_reached else "waiting_for_provider",
+        "auth_session_id": str(auth_session.id),
+        "txn": auth_session.txn,
+        "attempt_count": attempt_count,
+        "max_attempts": max_attempts,
+        "int_tran_id": str(int_tran_id),
+        "generate_response": client.sanitize_response_payload(generate_response),
+        "status_response": client.sanitize_response_payload(status_response),
+        "next_action": "start_fresh_fetch_gstr2b" if max_attempts_reached else "retry_fetch_gstr2b",
+        "retryable": not max_attempts_reached,
+    }
+    if max_attempts_reached:
+        import_batch.processed_at = timezone.now()
+    import_batch.updated_by = user
+    import_batch.save(update_fields=["status", "error_summary", "source_metadata", "processed_at", "updated_by", "updated_at"])
+    record_audit_log(
+        actor=user,
+        action="import.provider_fetch_failed" if max_attempts_reached else "import.provider_fetch_waiting",
+        entity=import_batch,
+        workspace_id=import_batch.workspace_id,
+        client_id=import_batch.client_id,
+        gstin_id=import_batch.gstin_id,
+        compliance_period_id=import_batch.compliance_period_id,
+        metadata={
+            "provider": provider,
+            "int_tran_id": str(int_tran_id),
+            "attempt_count": attempt_count,
+            "max_attempts": max_attempts,
+            "next_action": "start_fresh_fetch_gstr2b" if max_attempts_reached else "retry_fetch_gstr2b",
+        },
+    )
+    if not max_attempts_reached:
+        _schedule_provider_gstr2b_poll(import_batch=import_batch, actor=user, attempt_count=attempt_count)
+
+
+def _schedule_provider_gstr2b_poll(*, import_batch, actor, attempt_count):
+    if settings.CELERY_TASK_ALWAYS_EAGER:
+        return
+    from apps.imports.tasks import poll_provider_gstr2b_import_batch_task
+
+    countdown = _provider_gstr2b_poll_delay_seconds(attempt_count)
+    try:
+        async_result = poll_provider_gstr2b_import_batch_task.apply_async(
+            args=[str(import_batch.id), actor.id if actor else None],
+            countdown=countdown,
+            queue=settings.CELERY_IMPORTS_QUEUE,
+        )
+        import_batch.celery_task_id = async_result.id
+        import_batch.save(update_fields=["celery_task_id", "updated_at"])
+    except Exception:
+        if settings.CELERY_STRICT_PRODUCTION_ASYNC and not settings.DEBUG:
+            raise RuntimeError("GSTR-2B provider poll could not be queued. Imports worker is unavailable.")
+
+
+def _provider_gstr2b_poll_delay_seconds(attempt_count):
+    base_delay = max(_safe_positive_int(getattr(settings, "WHITEBOOKS_GSTR2B_POLL_BASE_DELAY_SECONDS", 60), default=60), 1)
+    max_delay = max(_safe_positive_int(getattr(settings, "WHITEBOOKS_GSTR2B_POLL_MAX_DELAY_SECONDS", 600), default=600), base_delay)
+    delay = base_delay * (2 ** max(_safe_positive_int(attempt_count, default=1) - 1, 0))
+    return min(delay, max_delay)
+
+
+def _safe_positive_int(value, *, default):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
 
 
 def _get_latest_provider_auth_session(*, workspace_id, client_id, gstin_id, provider):

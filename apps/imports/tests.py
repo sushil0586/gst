@@ -15,6 +15,7 @@ from apps.filings.models import ProviderAuthSession, ReturnFiling
 from apps.gst_transactions.models import GSTTransaction
 from apps.gstins.models import GSTIN
 from apps.imports.models import ImportBatch, ImportRowError, ImportTemplate
+from apps.imports.services.imports import poll_provider_gstr2b_import_batch
 from apps.imports.services.parsers.base import IMPORT_BULK_CREATE_BATCH_SIZE
 from apps.imports.services.parsers.sales import SalesImportParser
 from apps.integrations.whitebooks.client import WhiteBooksClient
@@ -909,8 +910,368 @@ def test_fetch_gstr2b_from_provider_creates_import_batch_and_transactions(import
     assert batch.source_metadata["normalized_rows"] == "[PURGED_AFTER_PROCESSING]"
     assert batch.total_rows == 1
     assert batch.valid_rows + batch.invalid_rows == 1
+    assert GSTTransaction.objects.filter(import_batch=batch).count() == 1
     assert AuditLog.objects.filter(action="import.provider_fetch_requested", entity_id=batch.id).exists()
     assert AuditLog.objects.filter(action="import.provider_fetch_completed", entity_id=batch.id).exists()
+
+
+@pytest.mark.django_db
+def test_fetch_gstr2b_waits_when_provider_file_is_not_ready(import_authenticated_client, import_context, import_user, monkeypatch):
+    ProviderAuthSession.objects.create(
+        workspace=import_context["workspace"],
+        client=import_context["client"],
+        gstin=import_context["gstin"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        email="platform@example.com",
+        txn="txn-2b-waiting",
+        status=ProviderAuthSession.SessionStatus.SESSION_ACTIVE,
+        response_contract_confirmed=True,
+        created_by=import_user,
+        updated_by=import_user,
+        initiated_by=import_user,
+        verified_by=import_user,
+    )
+
+    monkeypatch.setattr(
+        WhiteBooksClient,
+        "generate_gstr2b",
+        lambda self, **kwargs: {"status_cd": "1", "data": {"int_tran_id": "int-2b-waiting"}},
+    )
+    monkeypatch.setattr(
+        WhiteBooksClient,
+        "get_gstr2b_generate_status",
+        lambda self, **kwargs: {"status_cd": "1", "data": {"status": "IN_PROGRESS"}},
+    )
+
+    def fail_fetch_all(self, **kwargs):
+        raise AssertionError("fetch_gstr2b_all should not be called before WhiteBooks returns filenum")
+
+    monkeypatch.setattr(WhiteBooksClient, "fetch_gstr2b_all", fail_fetch_all)
+
+    response = import_authenticated_client.post(
+        "/api/v1/imports/batches/fetch-gstr2b/",
+        provider_fetch_payload(import_context),
+        format="json",
+    )
+
+    assert response.status_code == 200
+    batch = ImportBatch.objects.get(pk=response.data["data"]["id"])
+    assert batch.status == ImportBatch.BatchStatus.QUEUED
+    assert batch.source_metadata["fetch_status"] == "waiting_for_provider"
+    assert batch.source_metadata["int_tran_id"] == "int-2b-waiting"
+    assert batch.source_metadata["next_action"] == "retry_fetch_gstr2b"
+    assert batch.error_summary["errors"] == 0
+    assert batch.error_summary["warnings"] == 1
+    assert GSTTransaction.objects.filter(import_batch=batch).count() == 0
+    assert AuditLog.objects.filter(action="import.provider_fetch_waiting", entity_id=batch.id).exists()
+
+
+@pytest.mark.django_db
+def test_fetch_gstr2b_retry_reuses_waiting_provider_request(import_authenticated_client, import_context, import_user, monkeypatch):
+    ProviderAuthSession.objects.create(
+        workspace=import_context["workspace"],
+        client=import_context["client"],
+        gstin=import_context["gstin"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        email="platform@example.com",
+        txn="txn-2b-retry",
+        status=ProviderAuthSession.SessionStatus.SESSION_ACTIVE,
+        response_contract_confirmed=True,
+        created_by=import_user,
+        updated_by=import_user,
+        initiated_by=import_user,
+        verified_by=import_user,
+    )
+
+    calls = {"generate": 0, "status": 0}
+
+    def generate_gstr2b(self, **kwargs):
+        calls["generate"] += 1
+        return {"status_cd": "1", "data": {"int_tran_id": "int-2b-retry"}}
+
+    def get_status(self, **kwargs):
+        calls["status"] += 1
+        if calls["status"] == 1:
+            return {"status_cd": "1", "data": {"status": "IN_PROGRESS"}}
+        return {"status_cd": "1", "data": {"filenum": "file-2b-retry"}}
+
+    monkeypatch.setattr(WhiteBooksClient, "generate_gstr2b", generate_gstr2b)
+    monkeypatch.setattr(WhiteBooksClient, "get_gstr2b_generate_status", get_status)
+    monkeypatch.setattr(
+        WhiteBooksClient,
+        "fetch_gstr2b_all",
+        lambda self, **kwargs: {
+            "status_cd": "1",
+            "data": {
+                "b2b": [
+                    {
+                        "ctin": "29ABCDE1234F1Z5",
+                        "cname": "Vendor Retry",
+                        "inv": [
+                                {
+                                    "inum": "2B-RETRY-001",
+                                    "idt": "21/04/2026",
+                                    "val": "2950.00",
+                                    "pos": "29",
+                                    "rchrg": "N",
+                                    "itms": [
+                                        {
+                                            "num": 1,
+                                            "itm_det": {
+                                                "txval": "2500.00",
+                                                "iamt": "450.00",
+                                                "camt": "0.00",
+                                                "samt": "0.00",
+                                                "csamt": "0.00",
+                                            },
+                                        }
+                                    ],
+                            }
+                        ],
+                    }
+                ]
+            },
+        },
+    )
+
+    first_response = import_authenticated_client.post(
+        "/api/v1/imports/batches/fetch-gstr2b/",
+        provider_fetch_payload(import_context),
+        format="json",
+    )
+    second_response = import_authenticated_client.post(
+        "/api/v1/imports/batches/fetch-gstr2b/",
+        provider_fetch_payload(import_context),
+        format="json",
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    first_batch_id = first_response.data["data"]["id"]
+    second_batch_id = second_response.data["data"]["id"]
+    assert second_batch_id == first_batch_id
+    assert calls == {"generate": 1, "status": 2}
+    assert ImportBatch.objects.filter(
+        workspace=import_context["workspace"],
+        client=import_context["client"],
+        gstin=import_context["gstin"],
+        compliance_period=import_context["compliance_period"],
+        import_type=ImportBatch.ImportType.GSTR_2B,
+        source_type=ImportBatch.SourceType.PROVIDER,
+    ).count() == 1
+
+    batch = ImportBatch.objects.get(pk=second_batch_id)
+    assert batch.status == ImportBatch.BatchStatus.PROCESSED
+    assert batch.source_metadata["fetch_status"] == "fetched"
+    assert batch.source_metadata["attempt_count"] == 2
+    assert batch.source_metadata["normalized_rows"] == "[PURGED_AFTER_PROCESSING]"
+    assert GSTTransaction.objects.filter(import_batch=batch).count() == 1
+    assert AuditLog.objects.filter(action="import.provider_fetch_retry_requested", entity_id=batch.id).exists()
+    assert AuditLog.objects.filter(action="import.provider_fetch_completed", entity_id=batch.id).exists()
+
+
+@pytest.mark.django_db
+def test_fetch_gstr2b_waiting_schedules_background_poll(import_authenticated_client, import_context, import_user, settings, monkeypatch):
+    settings.CELERY_TASK_ALWAYS_EAGER = False
+    settings.CELERY_STRICT_PRODUCTION_ASYNC = False
+    settings.WHITEBOOKS_GSTR2B_POLL_BASE_DELAY_SECONDS = 30
+
+    ProviderAuthSession.objects.create(
+        workspace=import_context["workspace"],
+        client=import_context["client"],
+        gstin=import_context["gstin"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        email="platform@example.com",
+        txn="txn-2b-scheduled",
+        status=ProviderAuthSession.SessionStatus.SESSION_ACTIVE,
+        response_contract_confirmed=True,
+        created_by=import_user,
+        updated_by=import_user,
+        initiated_by=import_user,
+        verified_by=import_user,
+    )
+
+    monkeypatch.setattr(
+        WhiteBooksClient,
+        "generate_gstr2b",
+        lambda self, **kwargs: {"status_cd": "1", "data": {"int_tran_id": "int-2b-scheduled"}},
+    )
+    monkeypatch.setattr(
+        WhiteBooksClient,
+        "get_gstr2b_generate_status",
+        lambda self, **kwargs: {"status_cd": "1", "data": {"status": "IN_PROGRESS"}},
+    )
+
+    scheduled = {}
+
+    class DummyAsyncResult:
+        id = "poll-task-001"
+
+    def fake_apply_async(*, args, countdown, queue):
+        scheduled["args"] = args
+        scheduled["countdown"] = countdown
+        scheduled["queue"] = queue
+        return DummyAsyncResult()
+
+    monkeypatch.setattr("apps.imports.tasks.poll_provider_gstr2b_import_batch_task.apply_async", fake_apply_async)
+
+    response = import_authenticated_client.post(
+        "/api/v1/imports/batches/fetch-gstr2b/",
+        provider_fetch_payload(import_context),
+        format="json",
+    )
+
+    assert response.status_code == 200
+    batch = ImportBatch.objects.get(pk=response.data["data"]["id"])
+    assert batch.status == ImportBatch.BatchStatus.QUEUED
+    assert batch.celery_task_id == "poll-task-001"
+    assert scheduled == {
+        "args": [str(batch.id), import_user.id],
+        "countdown": 30,
+        "queue": settings.CELERY_IMPORTS_QUEUE,
+    }
+
+
+@pytest.mark.django_db
+def test_poll_provider_gstr2b_import_batch_completes_waiting_batch(import_context, import_user, monkeypatch):
+    ProviderAuthSession.objects.create(
+        workspace=import_context["workspace"],
+        client=import_context["client"],
+        gstin=import_context["gstin"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        email="platform@example.com",
+        txn="txn-2b-poll",
+        status=ProviderAuthSession.SessionStatus.SESSION_ACTIVE,
+        response_contract_confirmed=True,
+        created_by=import_user,
+        updated_by=import_user,
+        initiated_by=import_user,
+        verified_by=import_user,
+    )
+    batch = ImportBatch.objects.create(
+        workspace=import_context["workspace"],
+        client=import_context["client"],
+        gstin=import_context["gstin"],
+        compliance_period=import_context["compliance_period"],
+        import_type=ImportBatch.ImportType.GSTR_2B,
+        source_type=ImportBatch.SourceType.PROVIDER,
+        file_name="poll-gstr2b.provider.json",
+        status=ImportBatch.BatchStatus.QUEUED,
+        source_metadata={
+            "provider": "whitebooks",
+            "fetch_status": "waiting_for_provider",
+            "auth_session_id": "",
+            "txn": "txn-2b-poll",
+            "attempt_count": 1,
+            "int_tran_id": "int-2b-poll",
+            "generate_response": {"status_cd": "1", "data": {"int_tran_id": "int-2b-poll"}},
+        },
+        created_by=import_user,
+        updated_by=import_user,
+    )
+
+    def fail_generate(self, **kwargs):
+        raise AssertionError("poll should reuse the saved int_tran_id")
+
+    monkeypatch.setattr(WhiteBooksClient, "generate_gstr2b", fail_generate)
+    monkeypatch.setattr(
+        WhiteBooksClient,
+        "get_gstr2b_generate_status",
+        lambda self, **kwargs: {"status_cd": "1", "data": {"filenum": "file-2b-poll"}},
+    )
+    monkeypatch.setattr(
+        WhiteBooksClient,
+        "fetch_gstr2b_all",
+        lambda self, **kwargs: {
+            "status_cd": "1",
+            "data": {
+                "b2b": [
+                    {
+                        "ctin": "29ABCDE1234F1Z5",
+                        "cname": "Vendor Poll",
+                        "inv": [
+                            {
+                                "inum": "2B-POLL-001",
+                                "idt": "22/04/2026",
+                                "val": "2950.00",
+                                "pos": "29",
+                                "itms": [
+                                    {
+                                        "itm_det": {
+                                            "txval": "2500.00",
+                                            "iamt": "450.00",
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            },
+        },
+    )
+
+    result = poll_provider_gstr2b_import_batch(import_batch_id=batch.id, actor_id=import_user.id)
+
+    assert result["status"] == "polled"
+    assert result["fetch_status"] == "fetched"
+    batch.refresh_from_db()
+    assert batch.status == ImportBatch.BatchStatus.PROCESSED
+    assert batch.source_metadata["attempt_count"] == 2
+    assert GSTTransaction.objects.filter(import_batch=batch).count() == 1
+
+
+@pytest.mark.django_db
+def test_fetch_gstr2b_marks_failed_after_poll_attempt_limit(import_authenticated_client, import_context, import_user, settings, monkeypatch):
+    settings.WHITEBOOKS_GSTR2B_POLL_MAX_ATTEMPTS = 2
+
+    ProviderAuthSession.objects.create(
+        workspace=import_context["workspace"],
+        client=import_context["client"],
+        gstin=import_context["gstin"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        email="platform@example.com",
+        txn="txn-2b-max",
+        status=ProviderAuthSession.SessionStatus.SESSION_ACTIVE,
+        response_contract_confirmed=True,
+        created_by=import_user,
+        updated_by=import_user,
+        initiated_by=import_user,
+        verified_by=import_user,
+    )
+
+    monkeypatch.setattr(
+        WhiteBooksClient,
+        "generate_gstr2b",
+        lambda self, **kwargs: {"status_cd": "1", "data": {"int_tran_id": "int-2b-max"}},
+    )
+    monkeypatch.setattr(
+        WhiteBooksClient,
+        "get_gstr2b_generate_status",
+        lambda self, **kwargs: {"status_cd": "1", "data": {"status": "IN_PROGRESS"}},
+    )
+
+    first_response = import_authenticated_client.post(
+        "/api/v1/imports/batches/fetch-gstr2b/",
+        provider_fetch_payload(import_context),
+        format="json",
+    )
+    second_response = import_authenticated_client.post(
+        "/api/v1/imports/batches/fetch-gstr2b/",
+        provider_fetch_payload(import_context),
+        format="json",
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert second_response.data["data"]["id"] == first_response.data["data"]["id"]
+    batch = ImportBatch.objects.get(pk=second_response.data["data"]["id"])
+    assert batch.status == ImportBatch.BatchStatus.FAILED
+    assert batch.source_metadata["fetch_status"] == "failed"
+    assert batch.source_metadata["attempt_count"] == 2
+    assert batch.source_metadata["retryable"] is False
+    assert batch.error_summary["errors"] == 1
+    assert "configured polling window" in batch.error_summary["message"]
 
 
 @pytest.mark.django_db

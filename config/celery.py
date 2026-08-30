@@ -18,6 +18,7 @@ app.conf.task_time_limit = settings.CELERY_TASK_TIME_LIMIT
 app.conf.task_soft_time_limit = settings.CELERY_TASK_SOFT_TIME_LIMIT
 app.conf.task_routes = {
     "apps.imports.process_import_batch_task": {"queue": settings.CELERY_IMPORTS_QUEUE},
+    "apps.imports.poll_provider_gstr2b_import_batch_task": {"queue": settings.CELERY_IMPORTS_QUEUE},
     "apps.reconciliation.trigger_reconciliation_run": {"queue": settings.CELERY_RECONCILIATION_QUEUE},
     "apps.filings.process_return_filing": {"queue": settings.CELERY_FILINGS_QUEUE},
     "apps.filings.sync_return_filing_status": {"queue": settings.CELERY_FILINGS_QUEUE},

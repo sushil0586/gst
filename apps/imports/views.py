@@ -115,7 +115,14 @@ class ImportBatchViewSet(ListModelMixin, RetrieveModelMixin, CreateModelMixin, G
         serializer.is_valid(raise_exception=True)
         batch = fetch_gstr2b_import_batch(validated_data=serializer.validated_data, user=request.user)
         output = ImportBatchSerializer(batch, context=self.get_serializer_context())
-        return Response(api_response(data=output.data, message="GSTR-2B fetched from provider"))
+        source_metadata = batch.source_metadata if isinstance(batch.source_metadata, dict) else {}
+        if source_metadata.get("fetch_status") == "waiting_for_provider":
+            message = "GSTR-2B fetch is waiting for provider file preparation"
+        elif source_metadata.get("fetch_status") == "failed":
+            message = "GSTR-2B provider fetch stopped before the file was ready"
+        else:
+            message = "GSTR-2B fetched from provider"
+        return Response(api_response(data=output.data, message=message))
 
     @action(detail=True, methods=["get"], url_path="errors")
     def errors(self, request, pk=None):

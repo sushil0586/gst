@@ -556,6 +556,15 @@ export default function ReconciliationPage() {
       compliance_period: selectedPeriodId,
       provider: "whitebooks",
     });
+    const fetchStatus = String(batch.source_metadata?.fetch_status ?? "");
+    if (fetchStatus === "waiting_for_provider") {
+      toast.success("WhiteBooks is still preparing GSTR-2B. Retry the fetch shortly; the same provider request will be reused.");
+      return true;
+    }
+    if (fetchStatus === "failed") {
+      toast.error(batch.error_summary?.message || "WhiteBooks did not return the GSTR-2B file in time. Start a fresh fetch after checking provider status.");
+      return false;
+    }
     toast.success(
       batch.transaction_count > 0
         ? `Fetched ${batch.transaction_count} GSTR-2B transaction(s) from the connected filing channel.`
