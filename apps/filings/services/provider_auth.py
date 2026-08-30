@@ -339,6 +339,103 @@ def refresh_provider_auth_session(*, auth_session, txn, user):
         raise
 
 
+def logout_provider_auth_session(*, auth_session, txn="", user):
+    from apps.filings.providers.registry import get_filing_provider
+
+    resolved_txn = txn or auth_session.txn
+    if not resolved_txn:
+        raise serializers.ValidationError({"txn": "A provider txn value is required to logout the auth session."})
+
+    provider = get_filing_provider(auth_session.provider)
+    logout_auth_session = getattr(provider, "logout_auth_session", None)
+    if not callable(logout_auth_session):
+        raise serializers.ValidationError({"provider": "This provider does not support auth logout."})
+
+    gstin = getattr(auth_session, "gstin", None)
+    state_code = _resolve_state_code(gstin)
+    gst_username = _resolve_gst_username(gstin)
+    try:
+        payload = _invoke_provider_auth_callable(
+            logout_auth_session,
+            email=auth_session.email,
+            txn=resolved_txn,
+            state_code=state_code,
+            gst_username=gst_username,
+        )
+        existing_session_metadata = auth_session.session_metadata if isinstance(auth_session.session_metadata, dict) else {}
+        auth_session.txn = resolved_txn
+        auth_session.auth_token_payload = {}
+        auth_session.session_metadata = _sanitize_provider_payload(
+            {
+                **existing_session_metadata,
+                "logout_confirmed": True,
+                "logged_out_at": timezone.now().isoformat(),
+                "logout_response": payload,
+                "state_code": state_code,
+                "gst_username": gst_username,
+            }
+        )
+        auth_session.response_contract_confirmed = False
+        auth_session.status = ProviderAuthSession.SessionStatus.CREATED
+        auth_session.error_summary = {}
+        auth_session.updated_by = user
+        auth_session.save(
+            update_fields=[
+                "txn",
+                "auth_token_payload",
+                "session_metadata",
+                "response_contract_confirmed",
+                "status",
+                "error_summary",
+                "updated_by",
+                "updated_at",
+            ]
+        )
+        record_audit_log(
+            actor=user,
+            action=_provider_auth_action(auth_session.provider, "logged_out"),
+            entity=auth_session,
+            workspace_id=auth_session.workspace_id,
+            client_id=auth_session.client_id,
+            gstin_id=auth_session.gstin_id,
+            metadata={
+                "email": auth_session.email,
+                "txn": resolved_txn,
+                "state_code": state_code,
+                "gst_username": gst_username,
+            },
+        )
+        log_security_event(
+            event="provider_auth.logged_out",
+            severity="info",
+            details={
+                "provider": auth_session.provider,
+                "workspace_id": str(auth_session.workspace_id),
+                "client_id": str(auth_session.client_id),
+                "gstin_id": str(auth_session.gstin_id or ""),
+            },
+        )
+        return auth_session
+    except FilingProviderSessionLimitError as exc:
+        _mark_auth_session_failed(
+            auth_session=auth_session,
+            actor=user,
+            error_code=f"{_provider_error_prefix(auth_session.provider)}_session_limit",
+            error_message=str(exc),
+            audit_action=_provider_auth_action(auth_session.provider, "failed"),
+        )
+        raise
+    except FilingProviderAuthenticationError as exc:
+        _mark_auth_session_failed(
+            auth_session=auth_session,
+            actor=user,
+            error_code=f"{_provider_error_prefix(auth_session.provider)}_authentication_error",
+            error_message=str(exc),
+            audit_action=_provider_auth_action(auth_session.provider, "failed"),
+        )
+        raise
+
+
 def _provider_auth_action(provider_code: str, action: str) -> str:
     return f"{_provider_error_prefix(provider_code)}_auth.{action}"
 

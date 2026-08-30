@@ -42,7 +42,7 @@ from apps.filings.services.filings import (
     retry_return_filing,
     sync_return_filing_status,
 )
-from apps.filings.services.provider_auth import request_provider_otp_session, verify_provider_otp_session
+from apps.filings.services.provider_auth import logout_provider_auth_session, request_provider_otp_session, verify_provider_otp_session
 from apps.filings.services.provider_auth import refresh_provider_auth_session
 from apps.workspaces.models import Workspace
 
@@ -285,12 +285,12 @@ class ProviderAuthSessionViewSet(ListModelMixin, RetrieveModelMixin, GenericView
             return ProviderOTPRequestSerializer
         if self.action == "verify_otp":
             return ProviderOTPVerifySerializer
-        if self.action == "refresh_token":
+        if self.action in {"refresh_token", "logout"}:
             return ProviderAuthRefreshSerializer
         return ProviderAuthSessionSerializer
 
     def get_permission_code(self, request):
-        if self.action in {"request_otp", "verify_otp", "refresh_token"}:
+        if self.action in {"request_otp", "verify_otp", "refresh_token", "logout"}:
             return "file_return"
         return "view_client"
 
@@ -366,6 +366,18 @@ class ProviderAuthSessionViewSet(ListModelMixin, RetrieveModelMixin, GenericView
         )
         output = ProviderAuthSessionSerializer(auth_session, context=self.get_serializer_context())
         return Response(api_response(data=output.data, message="Provider auth session refreshed"))
+
+    @action(detail=True, methods=["post"], url_path="logout")
+    def logout(self, request, pk=None):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        auth_session = logout_provider_auth_session(
+            auth_session=self.get_object(),
+            txn=serializer.validated_data.get("txn", ""),
+            user=request.user,
+        )
+        output = ProviderAuthSessionSerializer(auth_session, context=self.get_serializer_context())
+        return Response(api_response(data=output.data, message="Provider auth session logged out"))
 
 
 class WhiteBooksAuthSessionViewSet(ProviderAuthSessionViewSet):

@@ -113,6 +113,26 @@ class WhiteBooksClient:
         )
         return self._normalize_auth_payload(payload)
 
+    def logout(
+        self,
+        *,
+        email: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        if not email:
+            raise WhiteBooksAuthenticationError("WhiteBooks contact email is required for logout.")
+        if not txn:
+            raise WhiteBooksAuthenticationError("WhiteBooks txn header is required for logout.")
+        payload = self._request_json(
+            "/authentication/logout",
+            method="GET",
+            query_params={"email": email},
+            headers=self._auth_headers({"txn": txn}, state_code=state_code, gst_username=gst_username),
+        )
+        return self._normalize_auth_payload(payload)
+
     def search_taxpayer(self, *, gstin: str, email: str | None = None) -> dict:
         resolved_email = email or self.contact_email
         if not resolved_email:
@@ -833,16 +853,32 @@ class WhiteBooksClient:
         request = Request(endpoint, method=method, headers=request_headers, data=data)
         try:
             with urlopen(request, timeout=self.timeout_seconds, context=self._build_ssl_context()) as response:
-                return self._decode_json_response(response.read(), endpoint=endpoint)
+                return self._decode_json_response(
+                    response.read(),
+                    endpoint=endpoint,
+                    response_headers=self._response_headers_as_dict(response),
+                )
         except HTTPError as exc:
             try:
-                return self._decode_json_response(exc.read(), endpoint=endpoint, status_code=exc.code)
+                return self._decode_json_response(
+                    exc.read(),
+                    endpoint=endpoint,
+                    status_code=exc.code,
+                    response_headers=self._response_headers_as_dict(exc),
+                )
             except WhiteBooksTemporaryError as parse_exc:  # pragma: no cover - defensive fallback
                 raise WhiteBooksTemporaryError(f"WhiteBooks HTTP error {exc.code}. {parse_exc}") from parse_exc
         except (URLError, TimeoutError, OSError) as exc:
             raise WhiteBooksTemporaryError("WhiteBooks request could not be completed due to a temporary transport error.") from exc
 
-    def _decode_json_response(self, raw_body: bytes, *, endpoint: str, status_code: int | None = None) -> dict:
+    def _decode_json_response(
+        self,
+        raw_body: bytes,
+        *,
+        endpoint: str,
+        status_code: int | None = None,
+        response_headers: dict | None = None,
+    ) -> dict:
         decoded = raw_body.decode("utf-8", errors="replace").strip()
         if not decoded:
             suffix = f" from {endpoint}" if endpoint else ""
@@ -850,7 +886,7 @@ class WhiteBooksClient:
                 suffix = f" for HTTP {status_code}{suffix}"
             raise WhiteBooksTemporaryError(f"WhiteBooks returned an empty response{suffix}.")
         try:
-            return json.loads(decoded)
+            payload = json.loads(decoded)
         except JSONDecodeError as exc:
             preview = decoded[:160].replace("\n", " ")
             suffix = f" from {endpoint}" if endpoint else ""
@@ -859,6 +895,25 @@ class WhiteBooksClient:
             raise WhiteBooksTemporaryError(
                 f"WhiteBooks returned a non-JSON response{suffix}. Response preview: {preview}"
             ) from exc
+        self._merge_response_headers(payload, response_headers)
+        return payload
+
+    def _merge_response_headers(self, payload: dict, response_headers: dict | None) -> None:
+        if not isinstance(payload, dict) or not response_headers:
+            return
+        header_lookup = {str(key).lower(): value for key, value in response_headers.items()}
+        txn = header_lookup.get("txn")
+        if not txn:
+            return
+        payload_header = payload.get("header") if isinstance(payload.get("header"), dict) else {}
+        payload_header.setdefault("txn", txn)
+        payload["header"] = payload_header
+
+    def _response_headers_as_dict(self, response) -> dict:
+        headers = getattr(response, "headers", None)
+        if not headers:
+            return {}
+        return dict(headers.items())
 
     def _auth_headers(
         self,
@@ -908,8 +963,8 @@ class WhiteBooksClient:
             return payload
 
         error = payload.get("error") or {}
-        error_code = error.get("error_cd", "")
-        error_message = error.get("message", "WhiteBooks authentication failed.")
+        error_code = error.get("error_cd") or error.get("errorCode") or ""
+        error_message = error.get("message") or error.get("errorMessage") or payload.get("status_desc") or "WhiteBooks authentication failed."
         if error_code == "AUTH403":
             raise WhiteBooksSessionLimitError(error_message)
         raise WhiteBooksAuthenticationError(f"{error_code}: {error_message}" if error_code else error_message)
@@ -949,9 +1004,10 @@ class WhiteBooksClient:
             return payload
 
         error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
-        error_code = error.get("error_cd", "")
+        error_code = error.get("error_cd") or error.get("errorCode") or ""
         error_message = (
             error.get("message")
+            or error.get("errorMessage")
             or payload.get("status_desc")
             or payload.get("message")
             or default_message

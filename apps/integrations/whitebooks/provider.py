@@ -103,6 +103,21 @@ class WhiteBooksProvider(FilingProvider):
             gst_username=gst_username,
         )
 
+    def logout_auth_session(
+        self,
+        *,
+        email: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        return self.client.logout(
+            email=email,
+            txn=txn,
+            state_code=state_code,
+            gst_username=gst_username,
+        )
+
     def get_capabilities(self, filing=None, payload=None) -> ProviderCapabilitySet:
         operations = {}
         readiness = {}

@@ -6,6 +6,32 @@ Purpose:
 
 Use this checklist to confirm the remaining WhiteBooks contract items before broad public launch or before enabling automated final filing widely.
 
+## Sandbox Evidence On 2026-08-30
+
+Stage was configured against WhiteBooks sandbox credentials and tested with the sandbox OTP `575757`.
+
+Observed:
+
+- `GET /public/search` succeeded for sandbox GSTIN lookup.
+- `GET /authentication/otprequest` for `33AAGCB1286Q1ZB` / `TN_NT2.152383` returned a `txn` in the HTTP response header.
+- `GET /authentication/authtoken` succeeded with OTP `575757` when using the response-header `txn`.
+- `GET /authentication/logout` succeeded when called with the authenticated `txn`.
+- `PUT /gstr2b/gen2b` returned provider/upstream error `WB_ERR_9991` across tested periods `012023`, `042024`, `072017`, and `082026`.
+- `27AAGCB1286Q1Z4`, `33AAGCB1286Q2ZA`, and `27AAGCB1286Q2Z3` returned `AUTH002` API-access or GSP/ASP-allowance errors during OTP request.
+
+Implementation notes:
+
+- The app must capture `txn` from WhiteBooks HTTP response headers, not only JSON body fields.
+- WhiteBooks sandbox errors may use `error.errorCode` and `error.errorMessage`, not only `error.error_cd` and `error.message`.
+- For stored `YYYY-MM` periods, WhiteBooks `ret_period` / `rtnprd` should be sent as `MMYYYY`.
+
+Follow-up questions from this evidence:
+
+- Should `gen2b` work in sandbox for these four accounts, or is GSTR-2B unavailable in the sandbox upstream?
+- Which exact GSTIN/period should WhiteBooks recommend for a successful sandbox GSTR-2B fetch?
+- Why do three enabled sandbox test accounts return `AUTH002` during OTP request?
+- Is `txn` always returned in the HTTP response header for OTP/auth/logout flows?
+
 ## 1. Final Filing Flow
 
 Please confirm which final filing flow our account should use for each return type.
@@ -33,7 +59,7 @@ Current app behavior:
 - requests OTP with `GET /authentication/otprequest`
 - verifies OTP with `GET /authentication/authtoken`
 - can refresh with `GET /authentication/refreshtoken`
-- does not call `GET /authentication/logout`
+- supports `GET /authentication/logout`
 
 Questions:
 

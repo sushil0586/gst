@@ -24,14 +24,20 @@ from apps.filings.models import (
 )
 from apps.filings.providers.base import FilingProvider, ProviderCapabilitySet
 from apps.filings.providers.registry import get_filing_provider
-from apps.filings.services.provider_auth import request_provider_otp_session, verify_provider_otp_session, refresh_provider_auth_session
+from apps.filings.services.provider_auth import (
+    logout_provider_auth_session,
+    refresh_provider_auth_session,
+    request_provider_otp_session,
+    verify_provider_otp_session,
+)
 from apps.filings.services.auth_session_freshness import (
     get_provider_auth_session_freshness,
     is_provider_auth_session_live_enabled,
 )
 from apps.filings.services.filings import process_return_filing
 from apps.gstins.models import GSTIN
-from apps.integrations.whitebooks.exceptions import WhiteBooksSessionLimitError, WhiteBooksSubmissionError
+from apps.integrations.whitebooks.client import WhiteBooksClient
+from apps.integrations.whitebooks.exceptions import WhiteBooksAuthenticationError, WhiteBooksSessionLimitError, WhiteBooksSubmissionError
 from apps.integrations.whitebooks.mappers import map_return_filing_to_whitebooks_payload
 from apps.integrations.whitebooks.provider import WhiteBooksProvider
 from apps.integrations.whitebooks.types import WhiteBooksSession
@@ -1371,6 +1377,123 @@ def test_refresh_whitebooks_auth_session_api(monkeypatch, filings_authenticated_
     auth_session.refresh_from_db()
     assert auth_session.session_metadata["refresh_confirmed"] is True
     assert response.data["message"] == "Provider auth session refreshed"
+
+
+@pytest.mark.django_db
+def test_logout_provider_auth_session_clears_live_session(monkeypatch, filings_context):
+    auth_session = WhiteBooksAuthSession.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        email="ops@example.com",
+        txn="txn-logout-001",
+        status=WhiteBooksAuthSession.SessionStatus.SESSION_ACTIVE,
+        response_contract_confirmed=True,
+        auth_token_payload={"status_cd": "1", "header": {"txn": "txn-logout-001"}},
+        session_metadata={"txn": "txn-logout-001", "response_contract_confirmed": True},
+        initiated_by=filings_context["user"],
+        verified_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+    captured = {}
+
+    def fake_logout(self, *, email, txn, state_code=None, gst_username=None):
+        captured["email"] = email
+        captured["txn"] = txn
+        captured["state_code"] = state_code
+        captured["gst_username"] = gst_username
+        return {"status_cd": "1", "status_desc": "logout ok", "header": {"txn": txn}}
+
+    monkeypatch.setattr(WhiteBooksProvider, "logout_auth_session", fake_logout)
+
+    logged_out = logout_provider_auth_session(auth_session=auth_session, user=filings_context["user"])
+
+    assert logged_out.status == WhiteBooksAuthSession.SessionStatus.CREATED
+    assert logged_out.response_contract_confirmed is False
+    assert logged_out.session_metadata["logout_confirmed"] is True
+    assert logged_out.session_metadata["logout_response"]["status_desc"] == "logout ok"
+    assert captured["txn"] == "txn-logout-001"
+    assert AuditLog.objects.filter(action="whitebooks_auth.logged_out", entity_id=auth_session.id).exists()
+    assert is_provider_auth_session_live_enabled(auth_session=logged_out) is False
+
+
+@pytest.mark.django_db
+def test_logout_whitebooks_auth_session_api(monkeypatch, filings_authenticated_client, filings_context):
+    auth_session = WhiteBooksAuthSession.objects.create(
+        workspace=filings_context["workspace"],
+        client=filings_context["client"],
+        gstin=filings_context["gstin"],
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        email="ops@example.com",
+        txn="txn-logout-api-001",
+        status=WhiteBooksAuthSession.SessionStatus.SESSION_ACTIVE,
+        response_contract_confirmed=True,
+        initiated_by=filings_context["user"],
+        verified_by=filings_context["user"],
+        created_by=filings_context["user"],
+        updated_by=filings_context["user"],
+    )
+
+    def fake_logout(self, *, email, txn, state_code=None, gst_username=None):
+        return {"status_cd": "1", "status_desc": "logout ok", "header": {"txn": txn}}
+
+    monkeypatch.setattr(WhiteBooksProvider, "logout_auth_session", fake_logout)
+
+    response = filings_authenticated_client.post(
+        f"/api/v1/whitebooks-auth-sessions/{auth_session.id}/logout/",
+        {},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    auth_session.refresh_from_db()
+    assert auth_session.session_metadata["logout_confirmed"] is True
+    assert auth_session.response_contract_confirmed is False
+    assert response.data["message"] == "Provider auth session logged out"
+
+
+def test_whitebooks_auth_normalizer_maps_camel_case_session_limit():
+    client = WhiteBooksClient()
+
+    with pytest.raises(WhiteBooksSessionLimitError, match="Maximum session allowed"):
+        client._normalize_auth_payload(
+            {
+                "status_cd": "0",
+                "error": {
+                    "errorCode": "AUTH403",
+                    "errorMessage": "Maximum session allowed for user with this GSP account exceeded.",
+                },
+            }
+        )
+
+
+def test_whitebooks_auth_normalizer_reports_camel_case_auth_error():
+    client = WhiteBooksClient()
+
+    with pytest.raises(WhiteBooksAuthenticationError, match="AUTH002: GSTIN/UIN"):
+        client._normalize_auth_payload(
+            {
+                "status_cd": "0",
+                "error": {
+                    "errorCode": "AUTH002",
+                    "errorMessage": "GSTIN/UIN has disabled API access.",
+                },
+            }
+        )
+
+
+def test_whitebooks_json_decoder_preserves_response_txn_header():
+    client = WhiteBooksClient()
+
+    payload = client._decode_json_response(
+        b'{"status_cd":"1","status_desc":"user name exists"}',
+        endpoint="https://apisandbox.whitebooks.in/authentication/otprequest",
+        response_headers={"txn": "txn-from-response-header"},
+    )
+
+    assert payload["header"]["txn"] == "txn-from-response-header"
 
 
 @pytest.mark.django_db

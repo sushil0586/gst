@@ -132,6 +132,8 @@ Completed on 2026-08-30:
 - reconciliation UI messaging distinguishes waiting from fetched
 - waiting provider fetches schedule an automatic Celery poll on the imports queue
 - polling uses configurable exponential backoff and stops after a configured attempt limit
+- WhiteBooks `txn` is captured from HTTP response headers for OTP/auth workflows
+- app periods stored as `YYYY-MM` are sent to WhiteBooks as `MMYYYY`
 
 ### IMS
 
@@ -297,10 +299,16 @@ Why defer:
 
 - `GET /authentication/logout`
 
-Why defer:
+Current status:
 
 - refresh token is already implemented
-- logout is useful only if WhiteBooks confirms explicit logout is required to avoid session-limit exhaustion
+- logout client/service/API support exists
+- logout clears the local provider session from live reuse and stores sanitized logout evidence
+
+Current need:
+
+- confirm when logout should be called automatically after fetch/filing operations
+- confirm whether logout can clear a session when the app does not have the original `txn`
 
 ### GSTR-1 detailed readback endpoints
 

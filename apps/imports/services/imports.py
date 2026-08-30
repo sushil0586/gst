@@ -903,7 +903,11 @@ def _build_provider_import_filename(gstin_value, period):
 
 
 def _to_whitebooks_period(period):
-    return str(period or "").replace("-", "")[-6:]
+    value = str(period or "").strip()
+    if len(value) == 7 and value[4] == "-":
+        year, month = value.split("-", 1)
+        return f"{month}{year}"
+    return value.replace("-", "")[-6:]
 
 
 def _extract_first_non_empty(payload, *keys):

@@ -833,6 +833,7 @@ def test_multiline_invoice_rows_aggregate_into_single_transaction(import_authent
 
 @pytest.mark.django_db
 def test_fetch_gstr2b_from_provider_creates_import_batch_and_transactions(import_authenticated_client, import_context, import_user, monkeypatch):
+    provider_call_args = {}
     ProviderAuthSession.objects.create(
         workspace=import_context["workspace"],
         client=import_context["client"],
@@ -848,20 +849,17 @@ def test_fetch_gstr2b_from_provider_creates_import_batch_and_transactions(import
         verified_by=import_user,
     )
 
-    monkeypatch.setattr(
-        WhiteBooksClient,
-        "generate_gstr2b",
-        lambda self, **kwargs: {"status_cd": "1", "data": {"int_tran_id": "int-2b-001"}},
-    )
-    monkeypatch.setattr(
-        WhiteBooksClient,
-        "get_gstr2b_generate_status",
-        lambda self, **kwargs: {"status_cd": "1", "data": {"filenum": "file-2b-001"}},
-    )
-    monkeypatch.setattr(
-        WhiteBooksClient,
-        "fetch_gstr2b_all",
-        lambda self, **kwargs: {
+    def generate_gstr2b(self, **kwargs):
+        provider_call_args["generate"] = kwargs
+        return {"status_cd": "1", "data": {"int_tran_id": "int-2b-001"}}
+
+    def get_gstr2b_generate_status(self, **kwargs):
+        provider_call_args["status"] = kwargs
+        return {"status_cd": "1", "data": {"filenum": "file-2b-001"}}
+
+    def fetch_gstr2b_all(self, **kwargs):
+        provider_call_args["all"] = kwargs
+        return {
             "status_cd": "1",
             "data": {
                 "b2b": [
@@ -892,7 +890,22 @@ def test_fetch_gstr2b_from_provider_creates_import_batch_and_transactions(import
                     }
                 ]
             },
-        },
+        }
+
+    monkeypatch.setattr(
+        WhiteBooksClient,
+        "generate_gstr2b",
+        generate_gstr2b,
+    )
+    monkeypatch.setattr(
+        WhiteBooksClient,
+        "get_gstr2b_generate_status",
+        get_gstr2b_generate_status,
+    )
+    monkeypatch.setattr(
+        WhiteBooksClient,
+        "fetch_gstr2b_all",
+        fetch_gstr2b_all,
     )
 
     response = import_authenticated_client.post(
@@ -911,6 +924,8 @@ def test_fetch_gstr2b_from_provider_creates_import_batch_and_transactions(import
     assert batch.total_rows == 1
     assert batch.valid_rows + batch.invalid_rows == 1
     assert GSTTransaction.objects.filter(import_batch=batch).count() == 1
+    assert provider_call_args["generate"]["ret_period"] == "042026"
+    assert provider_call_args["all"]["rtnprd"] == "042026"
     assert AuditLog.objects.filter(action="import.provider_fetch_requested", entity_id=batch.id).exists()
     assert AuditLog.objects.filter(action="import.provider_fetch_completed", entity_id=batch.id).exists()
 
