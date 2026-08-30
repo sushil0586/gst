@@ -47,6 +47,7 @@ import {
   usePrepareReturnMutation,
   usePortalChallanRequestsQuery,
   usePortalFilingReadinessQuery,
+  useProviderSummaryCompareMutation,
   useReturnReadinessQuery,
   useReturnQuery,
   useReturnsQuery,
@@ -57,13 +58,30 @@ import { useReconciliationRunsQuery } from "@/features/reconciliation";
 import { useSession } from "@/lib/query/session-provider";
 import { getErrorMessage, getFieldErrors } from "@/lib/api/error-handler";
 import { useWorkspaceContext } from "@/store/workspace-context";
-import type { ReturnFilingAttemptRecord, ReturnFilingRecord, ReturnPreparationRecord, WhiteBooksAuthSessionRecord, WhiteBooksProviderStage } from "@/types/api";
+import type {
+  ProviderReturnSummarySnapshotRecord,
+  ReturnFilingAttemptRecord,
+  ReturnFilingRecord,
+  ReturnPreparationRecord,
+  WhiteBooksAuthSessionRecord,
+  WhiteBooksProviderStage,
+} from "@/types/api";
 
 function formatMoney(value?: string | number | null) {
   return Number(value || 0).toLocaleString("en-IN", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
+}
+
+function toMoneyNumber(value?: string | number | null) {
+  const numericValue = Number(value || 0);
+  return Number.isFinite(numericValue) ? numericValue : 0;
+}
+
+function formatSignedMoney(value: number) {
+  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+  return `${sign}${formatMoney(Math.abs(value))}`;
 }
 
 function formatDateTime(value?: string | null) {
@@ -136,6 +154,29 @@ function getProviderStageVariant(stage?: WhiteBooksProviderStage) {
     return "warning" as const;
   }
   return "primary" as const;
+}
+
+function getPortalEvidenceSupportVariant(status?: string) {
+  if (status === "complete_live") return "success" as const;
+  if (status === "partial_live" || status === "saved_fallback") return "warning" as const;
+  if (status === "blocked") return "danger" as const;
+  return "neutral" as const;
+}
+
+function getProviderSummaryStatusVariant(status?: ProviderReturnSummarySnapshotRecord["status"]) {
+  if (status === "matched") return "success" as const;
+  if (status === "within_threshold") return "warning" as const;
+  if (status === "mismatch" || status === "provider_unavailable" || status === "not_prepared") return "danger" as const;
+  return "neutral" as const;
+}
+
+function getProviderSummaryStatusLabel(status?: ProviderReturnSummarySnapshotRecord["status"]) {
+  if (status === "matched") return "Matched";
+  if (status === "within_threshold") return "Within threshold";
+  if (status === "mismatch") return "Mismatch";
+  if (status === "provider_unavailable") return "Provider unavailable";
+  if (status === "not_prepared") return "Not prepared";
+  return "Not compared";
 }
 
 function getProviderMessage(attempt?: ReturnFilingAttemptRecord | null) {
@@ -596,6 +637,7 @@ export default function ReturnsPage() {
     setSelectedGstinId,
     setSelectedPeriodId,
   } = useWorkspaceContext();
+  const providerSummaryContextKey = [selectedWorkspaceId, selectedClientId, selectedGstinId, selectedPeriodId].join(":");
   const [manualSelectedReturnId, setManualSelectedReturnId] = useState<string | null>(null);
   const [dismissedQueryReturnId, setDismissedQueryReturnId] = useState<string | null>(null);
   const [isMarkFiledOpen, setIsMarkFiledOpen] = useState(false);
@@ -615,6 +657,11 @@ export default function ReturnsPage() {
   const [challanSgstAmount, setChallanSgstAmount] = useState("0.00");
   const [challanCessAmount, setChallanCessAmount] = useState("0.00");
   const [challanValidationFeedback, setChallanValidationFeedback] = useState<{ valid: boolean; message: string } | null>(null);
+  const [allowDuplicateChallanGeneration, setAllowDuplicateChallanGeneration] = useState(false);
+  const [providerSummaryResult, setProviderSummaryResult] = useState<{
+    contextKey: string;
+    snapshot: ProviderReturnSummarySnapshotRecord;
+  } | null>(null);
   const [filingActionFeedback, setFilingActionFeedback] = useState<{ tone: "warning" | "danger" | "success"; message: string } | null>(null);
   const queryWorkspaceId = searchParams.get("workspace");
   const queryClientId = searchParams.get("client");
@@ -701,6 +748,7 @@ export default function ReturnsPage() {
     return_type: "gstr3b",
   });
   const validatePortalChallanMutation = useValidatePortalChallanMutation();
+  const providerSummaryCompareMutation = useProviderSummaryCompareMutation();
   const reconciliationRunsQuery = useReconciliationRunsQuery(reconciliationFilters);
   const salesTransactionsQuery = useGstTransactionsQuery({
     client: selectedClientId ?? undefined,
@@ -837,6 +885,70 @@ export default function ReturnsPage() {
     Number(challanSgstAmount || 0) +
     Number(challanCessAmount || 0)
   ).toFixed(2);
+  const existingSubmittedPortalChallan = useMemo(
+    () =>
+      (portalChallanRequestsQuery.data ?? []).find(
+        (challan) => challan.status === "submitted" && Boolean(challan.cpin),
+      ) ?? null,
+    [portalChallanRequestsQuery.data],
+  );
+  const portalBalanceComparison = useMemo(() => {
+    const readinessPayload = portalFilingReadinessQuery.data;
+    if (!readinessPayload) {
+      return null;
+    }
+    const computedNetPayable = toMoneyNumber(readinessPayload.computed_summary.net_tax_payable);
+    const computedEligibleItc = toMoneyNumber(readinessPayload.computed_summary.eligible_itc);
+    const computedOutwardLiability = toMoneyNumber(readinessPayload.computed_summary.outward_tax_liability);
+    const cashClosing = toMoneyNumber(readinessPayload.provider_evidence.cash_ledger_summary?.closing_total);
+    const itcClosing = toMoneyNumber(readinessPayload.provider_evidence.itc_ledger_summary?.closing_total);
+    const liabilityClosing = toMoneyNumber(readinessPayload.provider_evidence.liability_ledger_summary?.closing_total);
+    const hasPortalEvidence = readinessPayload.provider_evidence.source !== "none";
+    const cashDelta = cashClosing - computedNetPayable;
+    const itcDelta = itcClosing - computedEligibleItc;
+    const liabilityDelta = liabilityClosing - computedOutwardLiability;
+    const tolerance = 1;
+
+    return {
+      hasPortalEvidence,
+      computedNetPayable,
+      computedEligibleItc,
+      computedOutwardLiability,
+      cashClosing,
+      itcClosing,
+      liabilityClosing,
+      cashDelta,
+      itcDelta,
+      liabilityDelta,
+      cashStatusLabel: !hasPortalEvidence ? "Not captured" : cashDelta >= 0 ? "Covered" : "Shortfall",
+      cashStatusVariant: !hasPortalEvidence ? "neutral" as const : cashDelta >= 0 ? "success" as const : "danger" as const,
+      itcStatusLabel: !hasPortalEvidence ? "Not captured" : Math.abs(itcDelta) <= tolerance ? "Aligned" : itcDelta > 0 ? "Portal higher" : "Books higher",
+      itcStatusVariant: !hasPortalEvidence ? "neutral" as const : Math.abs(itcDelta) <= tolerance ? "success" as const : itcDelta > 0 ? "warning" as const : "danger" as const,
+      liabilityStatusLabel: !hasPortalEvidence ? "Not captured" : Math.abs(liabilityDelta) <= tolerance ? "Aligned" : liabilityDelta > 0 ? "Portal higher" : "Books higher",
+      liabilityStatusVariant: !hasPortalEvidence ? "neutral" as const : Math.abs(liabilityDelta) <= tolerance ? "success" as const : "warning" as const,
+    };
+  }, [portalFilingReadinessQuery.data]);
+  const providerSummarySnapshot =
+    providerSummaryResult?.contextKey === providerSummaryContextKey ? providerSummaryResult.snapshot : null;
+  const providerSummaryRows = providerSummarySnapshot?.comparison_summary.rows ?? [];
+  const providerSummaryReturnType =
+    activeReturn?.return_type === "gstr1" || activeReturn?.return_type === "gstr3b"
+      ? activeReturn.return_type
+      : gstr1Return
+        ? "gstr1"
+        : "gstr3b";
+  const providerSummaryPreparedReturn = providerSummaryReturnType === "gstr1" ? gstr1Return : gstr3bReturn;
+  const providerSummaryAuthFresh =
+    Boolean(portalFilingReadinessQuery.data?.auth_session.available && !portalFilingReadinessQuery.data.auth_session.freshness_summary.is_stale) ||
+    Boolean(activeWhiteBooksAuthSession?.status === "session_active" && !activeWhiteBooksAuthSession.freshness_summary?.is_stale);
+  const canCompareProviderSummary = Boolean(
+    selectedWorkspaceId &&
+      selectedClientId &&
+      selectedGstinId &&
+      selectedPeriodId &&
+      providerSummaryPreparedReturn &&
+      providerSummaryAuthFresh,
+  );
   const latestProviderMessage = getProviderMessage(activeFiling?.latest_attempt);
   const linkedAuthSessionId = getLinkedAuthSessionId(activeFiling?.latest_attempt);
   const latestSavedProviderResponse = getSavedProviderResponse(activeFiling?.latest_attempt);
@@ -1217,6 +1329,10 @@ export default function ReturnsPage() {
       toast.error("Enter the WhiteBooks challan reason code before generating a portal challan.");
       return;
     }
+    if (existingSubmittedPortalChallan && !allowDuplicateChallanGeneration) {
+      toast.error("A submitted portal challan already exists for this return. Confirm duplicate generation to continue.");
+      return;
+    }
     try {
       const result = await generatePortalChallanMutation.mutateAsync({
         workspace: selectedWorkspaceId,
@@ -1234,9 +1350,11 @@ export default function ReturnsPage() {
         igst_tax_amount: challanIgstAmount,
         sgst_tax_amount: challanSgstAmount,
         cess_tax_amount: challanCessAmount,
+        allow_duplicate_generation: Boolean(existingSubmittedPortalChallan && allowDuplicateChallanGeneration),
       });
       toast.success(result.cpin ? `Portal challan generated. CPIN: ${result.cpin}` : "Portal challan generated.");
       setChallanValidationFeedback(null);
+      setAllowDuplicateChallanGeneration(false);
       setIsGenerateChallanOpen(false);
     } catch (error) {
       toast.error(getErrorMessage(error));
@@ -1278,6 +1396,32 @@ export default function ReturnsPage() {
         toast.success("Portal challan validation succeeded.");
       } else {
         toast.error(result.error_message || "Portal challan validation failed.");
+      }
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
+  };
+
+  const handleCompareProviderSummary = async () => {
+    if (!selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId) {
+      toast.error("Select a full return context before comparing the provider summary.");
+      return;
+    }
+    try {
+      const result = await providerSummaryCompareMutation.mutateAsync({
+        workspace: selectedWorkspaceId,
+        client: selectedClientId,
+        gstin: selectedGstinId,
+        compliance_period: selectedPeriodId,
+        return_type: providerSummaryReturnType,
+      });
+      setProviderSummaryResult({ contextKey: providerSummaryContextKey, snapshot: result });
+      if (result.status === "mismatch") {
+        toast.error("Provider summary mismatch found. Review the comparison rows.");
+      } else if (result.status === "provider_unavailable") {
+        toast.error(result.error_message || "WhiteBooks provider summary is unavailable right now.");
+      } else {
+        toast.success("Provider summary comparison completed.");
       }
     } catch (error) {
       toast.error(getErrorMessage(error));
@@ -2060,6 +2204,71 @@ export default function ReturnsPage() {
               </div>
             </div>
 
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">Portal evidence support summary</p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    {portalFilingReadinessQuery.data.provider_evidence.support_summary.detail}
+                  </p>
+                </div>
+                <StatusBadge
+                  label={portalFilingReadinessQuery.data.provider_evidence.support_summary.label}
+                  variant={getPortalEvidenceSupportVariant(portalFilingReadinessQuery.data.provider_evidence.support_summary.status)}
+                />
+              </div>
+              <div className="mt-4 grid gap-3 text-sm text-slate-700 lg:grid-cols-4">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">Source</p>
+                  <p className="mt-2 font-semibold text-slate-900">
+                    {portalFilingReadinessQuery.data.provider_evidence.support_summary.source.replace(/_/g, " ")}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">Snapshot</p>
+                  <p className="mt-2 break-all font-semibold text-slate-900">
+                    {portalFilingReadinessQuery.data.provider_evidence.support_summary.snapshot_id ?? "Not captured"}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">Captured</p>
+                  <p className="mt-2 font-semibold text-slate-900">
+                    {portalFilingReadinessQuery.data.provider_evidence.support_summary.captured_components.length}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">Transport errors</p>
+                  <p className="mt-2 font-semibold text-slate-900">
+                    {portalFilingReadinessQuery.data.provider_evidence.support_summary.transport_error_count}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-700">Captured components</p>
+                  <p className="mt-2 text-sm text-emerald-950">
+                    {portalFilingReadinessQuery.data.provider_evidence.support_summary.captured_components.length
+                      ? portalFilingReadinessQuery.data.provider_evidence.support_summary.captured_components.join(", ")
+                      : "None"}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700">Missing or failed components</p>
+                  <p className="mt-2 text-sm text-amber-950">
+                    {[
+                      ...portalFilingReadinessQuery.data.provider_evidence.support_summary.missing_components,
+                      ...portalFilingReadinessQuery.data.provider_evidence.support_summary.failed_components,
+                    ].length
+                      ? Array.from(new Set([
+                          ...portalFilingReadinessQuery.data.provider_evidence.support_summary.missing_components,
+                          ...portalFilingReadinessQuery.data.provider_evidence.support_summary.failed_components,
+                        ])).join(", ")
+                      : "None"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
             {portalFilingReadinessQuery.data.portal_sync.blockers.length > 0 ? (
               <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
                 <p className="text-sm font-semibold text-rose-950">Portal fetch blockers</p>
@@ -2084,6 +2293,165 @@ export default function ReturnsPage() {
                 </div>
               </div>
             ) : null}
+
+            {portalBalanceComparison ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Computed GSTR-3B vs portal evidence</p>
+                    <p className="mt-1 text-sm text-slate-600">
+                      Compare prepared return amounts with the latest WhiteBooks ledger evidence before challan or filing action.
+                    </p>
+                  </div>
+                  <StatusBadge
+                    label={portalBalanceComparison.hasPortalEvidence ? "Evidence available" : "Evidence missing"}
+                    variant={portalBalanceComparison.hasPortalEvidence ? "success" : "neutral"}
+                  />
+                </div>
+                <div className="mt-4 grid gap-3 lg:grid-cols-3">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-slate-900">Payment coverage</p>
+                      <StatusBadge label={portalBalanceComparison.cashStatusLabel} variant={portalBalanceComparison.cashStatusVariant} />
+                    </div>
+                    <div className="mt-3 space-y-1 text-sm text-slate-600">
+                      <p>Net payable: Rs. {formatMoney(portalBalanceComparison.computedNetPayable)}</p>
+                      <p>Cash closing: Rs. {formatMoney(portalBalanceComparison.cashClosing)}</p>
+                    </div>
+                    <p className={`mt-3 text-sm font-semibold ${portalBalanceComparison.cashDelta >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                      {portalBalanceComparison.cashDelta >= 0 ? "Cash surplus" : "Cash shortfall"} Rs. {formatMoney(Math.abs(portalBalanceComparison.cashDelta))}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-slate-900">ITC comparison</p>
+                      <StatusBadge label={portalBalanceComparison.itcStatusLabel} variant={portalBalanceComparison.itcStatusVariant} />
+                    </div>
+                    <div className="mt-3 space-y-1 text-sm text-slate-600">
+                      <p>Claimed ITC: Rs. {formatMoney(portalBalanceComparison.computedEligibleItc)}</p>
+                      <p>Portal ITC: Rs. {formatMoney(portalBalanceComparison.itcClosing)}</p>
+                    </div>
+                    <p className="mt-3 text-sm font-semibold text-slate-800">Delta Rs. {formatSignedMoney(portalBalanceComparison.itcDelta)}</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-slate-900">Liability comparison</p>
+                      <StatusBadge label={portalBalanceComparison.liabilityStatusLabel} variant={portalBalanceComparison.liabilityStatusVariant} />
+                    </div>
+                    <div className="mt-3 space-y-1 text-sm text-slate-600">
+                      <p>Computed liability: Rs. {formatMoney(portalBalanceComparison.computedOutwardLiability)}</p>
+                      <p>Portal liability: Rs. {formatMoney(portalBalanceComparison.liabilityClosing)}</p>
+                    </div>
+                    <p className="mt-3 text-sm font-semibold text-slate-800">Delta Rs. {formatSignedMoney(portalBalanceComparison.liabilityDelta)}</p>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">Internal vs WhiteBooks return summary</p>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Fetch `/{providerSummaryReturnType}/retsum` and compare the provider summary with the prepared return.
+                  </p>
+                </div>
+                <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center">
+                  <StatusBadge
+                    label={getProviderSummaryStatusLabel(providerSummarySnapshot?.status)}
+                    variant={getProviderSummaryStatusVariant(providerSummarySnapshot?.status)}
+                  />
+                  <Button
+                    variant="outline"
+                    data-testid="provider-summary-compare"
+                    onClick={handleCompareProviderSummary}
+                    disabled={!canCompareProviderSummary || providerSummaryCompareMutation.isPending}
+                  >
+                    {providerSummaryCompareMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <RefreshCcw className="size-4" />}
+                    Compare summary
+                  </Button>
+                </div>
+              </div>
+
+              {!canCompareProviderSummary ? (
+                <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  Prepare {providerSummaryReturnType.toUpperCase()} and keep a fresh WhiteBooks auth session active before running this comparison.
+                </p>
+              ) : null}
+
+              {providerSummarySnapshot ? (
+                <div className="mt-4 space-y-4">
+                  <div className="grid gap-3 text-sm text-slate-700 md:grid-cols-3">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">Fetched at</p>
+                      <p className="mt-2 font-semibold text-slate-900">{formatDateTime(providerSummarySnapshot.fetched_at)}</p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">Threshold</p>
+                      <p className="mt-2 font-semibold text-slate-900">Rs. {formatMoney(providerSummarySnapshot.threshold_amount)}</p>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-500">Mismatches</p>
+                      <p className="mt-2 font-semibold text-slate-900">
+                        {providerSummarySnapshot.comparison_summary.mismatch_count ?? 0}
+                      </p>
+                    </div>
+                  </div>
+
+                  {providerSummarySnapshot.error_message ? (
+                    <p className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
+                      {providerSummarySnapshot.error_message}
+                    </p>
+                  ) : null}
+
+                  {providerSummaryRows.length > 0 ? (
+                    <div className="overflow-hidden rounded-xl border border-slate-200">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Field</TableHead>
+                            <TableHead>Internal</TableHead>
+                            <TableHead>WhiteBooks</TableHead>
+                            <TableHead>Delta</TableHead>
+                            <TableHead>Status</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {providerSummaryRows.map((row) => (
+                            <TableRow key={row.field}>
+                              <TableCell className="font-medium text-slate-900">{row.label}</TableCell>
+                              <TableCell>Rs. {formatMoney(row.internal_amount)}</TableCell>
+                              <TableCell>
+                                {row.provider_present ? `Rs. ${formatMoney(row.provider_amount)}` : "Missing"}
+                              </TableCell>
+                              <TableCell>Rs. {formatSignedMoney(toMoneyNumber(row.difference_amount))}</TableCell>
+                              <TableCell>
+                                <StatusBadge
+                                  label={
+                                    row.severity === "match"
+                                      ? "Match"
+                                      : row.severity === "within_threshold"
+                                        ? "Within threshold"
+                                        : "Mismatch"
+                                  }
+                                  variant={
+                                    row.severity === "match"
+                                      ? "success"
+                                      : row.severity === "within_threshold"
+                                        ? "warning"
+                                        : "danger"
+                                  }
+                                />
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
 
             <div className="grid gap-4 xl:grid-cols-2">
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -3655,7 +4023,15 @@ export default function ReturnsPage() {
         </AppModalContent>
       </Dialog>
 
-      <Dialog open={isGenerateChallanOpen} onOpenChange={setIsGenerateChallanOpen}>
+      <Dialog
+        open={isGenerateChallanOpen}
+        onOpenChange={(open) => {
+          setIsGenerateChallanOpen(open);
+          if (!open) {
+            setAllowDuplicateChallanGeneration(false);
+          }
+        }}
+      >
         <AppModalContent size="lg">
           <AppModalHeader
             title="Generate portal challan"
@@ -3712,6 +4088,29 @@ export default function ReturnsPage() {
               <p className="mt-2 text-lg font-semibold text-slate-900">Rs. {formatMoney(challanTotalAmount)}</p>
               <p className="mt-1 text-sm text-slate-600">The total is calculated from the tax-component amounts you enter above.</p>
             </div>
+            {existingSubmittedPortalChallan ? (
+              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <div className="flex gap-3">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-700" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-950">Submitted challan already exists</p>
+                    <p className="mt-1 text-sm text-amber-900">
+                      CPIN {existingSubmittedPortalChallan.cpin} was generated for this return on {formatDateTime(existingSubmittedPortalChallan.created_at)}.
+                    </p>
+                    <label className="mt-3 flex items-start gap-2 text-sm text-amber-950">
+                      <input
+                        type="checkbox"
+                        checked={allowDuplicateChallanGeneration}
+                        onChange={(event) => setAllowDuplicateChallanGeneration(event.target.checked)}
+                        className="mt-1 size-4 rounded border-amber-300"
+                        data-testid="allow-duplicate-challan-generation"
+                      />
+                      <span>I confirm this is an intentional duplicate challan generation request.</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            ) : null}
             {challanValidationFeedback ? (
               <div className={`mt-4 rounded-2xl border p-4 ${challanValidationFeedback.valid ? "border-emerald-200 bg-emerald-50" : "border-rose-200 bg-rose-50"}`}>
                 <p className={`text-sm font-semibold ${challanValidationFeedback.valid ? "text-emerald-950" : "text-rose-950"}`}>
@@ -3732,7 +4131,13 @@ export default function ReturnsPage() {
               <Button variant="outline" onClick={handleValidatePortalChallan} disabled={validatePortalChallanMutation.isPending}>
                 {validatePortalChallanMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Validate challan"}
               </Button>
-              <Button onClick={handleGeneratePortalChallan} disabled={generatePortalChallanMutation.isPending}>
+              <Button
+                onClick={handleGeneratePortalChallan}
+                disabled={
+                  generatePortalChallanMutation.isPending ||
+                  Boolean(existingSubmittedPortalChallan && !allowDuplicateChallanGeneration)
+                }
+              >
                 {generatePortalChallanMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <ActionLabel kind="confirm" label="Generate challan" />}
               </Button>
             </div>

@@ -17,6 +17,8 @@ from apps.returns.serializers import (
     PortalChallanRecordSerializer,
     PortalChallanRequestSerializer,
     PortalFilingReadinessRequestSerializer,
+    ProviderReturnSummarySnapshotSerializer,
+    ProviderSummaryCompareRequestSerializer,
     ReturnApprovalSerializer,
     ReturnReadinessRequestSerializer,
     ReturnMarkFiledSerializer,
@@ -26,6 +28,7 @@ from apps.returns.serializers import (
 from apps.returns.services.portal_readiness import get_portal_filing_readiness
 from apps.returns.services.portal_challans import generate_portal_challan
 from apps.returns.services.portal_challans import validate_portal_challan
+from apps.returns.services.provider_summary_compare import compare_provider_summary
 from apps.returns.services.readiness import get_return_readiness
 from apps.returns.services.returns import approve_return, mark_filed, prepare_return
 
@@ -70,6 +73,8 @@ class ReturnPreparationViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSe
             return PortalChallanListRequestSerializer
         if self.action == "validate_portal_challan":
             return PortalChallanRequestSerializer
+        if self.action == "provider_summary_compare":
+            return ProviderSummaryCompareRequestSerializer
         return ReturnPreparationSerializer
 
     def get_permission_code(self, request):
@@ -206,6 +211,7 @@ class ReturnPreparationViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSe
             igst_tax_amount=serializer.validated_data["igst_tax_amount"],
             sgst_tax_amount=serializer.validated_data["sgst_tax_amount"],
             cess_tax_amount=serializer.validated_data["cess_tax_amount"],
+            allow_duplicate_generation=serializer.validated_data["allow_duplicate_generation"],
             actor=request.user,
         )
         output = PortalChallanRecordSerializer(record, context=self.get_serializer_context())
@@ -253,6 +259,21 @@ class ReturnPreparationViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSe
             actor=request.user,
         )
         return Response(api_response(data=payload, message="Portal challan validated"))
+
+    @action(detail=False, methods=["post"], url_path="provider-summary-compare")
+    def provider_summary_compare(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        snapshot = compare_provider_summary(
+            workspace_id=serializer.validated_data["workspace"],
+            client_id=serializer.validated_data["client"],
+            gstin_id=serializer.validated_data["gstin"],
+            compliance_period_id=serializer.validated_data["compliance_period"],
+            return_type=serializer.validated_data["return_type"],
+            actor=request.user,
+        )
+        output = ProviderReturnSummarySnapshotSerializer(snapshot, context=self.get_serializer_context())
+        return Response(api_response(data=output.data, message="Provider return summary compared"))
 
     @action(detail=True, methods=["post"], url_path="approve")
     def approve(self, request, *args, **kwargs):

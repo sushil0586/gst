@@ -88,6 +88,25 @@ test.describe("Import center", () => {
     await expect(detailsDialog.getByRole("heading", { name: "No row-level issues" })).toBeVisible();
   });
 
+  test("fetches GSTR-2B from the provider channel and opens the provider batch", async ({ page, app }) => {
+    await app.mockAuthenticatedShell();
+    await app.mockImportsApis();
+
+    await page.goto("/imports");
+
+    await expect(page.getByText("Provider GSTR-2B fetch", { exact: true })).toBeVisible();
+    await expect(page.getByText("Ready", { exact: true })).toBeVisible();
+
+    await page.getByTestId("fetch-provider-gstr2b").click();
+
+    await expect(page.getByText("Provider 2B available", { exact: true })).toBeVisible();
+    await expect(page.getByTestId("import-batch-row-batch-3").getByText("acme-client-gstr2b-052026.provider.json")).toBeVisible();
+
+    const detailsDialog = page.getByRole("dialog", { name: "Import batch details" });
+    await expect(detailsDialog).toBeVisible();
+    await expect(detailsDialog.getByText("acme-client-gstr2b-052026.provider.json")).toBeVisible();
+  });
+
   test("opens import history details from a stable batch action hook", async ({ page, app }) => {
     await app.mockAuthenticatedShell();
     await app.mockImportsApis();

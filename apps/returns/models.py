@@ -107,6 +107,54 @@ class PortalLedgerSnapshot(BaseModel):
         ]
 
 
+class ProviderReturnSummarySnapshot(BaseModel):
+    class ComparisonStatus(models.TextChoices):
+        MATCHED = "matched", "Matched"
+        WITHIN_THRESHOLD = "within_threshold", "Within Threshold"
+        MISMATCH = "mismatch", "Mismatch"
+        PROVIDER_UNAVAILABLE = "provider_unavailable", "Provider Unavailable"
+        NOT_PREPARED = "not_prepared", "Not Prepared"
+
+    compliance_period = models.ForeignKey(
+        CompliancePeriod,
+        on_delete=models.CASCADE,
+        related_name="provider_return_summary_snapshots",
+    )
+    prepared_return = models.ForeignKey(
+        ReturnPreparation,
+        on_delete=models.SET_NULL,
+        related_name="provider_return_summary_snapshots",
+        null=True,
+        blank=True,
+    )
+    auth_session = models.ForeignKey(
+        "filings.WhiteBooksAuthSession",
+        on_delete=models.SET_NULL,
+        related_name="provider_return_summary_snapshots",
+        null=True,
+        blank=True,
+    )
+    provider = models.CharField(max_length=32, default="whitebooks")
+    return_type = models.CharField(max_length=32, choices=ReturnPreparation.ReturnType.choices)
+    fetched_at = models.DateTimeField()
+    status = models.CharField(max_length=32, choices=ComparisonStatus.choices)
+    threshold_amount = models.DecimalField(max_digits=14, decimal_places=2, default=1)
+    internal_summary = models.JSONField(default=dict, blank=True)
+    provider_response = models.JSONField(default=dict, blank=True)
+    normalized_provider_summary = models.JSONField(default=dict, blank=True)
+    comparison_summary = models.JSONField(default=dict, blank=True)
+    error_message = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "provider_return_summary_snapshots"
+        ordering = ["-fetched_at", "-created_at"]
+        indexes = [
+            models.Index(fields=["compliance_period", "return_type", "provider"]),
+            models.Index(fields=["status", "provider"]),
+            models.Index(fields=["fetched_at"]),
+        ]
+
+
 class PortalChallanRequest(BaseModel):
     class RequestStatus(models.TextChoices):
         CREATED = "created", "Created"

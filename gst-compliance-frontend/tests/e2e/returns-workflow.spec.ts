@@ -140,7 +140,7 @@ test.describe("Returns workflow", () => {
     const returnsPage = new ReturnsPage(page);
 
     await app.mockAuthenticatedShell();
-    await app.mockReturnsApis({ portalReadiness: "ready" });
+    await app.mockReturnsApis({ portalReadiness: "ready", initialPreparedReturn: true });
 
     await returnsPage.goto();
     await returnsPage.expectReady();
@@ -148,6 +148,21 @@ test.describe("Returns workflow", () => {
     await expect(page.getByText("WhiteBooks balance payload fetched successfully.")).toBeVisible();
     await expect(page.getByText("Latest CPIN detected: CPIN0001234567")).toBeVisible();
     await expect(page.getByText("Cash ledger closing").locator("..")).toContainText("1,25,000.50");
+    await expect(page.getByText("Portal evidence support summary")).toBeVisible();
+    await expect(page.getByText("Complete live")).toBeVisible();
+    await expect(page.getByText("All enabled portal evidence calls returned usable data in the latest live fetch.")).toBeVisible();
+    await expect(page.getByText("Captured components").locator("..")).toContainText("challan_summary");
+    await expect(page.getByText("Computed GSTR-3B vs portal evidence")).toBeVisible();
+    await expect(page.getByText("Payment coverage").locator("..")).toContainText("Covered");
+    await expect(page.getByText("Cash surplus Rs. 44,000.50")).toBeVisible();
+    await expect(page.getByText("ITC comparison").locator("..")).toContainText("Aligned");
+    await expect(page.getByText("Liability comparison").locator("..")).toContainText("Aligned");
+    await page.getByTestId("provider-summary-compare").click();
+    await expect(page.getByText("Provider summary mismatch found. Review the comparison rows.")).toBeVisible();
+    await expect(page.getByText("Internal vs WhiteBooks return summary")).toBeVisible();
+    await expect(page.getByText("Mismatch").first()).toBeVisible();
+    await expect(page.getByRole("row", { name: /Eligible ITC/ })).toContainText("71,980.00");
+    await expect(page.getByRole("row", { name: /Net tax payable/ })).toContainText("-20.00");
 
     await returnsPage.openPortalLedgers();
 
@@ -155,6 +170,22 @@ test.describe("Returns workflow", () => {
     await expect(page.getByText("Latest CPIN: CPIN0001234567")).toBeVisible();
     await expect(page.getByText("cashEntries")).toBeVisible();
     await expect(page.getByText("liabilityEntries")).toBeVisible();
+  });
+
+  test("compares a prepared GSTR-1 with the WhiteBooks return summary", async ({ page, app }) => {
+    const returnsPage = new ReturnsPage(page);
+
+    await app.mockAuthenticatedShell();
+    await app.mockReturnsApis({ portalReadiness: "ready", initialPreparedReturn: true, initialReturnType: "gstr1" });
+
+    await returnsPage.goto();
+    await returnsPage.expectReady();
+
+    await expect(page.getByText("Fetch `/gstr1/retsum` and compare the provider summary with the prepared return.")).toBeVisible();
+    await page.getByTestId("provider-summary-compare").click();
+    await expect(page.getByText("Provider summary mismatch found. Review the comparison rows.")).toBeVisible();
+    await expect(page.getByRole("row", { name: /Total tax amount/ })).toContainText("550.00");
+    await expect(page.getByRole("row", { name: /B2C tax amount/ })).toContainText("-10.00");
   });
 
   test("validates and generates a portal challan from the returns workspace", async ({ page, app }) => {
@@ -185,6 +216,10 @@ test.describe("Returns workflow", () => {
     await expect(page.getByText("Validation passed")).toBeVisible();
     await expect(page.getByText("Portal challan validation succeeded.")).toBeVisible();
 
+    await expect(page.getByText("Submitted challan already exists")).toBeVisible();
+    await expect(page.getByText("CPIN CPIN0001234567 was generated for this return")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Generate challan" })).toBeDisabled();
+    await page.getByTestId("allow-duplicate-challan-generation").check();
     await page.getByRole("button", { name: "Generate challan" }).click();
     await expect(page.getByText("Portal challan generated. CPIN: CPIN0007654321")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Generate portal challan" })).not.toBeVisible();
@@ -203,6 +238,8 @@ test.describe("Returns workflow", () => {
 
     await expect(page.getByText("Portal fetch blockers")).toBeVisible();
     await expect(page.getByText("Verified portal session is not available for this GSTIN.")).toBeVisible();
+    await expect(page.getByText("Portal evidence support summary")).toBeVisible();
+    await expect(page.getByText("Portal evidence could not be fetched and no saved snapshot is available.")).toBeVisible();
 
     const generateChallanButton = page.getByRole("button", { name: "Generate portal challan" });
     await expect(generateChallanButton).toBeDisabled();

@@ -5,6 +5,7 @@ export {
   usePrepareReturnMutation,
   usePortalChallanRequestsQuery,
   usePortalFilingReadinessQuery,
+  useProviderSummaryCompareMutation,
   useReturnReadinessQuery,
   useReturnQuery,
   useReturnsQuery,

@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Any
 
 from django.conf import settings
+from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from rest_framework import serializers
 
@@ -14,6 +15,8 @@ from apps.filings.services.auth_session_freshness import get_provider_auth_sessi
 from apps.integrations.whitebooks.client import WhiteBooksClient
 from apps.integrations.whitebooks.exceptions import WhiteBooksSubmissionError, WhiteBooksTemporaryError
 from apps.returns.models import PortalChallanRequest, ReturnPreparation
+
+QRMP_CHALLAN_REASON_PREFIXES = ("QRMP",)
 
 
 def generate_portal_challan(
@@ -34,6 +37,7 @@ def generate_portal_challan(
     sgst_tax_amount: Decimal,
     cess_tax_amount: Decimal,
     actor,
+    allow_duplicate_generation: bool = False,
 ) -> PortalChallanRequest:
     if not settings.WHITEBOOKS_ENABLE_CHALLAN_GENERATION:
         raise serializers.ValidationError("WhiteBooks challan generation is not enabled for this environment.")
@@ -61,6 +65,38 @@ def generate_portal_challan(
     challan_period = context["challan_period"]
     request_payload = context["request_payload"]
     total_amount = context["total_amount"]
+    existing_submitted_challan = _get_existing_submitted_challan(
+        compliance_period=compliance_period,
+        return_type=return_type,
+    )
+
+    if existing_submitted_challan and not allow_duplicate_generation:
+        record_audit_log(
+            actor=actor,
+            action="portal_challan.duplicate_blocked",
+            entity=existing_submitted_challan,
+            workspace_id=workspace_id,
+            client_id=client_id,
+            gstin_id=gstin_id,
+            compliance_period_id=compliance_period_id,
+            metadata={
+                "return_type": return_type,
+                "provider": ReturnFiling.Provider.WHITEBOOKS,
+                "requested_total_amount": str(total_amount),
+            },
+            after_state={
+                "existing_challan_id": str(existing_submitted_challan.id),
+                "existing_cpin": existing_submitted_challan.cpin,
+                "existing_total_amount": str(existing_submitted_challan.total_amount),
+            },
+        )
+        raise serializers.ValidationError(
+            {
+                "allow_duplicate_generation": "A submitted WhiteBooks portal challan already exists for this return. Confirm duplicate generation to continue.",
+                "existing_challan_id": str(existing_submitted_challan.id),
+                "existing_cpin": existing_submitted_challan.cpin,
+            }
+        )
 
     request_record = PortalChallanRequest.objects.create(
         compliance_period=compliance_period,
@@ -91,7 +127,12 @@ def generate_portal_challan(
         client_id=client_id,
         gstin_id=gstin_id,
         compliance_period_id=compliance_period_id,
-        metadata={"return_type": return_type, "provider": ReturnFiling.Provider.WHITEBOOKS},
+        metadata={
+            "return_type": return_type,
+            "provider": ReturnFiling.Provider.WHITEBOOKS,
+            "duplicate_override": bool(allow_duplicate_generation),
+            "existing_challan_id": str(existing_submitted_challan.id) if existing_submitted_challan else "",
+        },
         after_state={"status": request_record.status, "total_amount": str(total_amount)},
     )
 
@@ -248,6 +289,20 @@ def _get_latest_auth_session(*, workspace_id, client_id, gstin_id) -> ProviderAu
     ).order_by("-verified_at", "-created_at").first()
 
 
+def _get_existing_submitted_challan(*, compliance_period: CompliancePeriod, return_type: str) -> PortalChallanRequest | None:
+    return (
+        PortalChallanRequest.objects.filter(
+            is_active=True,
+            compliance_period=compliance_period,
+            return_type=return_type,
+            provider=ReturnFiling.Provider.WHITEBOOKS,
+            status=PortalChallanRequest.RequestStatus.SUBMITTED,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+
 def _to_whitebooks_period(period: str) -> str:
     value = str(period or "").strip()
     if len(value) >= 7 and value[4] == "-":
@@ -336,6 +391,7 @@ def _build_challan_context(
     if total_amount <= Decimal("0.00"):
         raise serializers.ValidationError({"amounts": "At least one tax component amount must be greater than zero."})
     gstin = compliance_period.gstin
+    _validate_challan_reason_for_taxpayer_profile(gstin=gstin, challan_reason=challan_reason)
     challan_period = _to_whitebooks_period(compliance_period.period)
     state_code = str(getattr(gstin, "state_code", "") or "").strip()
     gst_username = str(getattr(gstin, "whitebooks_gst_username", "") or "").strip()
@@ -388,3 +444,40 @@ def _build_challan_context(
         "state_code": state_code,
         "gst_username": gst_username,
     }
+
+
+def _validate_challan_reason_for_taxpayer_profile(*, gstin, challan_reason: str) -> None:
+    normalized_reason = str(challan_reason or "").strip().upper()
+    is_qrmp_reason = normalized_reason.startswith(QRMP_CHALLAN_REASON_PREFIXES)
+    if not is_qrmp_reason:
+        return
+
+    if not _taxpayer_profile_indicates_qrmp(gstin):
+        raise serializers.ValidationError(
+            {
+                "challan_reason": "QRMP challan reason codes are allowed only when the taxpayer profile indicates QRMP filing."
+            }
+        )
+
+
+def _taxpayer_profile_indicates_qrmp(gstin) -> bool:
+    try:
+        profile = getattr(gstin, "taxpayer_profile", None)
+    except ObjectDoesNotExist:
+        profile = None
+    if profile is None:
+        return False
+    return _contains_qrmp_marker(
+        [
+            getattr(profile, "registration_type", ""),
+            getattr(profile, "raw_payload", {}),
+        ]
+    )
+
+
+def _contains_qrmp_marker(value: Any) -> bool:
+    if isinstance(value, dict):
+        return any(_contains_qrmp_marker(entry) for entry in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_contains_qrmp_marker(entry) for entry in value)
+    return "QRMP" in str(value or "").upper()

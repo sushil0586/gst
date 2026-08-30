@@ -228,6 +228,34 @@ class WhiteBooksClient:
         )
         return self._normalize_submission_payload(response, default_message="WhiteBooks GSTR-1 draft save failed.")
 
+    def get_gstr1_return_summary(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        ret_period: str,
+        txn: str,
+        summary_type: str = "L",
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/gstr1/retsum",
+            method="GET",
+            query_params={"gstin": gstin, "retperiod": ret_period, "email": email, "smrytyp": summary_type},
+            headers=self._filing_headers(
+                gstin=gstin,
+                ret_period=ret_period,
+                txn=txn,
+                state_code=state_code,
+                gst_username=gst_username,
+            ),
+        )
+        return self._normalize_submission_payload(
+            response,
+            default_message="WhiteBooks GSTR-1 return summary fetch failed.",
+        )
+
     def proceed_gstr1_filing(self, *, email: str, gstin: str, retperiod: str, txn: str, is_nil: str = "N") -> dict:
         response = self._request_json(
             "/all/newproceedfile",
@@ -322,6 +350,33 @@ class WhiteBooksClient:
             body=payload,
         )
         return self._normalize_submission_payload(response, default_message="WhiteBooks GSTR-3B draft save failed.")
+
+    def get_gstr3b_return_summary(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        ret_period: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/gstr3b/retsum",
+            method="GET",
+            query_params={"gstin": gstin, "retperiod": ret_period, "email": email},
+            headers=self._filing_headers(
+                gstin=gstin,
+                ret_period=ret_period,
+                txn=txn,
+                state_code=state_code,
+                gst_username=gst_username,
+            ),
+        )
+        return self._normalize_submission_payload(
+            response,
+            default_message="WhiteBooks GSTR-3B return summary fetch failed.",
+        )
 
     def offset_gstr3b_liability(self, *, email: str, gstin: str, ret_period: str, txn: str, payload: dict) -> dict:
         response = self._request_json(

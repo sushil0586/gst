@@ -14,10 +14,10 @@ from apps.clients.models import Client
 from apps.compliance_periods.models import CompliancePeriod
 from apps.filings.models import ProviderAuthSession, ReturnFiling
 from apps.gst_transactions.models import GSTTransaction
-from apps.gstins.models import GSTIN
+from apps.gstins.models import GSTIN, GSTINTaxpayerProfile
 from apps.organizations.models import Organization
 from apps.reconciliation.models import ReconciliationItem, ReconciliationRun
-from apps.returns.models import PortalChallanRequest, PortalLedgerSnapshot, ReturnPreparation
+from apps.returns.models import PortalChallanRequest, PortalLedgerSnapshot, ProviderReturnSummarySnapshot, ReturnPreparation
 from apps.workspaces.models import Workspace
 
 User = get_user_model()
@@ -303,6 +303,9 @@ def test_portal_filing_readiness_reports_blockers_when_ledger_reads_are_disabled
     assert payload["portal_sync"]["can_fetch"] is False
     assert "WhiteBooks ledger reads are not enabled" in payload["portal_sync"]["blockers"][0]
     assert payload["auth_session"]["available"] is False
+    assert payload["provider_evidence"]["support_summary"]["status"] == "blocked"
+    assert payload["provider_evidence"]["support_summary"]["label"] == "Blocked"
+    assert payload["provider_evidence"]["support_summary"]["live_fetch_attempted"] is False
 
 
 @pytest.mark.django_db
@@ -419,6 +422,18 @@ def test_portal_filing_readiness_fetches_balance_and_taxpayable(monkeypatch, ret
     assert payload["provider_evidence"]["challan_reference"] == "CPIN-042026-001"
     assert payload["provider_evidence"]["challan_history_response"]["challans"][0]["cpin"] == "CPIN-042026-001"
     assert payload["provider_evidence"]["challan_summary_response"]["challan"]["payment_status"] == "PAID"
+    assert payload["provider_evidence"]["support_summary"]["status"] == "complete_live"
+    assert payload["provider_evidence"]["support_summary"]["captured_components"] == [
+        "balance",
+        "taxpayable",
+        "cash_ledger",
+        "itc_ledger",
+        "liability_ledger",
+        "challan_history",
+        "challan_summary",
+    ]
+    assert payload["provider_evidence"]["support_summary"]["missing_components"] == []
+    assert payload["provider_evidence"]["support_summary"]["failed_components"] == []
     snapshot = PortalLedgerSnapshot.objects.get(compliance_period=returns_context["compliance_period"], return_type="gstr3b")
     assert snapshot.balance_response["balances"]["cash"] == 1200
     assert snapshot.taxpayable_response["tax_payable"]["net"] == 720
@@ -505,6 +520,10 @@ def test_portal_filing_readiness_keeps_other_ledgers_when_taxpayable_fails(
     assert payload["provider_evidence"]["liability_ledger_summary"]["closing_total"] == "420.00"
     assert "Portal tax payable evidence could not be fetched right now." in payload["portal_sync"]["warnings"]
     assert "taxpayable: LG9010: Invalid Return Type" in payload["portal_sync"]["transport_error"]
+    assert payload["provider_evidence"]["support_summary"]["status"] == "partial_live"
+    assert "taxpayable" in payload["provider_evidence"]["support_summary"]["missing_components"]
+    assert "taxpayable" in payload["provider_evidence"]["support_summary"]["failed_components"]
+    assert payload["provider_evidence"]["support_summary"]["transport_error_count"] == 1
 
 
 @pytest.mark.django_db
@@ -661,6 +680,238 @@ def test_portal_filing_readiness_uses_latest_saved_snapshot_when_live_fetch_is_u
     assert payload["provider_evidence"]["liability_ledger_summary"]["closing_total"] == "880.00"
     assert payload["provider_evidence"]["challan_reference"] == "CPIN-SAVED-001"
     assert payload["provider_evidence"]["challan_summary_response"]["challan"]["payment_status"] == "PENDING"
+    assert payload["provider_evidence"]["support_summary"]["status"] == "saved_fallback"
+    assert payload["provider_evidence"]["support_summary"]["used_saved_snapshot"] is True
+    assert payload["provider_evidence"]["support_summary"]["snapshot_id"] == str(snapshot.id)
+
+
+@pytest.mark.django_db
+@override_settings(
+    WHITEBOOKS_ENABLE_PROVIDER_SUMMARY_READS=True,
+    WHITEBOOKS_CONTACT_EMAIL="ops@example.com",
+    PROVIDER_SUMMARY_COMPARE_THRESHOLD_AMOUNT="1.00",
+)
+def test_provider_summary_compare_fetches_and_stores_gstr3b_snapshot(
+    monkeypatch,
+    returns_authenticated_client,
+    returns_context,
+):
+    returns_context["gstin"].whitebooks_gst_username = "TN_NT2.152383"
+    returns_context["gstin"].save(update_fields=["whitebooks_gst_username"])
+    prepared_return = ReturnPreparation.objects.create(
+        compliance_period=returns_context["compliance_period"],
+        return_type="gstr3b",
+        status=ReturnPreparation.PreparationStatus.READY_FOR_REVIEW,
+        summary_snapshot={
+            "outward_supplies": {"outward_tax_liability": "1500.00"},
+            "itc_summary": {"eligible_itc": "500.00", "net_tax_payable": "1000.00"},
+        },
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+    create_ready_whitebooks_auth_session(context=returns_context, txn="txn-summary-001")
+
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+
+    def mock_return_summary(self, **kwargs):
+        assert kwargs["email"] == "ops@example.com"
+        assert kwargs["gstin"] == returns_context["gstin"].gstin
+        assert kwargs["ret_period"] == "042026"
+        assert kwargs["txn"] == "txn-summary-001"
+        assert kwargs["state_code"] == "29"
+        assert kwargs["gst_username"] == "TN_NT2.152383"
+        return {
+            "status_cd": "1",
+            "data": {
+                "outward_tax_liability": "1510.00",
+                "eligible_itc": "500.00",
+                "net_tax_payable": "1010.00",
+            },
+        }
+
+    monkeypatch.setattr(WhiteBooksClient, "get_gstr3b_return_summary", mock_return_summary)
+
+    response = returns_authenticated_client.post(
+        "/api/v1/returns/provider-summary-compare/",
+        {
+            "workspace": str(returns_context["workspace"].id),
+            "client": str(returns_context["client"].id),
+            "gstin": str(returns_context["gstin"].id),
+            "compliance_period": str(returns_context["compliance_period"].id),
+            "return_type": "gstr3b",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    payload = response.data["data"]
+    assert payload["status"] == "mismatch"
+    assert str(payload["prepared_return"]) == str(prepared_return.id)
+    assert payload["normalized_provider_summary"]["outward_tax_liability"] == "1510.00"
+    assert payload["comparison_summary"]["mismatch_count"] == 2
+    outward_row = payload["comparison_summary"]["rows"][0]
+    assert outward_row["field"] == "outward_tax_liability"
+    assert outward_row["internal_amount"] == "1500.00"
+    assert outward_row["provider_amount"] == "1510.00"
+    assert outward_row["difference_amount"] == "-10.00"
+
+    snapshot = ProviderReturnSummarySnapshot.objects.get(pk=payload["id"])
+    assert snapshot.prepared_return == prepared_return
+    assert snapshot.auth_session.txn == "txn-summary-001"
+    assert snapshot.status == ProviderReturnSummarySnapshot.ComparisonStatus.MISMATCH
+    assert AuditLog.objects.filter(action="provider_summary.compare_completed", entity_id=snapshot.id).exists()
+
+
+@pytest.mark.django_db
+@override_settings(
+    WHITEBOOKS_ENABLE_PROVIDER_SUMMARY_READS=True,
+    WHITEBOOKS_CONTACT_EMAIL="ops@example.com",
+    PROVIDER_SUMMARY_COMPARE_THRESHOLD_AMOUNT="1.00",
+)
+def test_provider_summary_compare_captures_provider_unavailable_snapshot(
+    monkeypatch,
+    returns_authenticated_client,
+    returns_context,
+):
+    ReturnPreparation.objects.create(
+        compliance_period=returns_context["compliance_period"],
+        return_type="gstr3b",
+        status=ReturnPreparation.PreparationStatus.READY_FOR_REVIEW,
+        summary_snapshot={
+            "outward_supplies": {"outward_tax_liability": "1500.00"},
+            "itc_summary": {"eligible_itc": "500.00", "net_tax_payable": "1000.00"},
+        },
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+    create_ready_whitebooks_auth_session(context=returns_context, txn="txn-summary-down")
+
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+    from apps.integrations.whitebooks.exceptions import WhiteBooksTemporaryError
+
+    def mock_return_summary(self, **kwargs):
+        raise WhiteBooksTemporaryError("GST sandbox is temporarily unavailable.")
+
+    monkeypatch.setattr(WhiteBooksClient, "get_gstr3b_return_summary", mock_return_summary)
+
+    response = returns_authenticated_client.post(
+        "/api/v1/returns/provider-summary-compare/",
+        {
+            "workspace": str(returns_context["workspace"].id),
+            "client": str(returns_context["client"].id),
+            "gstin": str(returns_context["gstin"].id),
+            "compliance_period": str(returns_context["compliance_period"].id),
+            "return_type": "gstr3b",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    payload = response.data["data"]
+    assert payload["status"] == "provider_unavailable"
+    assert payload["error_message"] == "GST sandbox is temporarily unavailable."
+    assert payload["comparison_summary"]["rows"] == []
+    snapshot = ProviderReturnSummarySnapshot.objects.get(pk=payload["id"])
+    assert AuditLog.objects.filter(action="provider_summary.compare_failed", entity_id=snapshot.id).exists()
+
+
+@pytest.mark.django_db
+@override_settings(
+    WHITEBOOKS_ENABLE_PROVIDER_SUMMARY_READS=True,
+    WHITEBOOKS_CONTACT_EMAIL="ops@example.com",
+    PROVIDER_SUMMARY_COMPARE_THRESHOLD_AMOUNT="1.00",
+)
+def test_provider_summary_compare_fetches_and_stores_gstr1_snapshot(
+    monkeypatch,
+    returns_authenticated_client,
+    returns_context,
+):
+    returns_context["gstin"].whitebooks_gst_username = "TN_NT2.152383"
+    returns_context["gstin"].save(update_fields=["whitebooks_gst_username"])
+    prepared_return = ReturnPreparation.objects.create(
+        compliance_period=returns_context["compliance_period"],
+        return_type="gstr1",
+        status=ReturnPreparation.PreparationStatus.READY_FOR_REVIEW,
+        summary_snapshot={
+            "outward_supplies": {
+                "total_taxable_value": "3000.00",
+                "total_tax_amount": "540.00",
+                "document_count": 3,
+                "b2b_taxable_value": "2000.00",
+                "b2b_tax_amount": "360.00",
+                "b2c_taxable_value": "1000.00",
+                "b2c_tax_amount": "180.00",
+                "credit_note_tax_amount": "90.00",
+                "debit_note_tax_amount": "108.00",
+            }
+        },
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+    create_ready_whitebooks_auth_session(context=returns_context, txn="txn-gstr1-summary")
+
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+
+    def mock_return_summary(self, **kwargs):
+        assert kwargs["email"] == "ops@example.com"
+        assert kwargs["gstin"] == returns_context["gstin"].gstin
+        assert kwargs["ret_period"] == "042026"
+        assert kwargs["txn"] == "txn-gstr1-summary"
+        assert kwargs["state_code"] == "29"
+        assert kwargs["gst_username"] == "TN_NT2.152383"
+        return {
+            "status_cd": "1",
+            "data": {
+                "total_taxable_value": "3000.00",
+                "total_tax_amount": "550.00",
+                "document_count": 3,
+                "b2b_taxable_value": "2000.00",
+                "b2b_tax_amount": "360.00",
+                "b2c_taxable_value": "1000.00",
+                "b2c_tax_amount": "190.00",
+                "credit_note_tax_amount": "90.00",
+                "debit_note_tax_amount": "108.00",
+            },
+        }
+
+    monkeypatch.setattr(WhiteBooksClient, "get_gstr1_return_summary", mock_return_summary)
+
+    response = returns_authenticated_client.post(
+        "/api/v1/returns/provider-summary-compare/",
+        {
+            "workspace": str(returns_context["workspace"].id),
+            "client": str(returns_context["client"].id),
+            "gstin": str(returns_context["gstin"].id),
+            "compliance_period": str(returns_context["compliance_period"].id),
+            "return_type": "gstr1",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    payload = response.data["data"]
+    assert payload["status"] == "mismatch"
+    assert str(payload["prepared_return"]) == str(prepared_return.id)
+    assert payload["normalized_provider_summary"]["total_tax_amount"] == "550.00"
+    assert payload["comparison_summary"]["mismatch_count"] == 2
+    assert payload["comparison_summary"]["compared_fields"] == [
+        "total_taxable_value",
+        "total_tax_amount",
+        "document_count",
+        "b2b_taxable_value",
+        "b2b_tax_amount",
+        "b2c_taxable_value",
+        "b2c_tax_amount",
+        "credit_note_tax_amount",
+        "debit_note_tax_amount",
+    ]
+    b2c_row = next(row for row in payload["comparison_summary"]["rows"] if row["field"] == "b2c_tax_amount")
+    assert b2c_row["internal_amount"] == "180.00"
+    assert b2c_row["provider_amount"] == "190.00"
+    assert b2c_row["severity"] == "mismatch"
+    snapshot = ProviderReturnSummarySnapshot.objects.get(pk=payload["id"])
+    assert snapshot.return_type == ReturnPreparation.ReturnType.GSTR1
+    assert AuditLog.objects.filter(action="provider_summary.compare_completed", entity_id=snapshot.id).exists()
 
 
 @pytest.mark.django_db
@@ -720,6 +971,147 @@ def test_generate_portal_challan_creates_request_and_audit_log(monkeypatch, retu
     assert request_record.total_amount == Decimal("1000.00")
     assert AuditLog.objects.filter(action="portal_challan.requested", entity_id=request_record.id).exists()
     assert AuditLog.objects.filter(action="portal_challan.generated", entity_id=request_record.id).exists()
+
+
+@pytest.mark.django_db
+@override_settings(WHITEBOOKS_ENABLE_CHALLAN_GENERATION=True)
+def test_generate_portal_challan_blocks_duplicate_submitted_request(monkeypatch, returns_authenticated_client, returns_context):
+    prepared_return = ReturnPreparation.objects.create(
+        compliance_period=returns_context["compliance_period"],
+        return_type="gstr3b",
+        status=ReturnPreparation.PreparationStatus.READY_FOR_REVIEW,
+        summary_snapshot={},
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+    auth_session = create_ready_whitebooks_auth_session(context=returns_context, txn="txn-challan-duplicate")
+    existing_challan = PortalChallanRequest.objects.create(
+        compliance_period=returns_context["compliance_period"],
+        prepared_return=prepared_return,
+        auth_session=auth_session,
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type="gstr3b",
+        status=PortalChallanRequest.RequestStatus.SUBMITTED,
+        cpin="CPIN-EXISTING-001",
+        challan_reason="RET3B",
+        challan_period="042026",
+        payment_mode="OTC",
+        bank_code="ICIC",
+        sub_payment_mode="CQ",
+        taxpayer_name=returns_context["client"].legal_name,
+        address="123 Example Street, Bengaluru",
+        mobile_number="9876543210",
+        request_payload={"total_amt": 1000},
+        response_payload={"cpin": "CPIN-EXISTING-001"},
+        total_amount=Decimal("1000.00"),
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+
+    def mock_generate_challan(self, **kwargs):
+        raise AssertionError("WhiteBooks should not be called for a duplicate challan without explicit confirmation.")
+
+    monkeypatch.setattr(WhiteBooksClient, "generate_challan", mock_generate_challan)
+
+    response = returns_authenticated_client.post(
+        "/api/v1/returns/generate-portal-challan/",
+        {
+            "workspace": str(returns_context["workspace"].id),
+            "client": str(returns_context["client"].id),
+            "gstin": str(returns_context["gstin"].id),
+            "compliance_period": str(returns_context["compliance_period"].id),
+            "return_type": "gstr3b",
+            "challan_reason": "RET3B",
+            "payment_mode": "OTC",
+            "bank_code": "ICIC",
+            "sub_payment_mode": "CQ",
+            "mobile_number": "9876543210",
+            "address": "123 Example Street, Bengaluru",
+            "cgst_tax_amount": "250.00",
+            "igst_tax_amount": "500.00",
+            "sgst_tax_amount": "250.00",
+            "cess_tax_amount": "0.00",
+        },
+        format="json",
+    )
+    assert response.status_code == 400
+    assert PortalChallanRequest.objects.count() == 1
+    assert "CPIN-EXISTING-001" in str(response.data)
+    assert AuditLog.objects.filter(action="portal_challan.duplicate_blocked", entity_id=existing_challan.id).exists()
+
+
+@pytest.mark.django_db
+@override_settings(WHITEBOOKS_ENABLE_CHALLAN_GENERATION=True)
+def test_generate_portal_challan_allows_duplicate_with_explicit_confirmation(monkeypatch, returns_authenticated_client, returns_context):
+    prepared_return = ReturnPreparation.objects.create(
+        compliance_period=returns_context["compliance_period"],
+        return_type="gstr3b",
+        status=ReturnPreparation.PreparationStatus.READY_FOR_REVIEW,
+        summary_snapshot={},
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+    auth_session = create_ready_whitebooks_auth_session(context=returns_context, txn="txn-challan-duplicate-allowed")
+    PortalChallanRequest.objects.create(
+        compliance_period=returns_context["compliance_period"],
+        prepared_return=prepared_return,
+        auth_session=auth_session,
+        provider=ReturnFiling.Provider.WHITEBOOKS,
+        return_type="gstr3b",
+        status=PortalChallanRequest.RequestStatus.SUBMITTED,
+        cpin="CPIN-EXISTING-001",
+        challan_reason="RET3B",
+        challan_period="042026",
+        payment_mode="OTC",
+        bank_code="ICIC",
+        sub_payment_mode="CQ",
+        taxpayer_name=returns_context["client"].legal_name,
+        address="123 Example Street, Bengaluru",
+        mobile_number="9876543210",
+        request_payload={"total_amt": 1000},
+        response_payload={"cpin": "CPIN-EXISTING-001"},
+        total_amount=Decimal("1000.00"),
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+
+    def mock_generate_challan(self, **kwargs):
+        assert kwargs["txn"] == "txn-challan-duplicate-allowed"
+        return {"status_cd": "1", "status_desc": "Success", "cpin": "CPIN-DUP-002"}
+
+    monkeypatch.setattr(WhiteBooksClient, "generate_challan", mock_generate_challan)
+
+    response = returns_authenticated_client.post(
+        "/api/v1/returns/generate-portal-challan/",
+        {
+            "workspace": str(returns_context["workspace"].id),
+            "client": str(returns_context["client"].id),
+            "gstin": str(returns_context["gstin"].id),
+            "compliance_period": str(returns_context["compliance_period"].id),
+            "return_type": "gstr3b",
+            "challan_reason": "RET3B",
+            "payment_mode": "OTC",
+            "bank_code": "ICIC",
+            "sub_payment_mode": "CQ",
+            "mobile_number": "9876543210",
+            "address": "123 Example Street, Bengaluru",
+            "cgst_tax_amount": "250.00",
+            "igst_tax_amount": "500.00",
+            "sgst_tax_amount": "250.00",
+            "cess_tax_amount": "0.00",
+            "allow_duplicate_generation": True,
+        },
+        format="json",
+    )
+    assert response.status_code == 200
+    payload = response.data["data"]
+    assert payload["status"] == "submitted"
+    assert payload["cpin"] == "CPIN-DUP-002"
+    assert PortalChallanRequest.objects.filter(status=PortalChallanRequest.RequestStatus.SUBMITTED).count() == 2
 
 
 @pytest.mark.django_db
@@ -870,6 +1262,113 @@ def test_validate_portal_challan_returns_valid_false_on_submission_error(monkeyp
     assert payload["valid"] is False
     assert "Invalid challan reason" in payload["error_message"]
     assert AuditLog.objects.filter(action="portal_challan.validation_failed").exists()
+
+
+@pytest.mark.django_db
+@override_settings(WHITEBOOKS_ENABLE_CHALLAN_GENERATION=True)
+def test_validate_portal_challan_blocks_qrmp_reason_for_non_qrmp_profile(monkeypatch, returns_authenticated_client, returns_context):
+    ReturnPreparation.objects.create(
+        compliance_period=returns_context["compliance_period"],
+        return_type="gstr3b",
+        status=ReturnPreparation.PreparationStatus.READY_FOR_REVIEW,
+        summary_snapshot={},
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+    create_ready_whitebooks_auth_session(context=returns_context, txn="txn-challan-qrmp-block")
+    GSTINTaxpayerProfile.objects.create(
+        gstin=returns_context["gstin"],
+        registration_type="Regular",
+        raw_payload={"data": {"filingPreference": "Monthly"}},
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+
+    def mock_validate_challan_reason(self, **kwargs):
+        raise AssertionError("WhiteBooks should not be called when a monthly profile uses a QRMP reason code.")
+
+    monkeypatch.setattr(WhiteBooksClient, "validate_challan_reason", mock_validate_challan_reason)
+
+    response = returns_authenticated_client.post(
+        "/api/v1/returns/validate-portal-challan/",
+        {
+            "workspace": str(returns_context["workspace"].id),
+            "client": str(returns_context["client"].id),
+            "gstin": str(returns_context["gstin"].id),
+            "compliance_period": str(returns_context["compliance_period"].id),
+            "return_type": "gstr3b",
+            "challan_reason": "QRMP35",
+            "payment_mode": "OTC",
+            "bank_code": "ICIC",
+            "sub_payment_mode": "CQ",
+            "mobile_number": "9876543210",
+            "address": "123 Example Street, Bengaluru",
+            "cgst_tax_amount": "250.00",
+            "igst_tax_amount": "500.00",
+            "sgst_tax_amount": "250.00",
+            "cess_tax_amount": "0.00",
+        },
+        format="json",
+    )
+    assert response.status_code == 400
+    assert "QRMP challan reason codes" in str(response.data)
+    assert not AuditLog.objects.filter(action="portal_challan.validated").exists()
+
+
+@pytest.mark.django_db
+@override_settings(WHITEBOOKS_ENABLE_CHALLAN_GENERATION=True)
+def test_validate_portal_challan_allows_qrmp_reason_when_profile_indicates_qrmp(monkeypatch, returns_authenticated_client, returns_context):
+    ReturnPreparation.objects.create(
+        compliance_period=returns_context["compliance_period"],
+        return_type="gstr3b",
+        status=ReturnPreparation.PreparationStatus.READY_FOR_REVIEW,
+        summary_snapshot={},
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+    create_ready_whitebooks_auth_session(context=returns_context, txn="txn-challan-qrmp-allow")
+    GSTINTaxpayerProfile.objects.create(
+        gstin=returns_context["gstin"],
+        registration_type="Regular",
+        raw_payload={"data": {"filingPreference": "QRMP"}},
+        created_by=returns_context["user"],
+        updated_by=returns_context["user"],
+    )
+
+    from apps.integrations.whitebooks.client import WhiteBooksClient
+
+    def mock_validate_challan_reason(self, **kwargs):
+        assert kwargs["payload"]["chln_rsn"] == "QRMP35"
+        return {"status_cd": "1", "status_desc": "Validated"}
+
+    monkeypatch.setattr(WhiteBooksClient, "validate_challan_reason", mock_validate_challan_reason)
+
+    response = returns_authenticated_client.post(
+        "/api/v1/returns/validate-portal-challan/",
+        {
+            "workspace": str(returns_context["workspace"].id),
+            "client": str(returns_context["client"].id),
+            "gstin": str(returns_context["gstin"].id),
+            "compliance_period": str(returns_context["compliance_period"].id),
+            "return_type": "gstr3b",
+            "challan_reason": "QRMP35",
+            "payment_mode": "OTC",
+            "bank_code": "ICIC",
+            "sub_payment_mode": "CQ",
+            "mobile_number": "9876543210",
+            "address": "123 Example Street, Bengaluru",
+            "cgst_tax_amount": "250.00",
+            "igst_tax_amount": "500.00",
+            "sgst_tax_amount": "250.00",
+            "cess_tax_amount": "0.00",
+        },
+        format="json",
+    )
+    assert response.status_code == 200
+    assert response.data["data"]["valid"] is True
+    assert AuditLog.objects.filter(action="portal_challan.validated").exists()
 
 
 @pytest.mark.django_db

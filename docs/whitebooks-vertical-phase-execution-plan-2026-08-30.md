@@ -92,6 +92,16 @@ Completed first hardening slice on 2026-08-30:
 - waiting provider fetches schedule an automatic Celery poll on the imports queue
 - polling uses configurable exponential backoff and stops after a configured attempt limit
 
+Completed import-center product slice on 2026-08-30:
+
+- import center now exposes a `Provider GSTR-2B fetch` panel next to manual upload
+- users can fetch GSTR-2B directly from the selected workspace, client, GSTIN, and period
+- manual upload remains available as the fallback path
+- provider-fetched GSTR-2B batches open in the normal import batch detail workflow
+- import center supports OTP request/verify when a usable provider auth session is missing
+- frontend provider-auth readiness now accepts a fresh authenticated `txn` even when WhiteBooks does not return the richer auth-token response body
+- reconciliation uses the same fresh-`txn` readiness rule for GSTR-2B fetch continuation
+
 Backend work:
 
 - tune automatic polling/backoff timing after staging evidence
@@ -107,14 +117,13 @@ Backend work:
 
 Frontend work:
 
-- add `Fetch GSTR-2B` action where users currently upload/import 2B
-- show fetch progress and provider reference
-- show fallback to manual upload
-- show provider failure reason and retry action
+- refine provider reference/detail display after WhiteBooks confirms final response fields
+- add live UAT screenshots/evidence after WhiteBooks provides a successful sandbox GSTIN/period
 
 QA/UAT:
 
 - mocked backend tests for generation, delayed status, failure, retry
+- mocked frontend browser coverage for import-center provider fetch
 - staging test with WhiteBooks-approved GSTIN/period
 - reconciliation comparison between manual 2B and provider-fetched 2B
 
@@ -153,21 +162,28 @@ Current foundation:
 - ledger readiness service exists
 - challan validation/generation service exists
 - feature flags exist
+- duplicate submitted challan guard completed on 2026-08-30; backend blocks repeat generation unless `allow_duplicate_generation` is explicitly supplied
+- returns UI now shows the existing submitted CPIN and requires duplicate-generation confirmation before enabling the generate action
+- returns UI now compares computed GSTR-3B payable, ITC, and liability values against captured WhiteBooks cash, ITC, and liability ledger evidence
+- QRMP reason-code guardrail completed on 2026-08-30 for the safe known case: `QRMP*` challan reasons are rejected unless the taxpayer profile indicates QRMP
+- provider evidence support summary completed on 2026-08-30; readiness payload and UI now identify complete live, partial live, saved fallback, blocked, or missing evidence states
 
 Backend work:
 
 - harden readiness snapshot storage
-- add provider evidence summaries for support
-- add validations for challan amount, reason, return type, and QRMP cases
-- prevent duplicate challan generation for same return unless explicitly allowed
-- add audit event for validation separate from generation
+- done: add provider evidence summaries for support
+- done: add validations for challan amount, reason, return type, and the known QRMP reason-code misuse case
+- pending WhiteBooks confirmation: exact monthly vs QRMP challan reason-code matrix
+- done: prevent duplicate challan generation for same return unless explicitly allowed
+- done: add audit event for validation separate from generation
+- done: add audit event when duplicate challan generation is blocked
 
 Frontend work:
 
-- improve GSTR-3B readiness panel
-- show computed liability vs portal balances
+- done: improve GSTR-3B readiness panel with balance comparison signals
+- done: show computed liability vs portal balances
 - show challan validation before generation
-- require explicit confirmation before generate
+- done: require explicit confirmation before duplicate generate
 - show CPIN and provider evidence after generation
 
 QA/UAT:

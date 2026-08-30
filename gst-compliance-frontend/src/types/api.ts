@@ -997,6 +997,22 @@ export type PortalFilingReadinessPayload = {
     challan_reference: string | null;
     challan_history_response: Record<string, unknown> | null;
     challan_summary_response: Record<string, unknown> | null;
+    support_summary: {
+      status: "complete_live" | "partial_live" | "saved_fallback" | "blocked" | "missing";
+      label: string;
+      detail: string;
+      source: "live_fetch" | "saved_snapshot" | "none";
+      snapshot_id: string | null;
+      fetched_at: string | null;
+      ledger_reads_enabled: boolean;
+      payment_reads_enabled: boolean;
+      live_fetch_attempted: boolean;
+      used_saved_snapshot: boolean;
+      captured_components: string[];
+      missing_components: string[];
+      failed_components: string[];
+      transport_error_count: number;
+    };
   };
 };
 
@@ -1023,6 +1039,52 @@ export type PortalChallanRecord = {
   request_payload: Record<string, unknown>;
   response_payload: Record<string, unknown>;
   total_amount: string;
+  error_message: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProviderSummaryComparisonRow = {
+  field: string;
+  label: string;
+  internal_amount: string;
+  provider_amount: string;
+  difference_amount: string;
+  absolute_difference: string;
+  provider_present: boolean;
+  severity: "match" | "within_threshold" | "mismatch";
+};
+
+export type ProviderReturnSummarySnapshotStatus = "matched" | "within_threshold" | "mismatch" | "provider_unavailable" | "not_prepared";
+
+export type ProviderReturnSummarySnapshotRecord = {
+  id: string;
+  workspace: string;
+  client: string;
+  gstin: string;
+  gstin_value: string;
+  compliance_period: string;
+  compliance_period_label: string;
+  prepared_return: string | null;
+  auth_session: string | null;
+  provider: "whitebooks";
+  return_type: ReturnPreparationRecord["return_type"];
+  fetched_at: string;
+  status: ProviderReturnSummarySnapshotStatus;
+  threshold_amount: string;
+  internal_summary: Record<string, unknown>;
+  provider_response: Record<string, unknown>;
+  normalized_provider_summary: Record<string, unknown>;
+  comparison_summary: {
+    status: ProviderReturnSummarySnapshotStatus;
+    threshold_amount: string;
+    matched_count?: number;
+    within_threshold_count?: number;
+    mismatch_count?: number;
+    compared_fields?: string[];
+    rows?: ProviderSummaryComparisonRow[];
+    source?: string;
+  };
   error_message: string;
   created_at: string;
   updated_at: string;

@@ -519,9 +519,14 @@ export default function ReconciliationPage() {
 
   const activeProviderAuthSession = providerAuthSessionsQuery.data?.items[0];
   const activeProviderAuthFreshness = activeProviderAuthSession?.freshness_summary;
-  const activeProviderAuthReady = Boolean(
+  const activeProviderAuthHasUsableTxn = Boolean(
     activeProviderAuthSession?.txn &&
-      activeProviderAuthSession?.response_contract_confirmed &&
+      (activeProviderAuthSession.response_contract_confirmed ||
+        activeProviderAuthSession.status === "auth_token_received" ||
+        activeProviderAuthSession.status === "session_active"),
+  );
+  const activeProviderAuthReady = Boolean(
+    activeProviderAuthHasUsableTxn &&
       !activeProviderAuthFreshness?.is_stale,
   );
   const activeProviderAuthPending = Boolean(
@@ -638,7 +643,12 @@ export default function ReconciliationPage() {
       });
       setFetch2BOtp("");
 
-      if (!session.response_contract_confirmed) {
+      const hasUsableTxn = Boolean(
+        session.txn &&
+          (session.response_contract_confirmed || session.status === "auth_token_received" || session.status === "session_active") &&
+          !session.freshness_summary?.is_stale,
+      );
+      if (!hasUsableTxn) {
         toast.error("OTP was accepted, but this GSTIN session is still not ready. Request OTP again if the status does not refresh.");
         return;
       }

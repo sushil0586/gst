@@ -23,6 +23,17 @@ RETURN_TYPE_TO_WHITEBOOKS = {
     ReturnPreparation.ReturnType.GSTR9C: "GSTR9C",
 }
 
+LEDGER_EVIDENCE_COMPONENTS = (
+    ("balance", "balance_response"),
+    ("taxpayable", "taxpayable_response"),
+    ("cash_ledger", "cash_ledger_response"),
+    ("itc_ledger", "itc_ledger_response"),
+    ("liability_ledger", "liability_ledger_response"),
+)
+PAYMENT_EVIDENCE_COMPONENTS = (
+    ("challan_history", "challan_history_response"),
+)
+
 
 def get_portal_filing_readiness(*, workspace_id, client_id, gstin_id, compliance_period_id, return_type: str, actor=None) -> dict:
     compliance_period = (
@@ -258,6 +269,14 @@ def get_portal_filing_readiness(*, workspace_id, client_id, gstin_id, compliance
         live_challan_history_response=challan_history_response,
         live_challan_summary_response=challan_summary_response,
     )
+    provider_evidence["support_summary"] = _build_provider_evidence_support_summary(
+        provider_evidence=provider_evidence,
+        blockers=blockers,
+        transport_errors=transport_errors,
+        ledger_reads_enabled=ledger_reads_enabled,
+        payment_reads_enabled=payment_reads_enabled,
+        live_fetch_attempted=ledger_reads_enabled and not blockers,
+    )
 
     return {
         "provider": ReturnFiling.Provider.WHITEBOOKS,
@@ -376,6 +395,85 @@ def _coerce_payload(value: Any) -> dict[str, Any] | None:
     if isinstance(value, dict) and value:
         return value
     return None
+
+
+def _build_provider_evidence_support_summary(
+    *,
+    provider_evidence: dict[str, Any],
+    blockers: list[str],
+    transport_errors: list[str],
+    ledger_reads_enabled: bool,
+    payment_reads_enabled: bool,
+    live_fetch_attempted: bool,
+) -> dict[str, Any]:
+    expected_components = list(LEDGER_EVIDENCE_COMPONENTS)
+    if payment_reads_enabled:
+        expected_components.extend(PAYMENT_EVIDENCE_COMPONENTS)
+        if provider_evidence.get("challan_reference"):
+            expected_components.append(("challan_summary", "challan_summary_response"))
+
+    captured_components = [
+        label
+        for label, payload_key in expected_components
+        if bool(provider_evidence.get(payload_key))
+    ]
+    missing_components = [
+        label
+        for label, payload_key in expected_components
+        if not provider_evidence.get(payload_key)
+    ]
+    failed_components = [_extract_transport_component(error) for error in transport_errors]
+    source = provider_evidence.get("source") or "none"
+    used_saved_snapshot = source == "saved_snapshot"
+
+    if blockers and source == "none":
+        status = "blocked"
+        label = "Blocked"
+        detail = "Portal evidence could not be fetched and no saved snapshot is available."
+    elif blockers and used_saved_snapshot:
+        status = "saved_fallback"
+        label = "Saved fallback"
+        detail = "Live portal fetch is blocked, so the latest saved snapshot is being shown."
+    elif used_saved_snapshot:
+        status = "saved_fallback"
+        label = "Saved fallback"
+        detail = "Latest saved portal evidence is being shown."
+    elif source == "none":
+        status = "missing"
+        label = "Missing"
+        detail = "No portal evidence has been captured for this return context yet."
+    elif missing_components or transport_errors:
+        status = "partial_live"
+        label = "Partial live"
+        detail = "Some live portal evidence was captured, but one or more provider calls did not return usable data."
+    else:
+        status = "complete_live"
+        label = "Complete live"
+        detail = "All enabled portal evidence calls returned usable data in the latest live fetch."
+
+    return {
+        "status": status,
+        "label": label,
+        "detail": detail,
+        "source": source,
+        "snapshot_id": provider_evidence.get("snapshot_id"),
+        "fetched_at": provider_evidence.get("fetched_at"),
+        "ledger_reads_enabled": ledger_reads_enabled,
+        "payment_reads_enabled": payment_reads_enabled,
+        "live_fetch_attempted": live_fetch_attempted,
+        "used_saved_snapshot": used_saved_snapshot,
+        "captured_components": captured_components,
+        "missing_components": missing_components,
+        "failed_components": failed_components,
+        "transport_error_count": len(transport_errors),
+    }
+
+
+def _extract_transport_component(error: str) -> str:
+    value = str(error or "").strip()
+    if ":" not in value:
+        return value
+    return value.split(":", 1)[0].strip()
 
 
 def _build_freshness_summary(auth_session: ProviderAuthSession | None) -> dict[str, Any]:

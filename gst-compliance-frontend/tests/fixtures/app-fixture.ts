@@ -1107,6 +1107,39 @@ class QaAppMock {
         transaction_count: 18,
       }),
     ];
+    const providerAuthSession = {
+      id: "provider-session-1",
+      workspace: "workspace-1",
+      workspace_name: "Primary Workspace",
+      client: "client-1",
+      client_name: "Acme Client Private Limited",
+      gstin: "gstin-1",
+      gstin_value: "27ABCDE1234F1Z5",
+      provider: "whitebooks",
+      email: "owner@example.com",
+      txn: "WB-TXN-001",
+      status: "auth_token_received",
+      otp_request_payload: {},
+      auth_token_payload: {},
+      session_metadata: {},
+      freshness_summary: {
+        max_age_minutes: 360,
+        verified_at: "2026-06-05T09:35:00Z",
+        expires_at: "2026-06-05T15:35:00Z",
+        is_stale: false,
+        stale_reason: "",
+      },
+      error_summary: {},
+      response_contract_confirmed: false,
+      last_requested_at: "2026-06-05T09:30:00Z",
+      verified_at: "2026-06-05T09:35:00Z",
+      initiated_by: 1,
+      initiated_by_name: "Owner Accounts",
+      verified_by: 1,
+      verified_by_name: "Owner Accounts",
+      created_at: "2026-06-05T09:30:00Z",
+      updated_at: "2026-06-05T09:35:00Z",
+    };
 
     await this.page.route("**/api/backend/import-templates/**", async (route) => {
       await route.fulfill(paginated([]));
@@ -1125,7 +1158,30 @@ class QaAppMock {
       await route.fulfill(jsonSuccess(nextBatch));
     });
 
-    await this.page.route(/\/api\/backend\/imports\/batches\/[^/]+\/$/, async (route) => {
+    await this.page.route("**/api/backend/imports/batches/fetch-gstr2b/", async (route) => {
+      const nextBatch = createImportBatch({
+        id: `batch-${batches.length + 1}`,
+        import_type: "gstr_2b",
+        source_type: "provider",
+        file_name: "acme-client-gstr2b-052026.provider.json",
+        source_metadata: {
+          provider: "whitebooks",
+          fetch_status: "fetched",
+          provider_reference_id: "WB-GSTR2B-001",
+        },
+        status: "processed",
+        total_rows: 18,
+        valid_rows: 18,
+        invalid_rows: 0,
+        processed_rows: 18,
+        transaction_count: 18,
+        uploaded_by_name: "Owner Accounts",
+      });
+      batches = [nextBatch, ...batches];
+      await route.fulfill(jsonSuccess(nextBatch));
+    });
+
+    await this.page.route(/\/api\/backend\/imports\/batches\/(?!fetch-gstr2b\/?$)[^/]+\/$/, async (route) => {
       const batchId = route.request().url().split("/imports/batches/")[1]?.replace(/\/$/, "");
       await route.fulfill(jsonSuccess(batches.find((batch) => batch.id === batchId) ?? createImportBatch()));
     });
@@ -1173,6 +1229,9 @@ class QaAppMock {
     });
     await this.page.route("**/api/backend/gst-transactions/**", async (route) => {
       await route.fulfill(paginated([], 42));
+    });
+    await this.page.route("**/api/backend/provider-auth-sessions/**", async (route) => {
+      await route.fulfill(paginated([providerAuthSession]));
     });
   }
 
@@ -1232,8 +1291,37 @@ class QaAppMock {
     staleRun?: boolean;
     portalReadiness?: "blocked" | "ready";
     challanValidationFails?: boolean;
+    initialPreparedReturn?: boolean;
+    initialReturnType?: "gstr1" | "gstr3b";
   }) {
-    let preparedReturns: Array<Record<string, unknown>> = [];
+    const initialReturnType = options?.initialReturnType ?? "gstr3b";
+    let preparedReturns: Array<Record<string, unknown>> = options?.initialPreparedReturn
+      ? [
+          createPreparedReturn({
+            id: `return-${initialReturnType}`,
+            return_type: initialReturnType,
+            ...(initialReturnType === "gstr1"
+              ? {
+                  summary_snapshot: {
+                    outward_supplies: {
+                      total_taxable_value: "3000.00",
+                      total_tax_amount: "540.00",
+                      document_count: 3,
+                      b2b_taxable_value: "2000.00",
+                      b2b_tax_amount: "360.00",
+                      b2c_taxable_value: "1000.00",
+                      b2c_tax_amount: "180.00",
+                      credit_note_tax_amount: "90.00",
+                      debit_note_tax_amount: "108.00",
+                    },
+                    sections: {},
+                    period_exceptions: { count: 0 },
+                  },
+                }
+              : {}),
+          }),
+        ]
+      : [];
     let portalChallanRequests: PortalChallanRecord[] = options?.portalReadiness === "ready"
       ? [{
           id: "challan-1",
@@ -1389,7 +1477,137 @@ class QaAppMock {
           challan_history_response: portalReadinessMode === "ready" ? { challans: portalChallanRequests } : null,
           challan_summary_response: portalReadinessMode === "ready" ? { cpin: "CPIN0001234567", total_amount: "81000.00" } : null,
           challan_reference: portalReadinessMode === "ready" ? "CPIN0001234567" : "",
+          support_summary: {
+            status: portalReadinessMode === "ready" ? "complete_live" : "blocked",
+            label: portalReadinessMode === "ready" ? "Complete live" : "Blocked",
+            detail: portalReadinessMode === "ready"
+              ? "All enabled portal evidence calls returned usable data in the latest live fetch."
+              : "Portal evidence could not be fetched and no saved snapshot is available.",
+            source: portalReadinessMode === "ready" ? "live_fetch" : "none",
+            snapshot_id: portalReadinessMode === "ready" ? "snapshot-portal-1" : null,
+            fetched_at: portalReadinessMode === "ready" ? "2026-06-05T09:30:00Z" : null,
+            ledger_reads_enabled: true,
+            payment_reads_enabled: portalReadinessMode === "ready",
+            live_fetch_attempted: portalReadinessMode === "ready",
+            used_saved_snapshot: false,
+            captured_components: portalReadinessMode === "ready"
+              ? ["balance", "taxpayable", "cash_ledger", "itc_ledger", "liability_ledger", "challan_history", "challan_summary"]
+              : [],
+            missing_components: portalReadinessMode === "ready"
+              ? []
+              : ["balance", "taxpayable", "cash_ledger", "itc_ledger", "liability_ledger"],
+            failed_components: [],
+            transport_error_count: 0,
+          },
         },
+      }));
+    });
+
+    await this.page.route("**/api/backend/returns/provider-summary-compare/", async (route) => {
+      const payload = route.request().postDataJSON() as Record<string, string>;
+      const returnType = payload.return_type === "gstr1" ? "gstr1" : "gstr3b";
+      const comparisonRows = returnType === "gstr1"
+        ? [
+            {
+              field: "total_taxable_value",
+              label: "Total taxable value",
+              internal_amount: "3000.00",
+              provider_amount: "3000.00",
+              difference_amount: "0.00",
+              absolute_difference: "0.00",
+              provider_present: true,
+              severity: "match",
+            },
+            {
+              field: "total_tax_amount",
+              label: "Total tax amount",
+              internal_amount: "540.00",
+              provider_amount: "550.00",
+              difference_amount: "-10.00",
+              absolute_difference: "10.00",
+              provider_present: true,
+              severity: "mismatch",
+            },
+            {
+              field: "b2c_tax_amount",
+              label: "B2C tax amount",
+              internal_amount: "180.00",
+              provider_amount: "190.00",
+              difference_amount: "-10.00",
+              absolute_difference: "10.00",
+              provider_present: true,
+              severity: "mismatch",
+            },
+          ]
+        : [
+            {
+              field: "outward_tax_liability",
+              label: "Outward tax liability",
+              internal_amount: "153000.00",
+              provider_amount: "153000.00",
+              difference_amount: "0.00",
+              absolute_difference: "0.00",
+              provider_present: true,
+              severity: "match",
+            },
+            {
+              field: "eligible_itc",
+              label: "Eligible ITC",
+              internal_amount: "72000.00",
+              provider_amount: "71980.00",
+              difference_amount: "20.00",
+              absolute_difference: "20.00",
+              provider_present: true,
+              severity: "mismatch",
+            },
+            {
+              field: "net_tax_payable",
+              label: "Net tax payable",
+              internal_amount: "81000.00",
+              provider_amount: "81020.00",
+              difference_amount: "-20.00",
+              absolute_difference: "20.00",
+              provider_present: true,
+              severity: "mismatch",
+            },
+          ];
+      await route.fulfill(jsonSuccess({
+        id: "provider-summary-snapshot-1",
+        workspace: "workspace-1",
+        client: "client-1",
+        gstin: "gstin-1",
+        gstin_value: "27ABCDE1234F1Z5",
+        compliance_period: "period-1",
+        compliance_period_label: "2026-05",
+        prepared_return: preparedReturns[0]?.id ?? `return-${returnType}`,
+        auth_session: "session-1",
+        provider: "whitebooks",
+        return_type: returnType,
+        fetched_at: "2026-06-05T09:35:00Z",
+        status: "mismatch",
+        threshold_amount: "1.00",
+        internal_summary: returnType === "gstr1"
+          ? { total_taxable_value: "3000.00", total_tax_amount: "540.00", b2c_tax_amount: "180.00" }
+          : { outward_tax_liability: "153000.00", eligible_itc: "72000.00", net_tax_payable: "81000.00" },
+        provider_response: returnType === "gstr1"
+          ? { status_cd: "1", data: { total_taxable_value: "3000.00", total_tax_amount: "550.00", b2c_tax_amount: "190.00" } }
+          : { status_cd: "1", data: { outward_tax_liability: "153000.00", eligible_itc: "71980.00", net_tax_payable: "81020.00" } },
+        normalized_provider_summary: returnType === "gstr1"
+          ? { total_taxable_value: "3000.00", total_tax_amount: "550.00", b2c_tax_amount: "190.00" }
+          : { outward_tax_liability: "153000.00", eligible_itc: "71980.00", net_tax_payable: "81020.00" },
+        comparison_summary: {
+          status: "mismatch",
+          threshold_amount: "1.00",
+          matched_count: returnType === "gstr1" ? 1 : 1,
+          within_threshold_count: 0,
+          mismatch_count: 2,
+          compared_fields: comparisonRows.map((row) => row.field),
+          source: "live_fetch",
+          rows: comparisonRows,
+        },
+        error_message: "",
+        created_at: "2026-06-05T09:35:00Z",
+        updated_at: "2026-06-05T09:35:00Z",
       }));
     });
 

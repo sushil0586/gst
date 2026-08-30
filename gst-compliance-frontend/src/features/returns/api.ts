@@ -3,7 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api/client";
 import { unwrapApiData, unwrapPaginatedData } from "@/lib/api/helpers";
 import { queryKeys } from "@/lib/query/query-keys";
-import type { PortalChallanRecord, PortalFilingReadinessPayload, ReturnPreparationRecord, ReturnReadinessPayload } from "@/types/api";
+import type {
+  PortalChallanRecord,
+  PortalFilingReadinessPayload,
+  ProviderReturnSummarySnapshotRecord,
+  ReturnPreparationRecord,
+  ReturnReadinessPayload,
+} from "@/types/api";
 
 type ReturnFilters = {
   workspace?: string;
@@ -37,6 +43,15 @@ type GeneratePortalChallanPayload = {
   igst_tax_amount: string;
   sgst_tax_amount: string;
   cess_tax_amount: string;
+  allow_duplicate_generation?: boolean;
+};
+
+type ProviderSummaryComparePayload = {
+  workspace: string;
+  client: string;
+  gstin: string;
+  compliance_period: string;
+  return_type: "gstr1" | "gstr3b";
 };
 
 type ValidatePortalChallanResult = {
@@ -144,6 +159,15 @@ export function useValidatePortalChallanMutation() {
     mutationFn: async (payload: GeneratePortalChallanPayload) => {
       const response = await apiClient.post("/returns/validate-portal-challan/", payload);
       return unwrapApiData<ValidatePortalChallanResult>(response);
+    },
+  });
+}
+
+export function useProviderSummaryCompareMutation() {
+  return useMutation({
+    mutationFn: async (payload: ProviderSummaryComparePayload) => {
+      const response = await apiClient.post("/returns/provider-summary-compare/", payload);
+      return unwrapApiData<ProviderReturnSummarySnapshotRecord>(response);
     },
   });
 }

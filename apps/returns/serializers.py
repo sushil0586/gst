@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from apps.returns.models import PortalChallanRequest, ReturnPreparation
+from apps.returns.models import PortalChallanRequest, ProviderReturnSummarySnapshot, ReturnPreparation
 
 
 class ReturnPreparationSerializer(serializers.ModelSerializer):
@@ -108,9 +108,18 @@ class PortalChallanRequestSerializer(serializers.Serializer):
     igst_tax_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
     sgst_tax_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
     cess_tax_amount = serializers.DecimalField(max_digits=14, decimal_places=2)
+    allow_duplicate_generation = serializers.BooleanField(required=False, default=False)
 
 
 class PortalChallanListRequestSerializer(serializers.Serializer):
+    workspace = serializers.UUIDField()
+    client = serializers.UUIDField()
+    gstin = serializers.UUIDField()
+    compliance_period = serializers.UUIDField()
+    return_type = serializers.ChoiceField(choices=ReturnPreparation.ReturnType.choices, default=ReturnPreparation.ReturnType.GSTR3B)
+
+
+class ProviderSummaryCompareRequestSerializer(serializers.Serializer):
     workspace = serializers.UUIDField()
     client = serializers.UUIDField()
     gstin = serializers.UUIDField()
@@ -150,6 +159,41 @@ class PortalChallanRecordSerializer(serializers.ModelSerializer):
             "request_payload",
             "response_payload",
             "total_amount",
+            "error_message",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class ProviderReturnSummarySnapshotSerializer(serializers.ModelSerializer):
+    workspace = serializers.UUIDField(source="compliance_period.gstin.client.workspace_id", read_only=True)
+    client = serializers.UUIDField(source="compliance_period.gstin.client_id", read_only=True)
+    gstin = serializers.UUIDField(source="compliance_period.gstin_id", read_only=True)
+    gstin_value = serializers.CharField(source="compliance_period.gstin.gstin", read_only=True)
+    compliance_period_label = serializers.CharField(source="compliance_period.period", read_only=True)
+
+    class Meta:
+        model = ProviderReturnSummarySnapshot
+        fields = [
+            "id",
+            "workspace",
+            "client",
+            "gstin",
+            "gstin_value",
+            "compliance_period",
+            "compliance_period_label",
+            "prepared_return",
+            "auth_session",
+            "provider",
+            "return_type",
+            "fetched_at",
+            "status",
+            "threshold_amount",
+            "internal_summary",
+            "provider_response",
+            "normalized_provider_summary",
+            "comparison_summary",
             "error_message",
             "created_at",
             "updated_at",

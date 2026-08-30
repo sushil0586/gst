@@ -56,6 +56,11 @@ Primary frontend launch verification reference:
 
 - [docs/frontend-launch-verification-summary.md](/Users/ansh/Documents/Gst-Compliance/docs/frontend-launch-verification-summary.md:1)
 
+Current launch closeout references:
+
+- [docs/whitebooks-sandbox-escalation-email-2026-08-30.md](/Users/ansh/Documents/Gst-Compliance/docs/whitebooks-sandbox-escalation-email-2026-08-30.md:1)
+- [docs/production-alerting-closeout-2026-08-30.md](/Users/ansh/Documents/Gst-Compliance/docs/production-alerting-closeout-2026-08-30.md:1)
+
 ## Tech stack
 
 ### Backend

@@ -24,7 +24,7 @@ import { ErrorState } from "@/components/common/error-state";
 import { LoadingState } from "@/components/common/loading-state";
 import { PageHeader } from "@/components/common/page-header";
 import { ActionLabel } from "@/components/common/action-label";
-import { AppModalBody, AppModalContent, AppModalHeader } from "@/components/common/app-modal";
+import { AppModalBody, AppModalContent, AppModalFooter, AppModalHeader } from "@/components/common/app-modal";
 import { SectionCard } from "@/components/common/section-card";
 import { FileUploadDropzone } from "@/components/forms/file-upload-dropzone";
 import { StatusBadge } from "@/components/status/status-badge";
@@ -38,6 +38,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Table,
@@ -62,8 +63,10 @@ import {
   useReprocessImportBatchMutation,
   useReplaceImportBatchMutation,
   useUpdateImportTemplateMutation,
+  useFetchGstr2BImportBatchMutation,
   useUploadImportBatchMutation,
 } from "@/features/imports";
+import { useProviderAuthSessionsQuery, useRequestProviderOTPMutation, useVerifyProviderOTPMutation } from "@/features/filings";
 import { downloadFile } from "@/lib/api/download";
 import { getErrorMessage, normalizeApiError } from "@/lib/api/error-handler";
 import { buildHeaderSuggestions, parseHeadersFromFile, type TemplateMappingField } from "@/lib/imports/header-detection";
@@ -321,6 +324,9 @@ export default function ImportsPage() {
   const [batchReplacementTarget, setBatchReplacementTarget] = useState<ImportBatchRecord | null>(null);
   const [batchReprocessTarget, setBatchReprocessTarget] = useState<ImportBatchRecord | null>(null);
   const [replacementFile, setReplacementFile] = useState<File | null>(null);
+  const [isFetch2BAuthModalOpen, setIsFetch2BAuthModalOpen] = useState(false);
+  const [pendingFetchAfterOtp, setPendingFetchAfterOtp] = useState(false);
+  const [fetch2BOtp, setFetch2BOtp] = useState("");
 
   const filters = useMemo(
     () => ({
@@ -353,9 +359,22 @@ export default function ImportsPage() {
   const reprocessImportBatchMutation = useReprocessImportBatchMutation(filters);
   const correctImportRowMutation = useCorrectImportRowMutation(filters);
   const discardImportRowMutation = useDiscardImportRowMutation(filters);
+  const fetchGstr2bMutation = useFetchGstr2BImportBatchMutation(filters);
   const createTemplateMutation = useCreateImportTemplateMutation(templateFilters);
   const updateTemplateMutation = useUpdateImportTemplateMutation(templateFilters, editingTemplate?.id);
   const deleteTemplateMutation = useDeleteImportTemplateMutation(templateFilters);
+  const providerAuthFilters = useMemo(
+    () => ({
+      workspace: selectedWorkspaceId ?? undefined,
+      client: selectedClientId ?? undefined,
+      gstin: selectedGstinId ?? undefined,
+      provider: "whitebooks" as const,
+    }),
+    [selectedWorkspaceId, selectedClientId, selectedGstinId],
+  );
+  const providerAuthSessionsQuery = useProviderAuthSessionsQuery(providerAuthFilters);
+  const requestProviderOTPMutation = useRequestProviderOTPMutation(providerAuthFilters);
+  const verifyProviderOTPMutation = useVerifyProviderOTPMutation(providerAuthFilters);
 
   const isPeriodLocked = Boolean(selectedPeriod?.is_locked);
   const canUpload = Boolean(selectedWorkspaceId && selectedClientId && selectedPeriodId && file && !isPeriodLocked);
@@ -534,6 +553,125 @@ export default function ImportsPage() {
     }
   };
 
+  const performFetchGstr2B = async () => {
+    if (!selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId) {
+      toast.error("Select workspace, client, GSTIN, and period before fetching GSTR-2B.");
+      return false;
+    }
+
+    const batch = await fetchGstr2bMutation.mutateAsync({
+      workspace: selectedWorkspaceId,
+      client: selectedClientId,
+      gstin: selectedGstinId,
+      compliance_period: selectedPeriodId,
+      provider: "whitebooks",
+    });
+    setSelectedBatchId(batch.id);
+
+    const fetchStatus = String(batch.source_metadata?.fetch_status ?? "");
+    if (fetchStatus === "waiting_for_provider") {
+      toast.success("WhiteBooks is preparing GSTR-2B. This batch will update after provider polling completes.");
+      return true;
+    }
+    if (fetchStatus === "failed") {
+      toast.error(batch.error_summary?.message || "WhiteBooks did not return the GSTR-2B file in time.");
+      return false;
+    }
+    toast.success(
+      batch.transaction_count > 0
+        ? `Fetched ${batch.transaction_count} GSTR-2B transaction(s).`
+        : "GSTR-2B fetched. Review the provider batch before reconciliation.",
+    );
+    return true;
+  };
+
+  const openFetch2BAuthModal = (shouldContinueAfterOtp = true) => {
+    setPendingFetchAfterOtp(shouldContinueAfterOtp);
+    setIsFetch2BAuthModalOpen(true);
+  };
+
+  const handleFetchProviderGstr2B = async () => {
+    if (!selectedWorkspaceId || !selectedClientId || !selectedGstinId || !selectedPeriodId) {
+      toast.error("Select workspace, client, GSTIN, and period before fetching GSTR-2B.");
+      return;
+    }
+    if (isPeriodLocked) {
+      toast.error("This compliance period is locked. Unlock it before fetching GSTR-2B.");
+      return;
+    }
+    if (!activeProviderAuthReady) {
+      openFetch2BAuthModal(true);
+      return;
+    }
+
+    try {
+      await performFetchGstr2B();
+    } catch (error) {
+      const message = getErrorMessage(error);
+      if (message.toLowerCase().includes("provider auth session") || message.toLowerCase().includes("otp")) {
+        openFetch2BAuthModal(true);
+      }
+      toast.error(message);
+    }
+  };
+
+  const handleRequestFetch2BOtp = async () => {
+    if (!selectedWorkspaceId || !selectedClientId || !selectedGstinId) {
+      toast.error("Select workspace, client, and GSTIN before requesting OTP.");
+      return;
+    }
+
+    try {
+      await requestProviderOTPMutation.mutateAsync({
+        workspace: selectedWorkspaceId,
+        client: selectedClientId,
+        gstin: selectedGstinId,
+        provider: "whitebooks",
+      });
+      setFetch2BOtp("");
+      toast.success("OTP requested for this GSTIN.");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
+  };
+
+  const handleVerifyFetch2BOtp = async () => {
+    if (!activeProviderAuthSession?.id) {
+      toast.error("Request OTP first for this GSTIN.");
+      return;
+    }
+
+    try {
+      const session = await verifyProviderOTPMutation.mutateAsync({
+        sessionId: activeProviderAuthSession.id,
+        otp: fetch2BOtp.trim(),
+        txn: activeProviderAuthSession.txn || undefined,
+      });
+      setFetch2BOtp("");
+
+      const hasUsableTxn = Boolean(
+        session.txn &&
+          (session.response_contract_confirmed || session.status === "auth_token_received" || session.status === "session_active") &&
+          !session.freshness_summary?.is_stale,
+      );
+      if (!hasUsableTxn) {
+        toast.error("OTP was accepted, but this GSTIN session is still not ready. Request OTP again if the status does not refresh.");
+        return;
+      }
+
+      toast.success("Verification complete. Continuing GSTR-2B fetch...");
+      if (pendingFetchAfterOtp) {
+        const didFetch = await performFetchGstr2B();
+        if (didFetch) {
+          setIsFetch2BAuthModalOpen(false);
+          setPendingFetchAfterOtp(false);
+        }
+      }
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
+  };
+
   const handleTemplateSubmit = async () => {
     setTemplateSubmitAttempted(true);
     if (!selectedWorkspaceId) {
@@ -597,6 +735,8 @@ export default function ImportsPage() {
   const processedBatchCount = batches.filter((batch) => batch.status === "processed").length;
   const invalidRowTotal = batches.reduce((count, batch) => count + (batch.invalid_rows ?? 0), 0);
   const latestBatch = batches[0] ?? null;
+  const latestProviderGstr2bBatch =
+    batches.find((batch) => batch.import_type === "gstr_2b" && batch.source_type === "provider") ?? null;
   const transactionCount = selectedBatch?.transaction_count ?? latestBatch?.transaction_count ?? 0;
   const batchesRequiringRerun = batches.filter((batch) => batch.correction_summary?.requires_reconciliation_rerun).length;
   const filingLockedBatchCount = batches.filter((batch) => batch.correction_summary?.is_locked_by_filing).length;
@@ -638,6 +778,58 @@ export default function ImportsPage() {
     }
     return details;
   }, [selectedBatch]);
+  const activeProviderAuthSession = providerAuthSessionsQuery.data?.items[0];
+  const activeProviderAuthFreshness = activeProviderAuthSession?.freshness_summary;
+  const activeProviderAuthHasUsableTxn = Boolean(
+    activeProviderAuthSession?.txn &&
+      (activeProviderAuthSession.response_contract_confirmed ||
+        activeProviderAuthSession.status === "auth_token_received" ||
+        activeProviderAuthSession.status === "session_active"),
+  );
+  const activeProviderAuthReady = Boolean(
+    activeProviderAuthHasUsableTxn &&
+      !activeProviderAuthFreshness?.is_stale,
+  );
+  const activeProviderAuthPending = Boolean(
+    activeProviderAuthSession &&
+      !activeProviderAuthReady &&
+      (activeProviderAuthSession.status === "otp_requested" || activeProviderAuthSession.status === "auth_token_received"),
+  );
+  const canRequestFetch2BOtp = Boolean(
+    selectedWorkspaceId &&
+      selectedClientId &&
+      selectedGstinId &&
+      !requestProviderOTPMutation.isPending &&
+      !verifyProviderOTPMutation.isPending,
+  );
+  const canVerifyFetch2BOtp = Boolean(
+    activeProviderAuthSession?.id &&
+      fetch2BOtp.trim() &&
+      !verifyProviderOTPMutation.isPending &&
+      !requestProviderOTPMutation.isPending,
+  );
+  const canFetchProviderGstr2b = Boolean(
+    isImportContextReady &&
+      !isPeriodLocked &&
+      !fetchGstr2bMutation.isPending,
+  );
+  const providerFetchStatus = String(latestProviderGstr2bBatch?.source_metadata?.fetch_status ?? "");
+  const providerFetchLabel =
+    providerFetchStatus === "waiting_for_provider"
+      ? "Waiting for provider"
+      : providerFetchStatus === "failed"
+        ? "Provider fetch failed"
+        : latestProviderGstr2bBatch
+          ? "Provider 2B available"
+          : "Not fetched";
+  const providerFetchVariant =
+    providerFetchStatus === "failed"
+      ? "danger"
+      : providerFetchStatus === "waiting_for_provider" || latestProviderGstr2bBatch?.status === "queued"
+        ? "warning"
+        : latestProviderGstr2bBatch
+          ? "success"
+          : "neutral";
 
   const handleExportErrors = async () => {
     if (!selectedWorkspaceId || !selectedClientId || !selectedPeriodId || !selectedBatchId) {
@@ -1100,6 +1292,81 @@ export default function ImportsPage() {
           )}
         </SectionCard>
       </div>
+
+      <SectionCard
+        title="Provider GSTR-2B fetch"
+        description="Fetch GSTR-2B directly from the connected filing channel for the selected GSTIN and period, while keeping manual upload available as fallback."
+        action={
+          <Button
+            size="sm"
+            onClick={handleFetchProviderGstr2B}
+            disabled={!canFetchProviderGstr2b}
+            data-testid="fetch-provider-gstr2b"
+          >
+            {fetchGstr2bMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Fetch GSTR-2B"}
+          </Button>
+        }
+      >
+        {isImportContextReady ? (
+          <div className="grid gap-4 xl:grid-cols-[0.85fr_1.15fr]">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusBadge label={providerFetchLabel} variant={providerFetchVariant} />
+                {latestProviderGstr2bBatch ? (
+                  <Badge variant="outline">Batch {latestProviderGstr2bBatch.id.slice(0, 8)}</Badge>
+                ) : null}
+              </div>
+              <div className="mt-4 grid gap-3 text-sm text-slate-700 md:grid-cols-3">
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Auth session</p>
+                  <p className="mt-1 font-semibold text-slate-900">
+                    {activeProviderAuthReady
+                      ? "Ready"
+                      : activeProviderAuthPending
+                        ? "OTP pending"
+                        : "Verification needed"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Transactions</p>
+                  <p className="mt-1 font-semibold text-slate-900">{latestProviderGstr2bBatch?.transaction_count ?? 0}</p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-slate-500">Last update</p>
+                  <p className="mt-1 font-semibold text-slate-900">{formatDateTime(latestProviderGstr2bBatch?.processed_at ?? latestProviderGstr2bBatch?.created_at)}</p>
+                </div>
+              </div>
+              {latestProviderGstr2bBatch?.error_summary?.message ? (
+                <p className="mt-3 text-sm leading-6 text-rose-700">{latestProviderGstr2bBatch.error_summary.message}</p>
+              ) : providerFetchStatus === "waiting_for_provider" ? (
+                <p className="mt-3 text-sm leading-6 text-amber-800">WhiteBooks is preparing the file. The imports worker will poll and update this batch automatically.</p>
+              ) : (
+                <p className="mt-3 text-sm leading-6 text-slate-600">Use provider fetch for the latest portal 2B data. Upload remains available if the provider is delayed or unavailable.</p>
+              )}
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                <p className="text-sm font-semibold text-slate-900">1. Verify GSTIN</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">{selectedGstin?.gstin ?? "Select a GSTIN in the topbar."}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                <p className="text-sm font-semibold text-slate-900">2. Fetch or wait</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">The same provider request is reused while WhiteBooks prepares the file.</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+                <p className="text-sm font-semibold text-slate-900">3. Reconcile</p>
+                <p className="mt-2 text-sm leading-6 text-slate-600">Processed provider rows become standard GSTR-2B transactions for matching.</p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <EmptyState
+            title="Select GSTIN and period first"
+            description="Choose workspace, client, GSTIN, and compliance period before fetching GSTR-2B from the filing channel."
+          />
+        )}
+      </SectionCard>
 
       <SectionCard
         title="Import operations snapshot"
@@ -2590,6 +2857,110 @@ export default function ImportsPage() {
             </div>
           </div>
         </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isFetch2BAuthModalOpen}
+        onOpenChange={(open) => {
+          setIsFetch2BAuthModalOpen(open);
+          if (!open) {
+            setPendingFetchAfterOtp(false);
+            setFetch2BOtp("");
+          }
+        }}
+      >
+        <AppModalContent size="md">
+          <AppModalHeader
+            title="Verification needed to fetch GSTR-2B"
+            description={`Use OTP for ${selectedClient?.legal_name ?? "the selected client"}${selectedGstin?.gstin ? ` • ${selectedGstin.gstin}` : ""}.`}
+          />
+
+          <AppModalBody className="space-y-5">
+            <div
+              className={`rounded-2xl border px-4 py-4 text-sm ${
+                activeProviderAuthReady
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                  : activeProviderAuthPending
+                    ? "border-amber-200 bg-amber-50 text-amber-900"
+                    : "border-sky-200 bg-sky-50 text-sky-900"
+              }`}
+            >
+              <p className="font-medium">
+                {activeProviderAuthReady
+                  ? "Verification complete"
+                  : activeProviderAuthPending
+                    ? "OTP verification pending"
+                    : "Request OTP to continue"}
+              </p>
+              <p className="mt-1">
+                {activeProviderAuthReady
+                  ? "This GSTIN has a usable WhiteBooks session for provider fetch."
+                  : activeProviderAuthPending
+                    ? "Enter the OTP for this GSTIN, then the GSTR-2B fetch will continue."
+                    : "WhiteBooks access is verified per workspace, client, GSTIN, and provider."}
+              </p>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className={`rounded-2xl border px-4 py-3 text-sm ${activeProviderAuthSession?.last_requested_at ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+                <p className="font-medium">1. Request OTP</p>
+                <p className="mt-1">{activeProviderAuthSession?.last_requested_at ? "OTP requested for this GSTIN." : "Send OTP through WhiteBooks."}</p>
+              </div>
+              <div className={`rounded-2xl border px-4 py-3 text-sm ${activeProviderAuthSession?.verified_at ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-slate-200 bg-slate-50 text-slate-700"}`}>
+                <p className="font-medium">2. Verify OTP</p>
+                <p className="mt-1">{activeProviderAuthSession?.verified_at ? "OTP verified." : "Enter the OTP exactly as received."}</p>
+              </div>
+              <div className={`rounded-2xl border px-4 py-3 text-sm ${activeProviderAuthReady ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+                <p className="font-medium">3. Fetch GSTR-2B</p>
+                <p className="mt-1">{activeProviderAuthReady ? "Ready to fetch now." : "Fetch continues after verification."}</p>
+              </div>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="imports-fetch2b-txn">Session reference</Label>
+                <Input
+                  id="imports-fetch2b-txn"
+                  readOnly
+                  value={activeProviderAuthSession?.txn || ""}
+                  placeholder="Auto-captured from WhiteBooks"
+                  className="h-11 bg-slate-50"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="imports-fetch2b-otp">OTP</Label>
+                <Input
+                  id="imports-fetch2b-otp"
+                  value={fetch2BOtp}
+                  onChange={(event) => setFetch2BOtp(event.target.value)}
+                  placeholder="Enter OTP"
+                  className="h-11 bg-slate-50"
+                />
+              </div>
+            </div>
+          </AppModalBody>
+
+          <AppModalFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsFetch2BAuthModalOpen(false);
+                setPendingFetchAfterOtp(false);
+                setFetch2BOtp("");
+              }}
+            >
+              Close
+            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={handleRequestFetch2BOtp} disabled={!canRequestFetch2BOtp}>
+                {requestProviderOTPMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Request OTP"}
+              </Button>
+              <Button onClick={handleVerifyFetch2BOtp} disabled={!canVerifyFetch2BOtp}>
+                {verifyProviderOTPMutation.isPending || fetchGstr2bMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : "Verify OTP and continue"}
+              </Button>
+            </div>
+          </AppModalFooter>
+        </AppModalContent>
       </Dialog>
     </div>
   );

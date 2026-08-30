@@ -11,6 +11,8 @@ Frontend launch-gate reference:
 Operational closeout reference:
 
 - [production-launch-ops-checklist-2026-08-24.md](/Users/ansh/Documents/Gst-Compliance/docs/production-launch-ops-checklist-2026-08-24.md:1)
+- [production-alerting-closeout-2026-08-30.md](/Users/ansh/Documents/Gst-Compliance/docs/production-alerting-closeout-2026-08-30.md:1)
+- [whitebooks-sandbox-escalation-email-2026-08-30.md](/Users/ansh/Documents/Gst-Compliance/docs/whitebooks-sandbox-escalation-email-2026-08-30.md:1)
 
 ## Pre-Release Checks
 
