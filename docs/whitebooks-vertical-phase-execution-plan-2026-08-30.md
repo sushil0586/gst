@@ -311,6 +311,12 @@ Completed normalized operator response slice on 2026-08-30:
 - raw provider JSON remains available below the normalized view for support/debugging
 - mocked frontend coverage verifies nested invoice normalization and count metric rendering
 
+Completed write-action confirmation slice on 2026-08-30:
+
+- IMS save/reset buttons now require an explicit operator confirmation and matching return-period text before they enable
+- failed-batch retry buttons now require typing `RETRY` before an operator can resubmit a failed provider write action
+- mocked frontend coverage verifies save/reset remain disabled until the confirmation guard is satisfied
+
 Backend work:
 
 - add async job handling for long IMS operations
@@ -328,7 +334,7 @@ Frontend work:
 - done: show provider response evidence and recent action batches
 - done: add action/status filters and recovery controls to recent IMS action batches
 - done: show normalized count metrics and invoice rows before the raw provider payload
-- prevent accidental bulk actions before expanding beyond pasted JSON draft payloads
+- done: prevent accidental write/retry actions before expanding beyond pasted JSON draft payloads
 
 QA/UAT:
 
@@ -339,6 +345,7 @@ QA/UAT:
 - done: mocked failed-batch retry
 - done: mocked action-batch provider status refresh
 - done: mocked normalized invoice table and count summary
+- done: mocked write-action confirmation guard
 - pending: live WhiteBooks sandbox fetch counts
 - pending: live WhiteBooks sandbox save accept/reject/no-action batch
 - pending: live WhiteBooks sandbox reset batch
@@ -366,24 +373,35 @@ WhiteBooks APIs:
 
 Backend work:
 
-- add WhiteBooks notice client methods
-- map provider notice payload into existing Notice model
-- add dedupe key strategy
-- add scheduled sync job
-- connect notices to follow-up/escalation system
+- done: add WhiteBooks notice list/detail client methods using Postman-confirmed `date` and `refId` query names
+- done: map provider notice-list payloads into existing Notice model with separate provider evidence fields
+- done: add dedupe key strategy per GSTIN + provider/reference number while preserving local owner/status workflow fields
+- done: add manual WhiteBooks sync endpoint with audit events and auth-session freshness checks
+- done: add audited WhiteBooks notice detail fetch with stored sanitized detail evidence and failure trail
+- done: add disabled-by-default scheduled notice sync task using fresh WhiteBooks auth sessions
+- done: connect notices to operational follow-ups with duplicate-safe create/reuse action
+- done: add append-only notice sync history for list sync, detail fetch success/failure, and follow-up create/reuse events
 
 Frontend work:
 
-- show provider-synced notices
-- show notice detail, due date, owner, priority, status
+- done: show provider-synced notices, portal status/type, portal due date, and last sync time
+- done: add scoped `Sync WhiteBooks` action for the selected workspace/client/GSTIN
+- done: show notice detail evidence, due date, owner, provider status, and detail fetch timestamp
+- done: show open/overdue notice follow-up posture and create notice-linked follow-ups from the register
+- done: show sync history from the notice register with event counters, status, actor, and timestamp
+- add priority classification
 - support manual note and attachment
-- show sync history
 
 QA/UAT:
 
-- first notice sync
-- duplicate notice sync
-- notice detail fetch failure
+- done: mocked first notice sync
+- done: mocked duplicate notice sync / evidence update
+- done: mocked notice detail fetch
+- done: mocked notice detail fetch failure
+- done: mocked scheduled notice sync processor
+- done: mocked duplicate-safe notice follow-up creation
+- done: mocked notice sync history display
+- done: mocked low-access user cannot sync
 - owner assignment and escalation
 
 Exit criteria:

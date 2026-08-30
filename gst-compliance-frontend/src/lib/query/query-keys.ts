@@ -41,6 +41,7 @@ export const queryKeys = {
   notices: {
     list: (filters?: Record<string, string | undefined>) => ["notices", "list", filters ?? {}] as const,
     detail: (noticeId: string) => ["notices", noticeId] as const,
+    syncHistory: (filters?: Record<string, string | undefined>) => ["notices", "sync-history", filters ?? {}] as const,
   },
   operationalFollowUps: {
     list: (filters?: Record<string, string | undefined>) => ["operational-follow-ups", "list", filters ?? {}] as const,

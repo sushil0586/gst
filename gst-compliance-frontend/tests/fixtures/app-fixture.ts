@@ -5,6 +5,7 @@ import type {
   GSTTransactionRecord,
   ImportBatchRecord,
   NoticeRecordApi,
+  NoticeSyncEventRecord,
   OperationalFollowUpRecord,
   PortalChallanRecord,
   ReconciliationItemRecord,
@@ -25,6 +26,7 @@ import {
   createGstTransaction,
   createImportBatch,
   createNotice,
+  createNoticeSyncEvent,
   createOperationalFollowUp,
   createPreparedReturn,
   createReconciliationItem,
@@ -580,6 +582,19 @@ class QaAppMock {
             updated_at: "2026-06-06T10:00:00Z",
           }) as NoticeRecordApi,
         ];
+    let syncEvents: NoticeSyncEventRecord[] = options?.empty
+      ? []
+      : [
+          createNoticeSyncEvent({
+            id: "notice-sync-event-existing-1",
+            event_type: "list_sync",
+            status: "success",
+            notice: "notice-1",
+            reference_number: "ASMT-10/2026/1184",
+            provider_reference_id: "ASMT-10/2026/1184",
+            message: "WhiteBooks notices synced.",
+          }) as NoticeSyncEventRecord,
+        ];
 
     await this.page.route(/\/api\/backend\/workspace-members\/?(?:\?.*)?$/, async (route) => {
       await route.fulfill(paginated(members));
@@ -646,8 +661,208 @@ class QaAppMock {
       await route.fulfill(jsonSuccess(nextNotice));
     });
 
+    await this.page.route(/\/api\/backend\/notices\/sync-whitebooks\/$/, async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+
+      const providerNotice = createNotice({
+        id: "notice-whitebooks-1",
+        reference_number: "WB-NTC-2026-01",
+        title: "WhiteBooks notice sync",
+        description: "Synced notice requiring GST portal response tracking.",
+        status: "open",
+        due_date: "2026-09-10",
+        provider: "whitebooks",
+        provider_reference_id: "WB-NTC-2026-01",
+        provider_notice_type: "ASMT-10",
+        provider_status: "OPEN",
+        provider_due_date: "2026-09-10",
+        provider_synced_at: "2026-08-30T07:30:00Z",
+        assigned_to: null,
+        assigned_to_name: null,
+        assigned_to_email: null,
+        created_at: "2026-08-30T07:30:00Z",
+        updated_at: "2026-08-30T07:30:00Z",
+      }) as NoticeRecordApi;
+      notices = [providerNotice, ...notices.filter((notice) => notice.reference_number !== providerNotice.reference_number)];
+      syncEvents = [
+        createNoticeSyncEvent({
+          id: "notice-sync-event-whitebooks-1",
+          notice: providerNotice.id,
+          reference_number: providerNotice.reference_number,
+          provider_reference_id: providerNotice.provider_reference_id,
+          event_type: "list_sync",
+          status: "success",
+          message: "WhiteBooks notices synced for 30/08/2026.",
+          counters: {
+            created_count: 1,
+            updated_count: 0,
+            skipped_count: 0,
+            synced_count: 1,
+            row_count: 1,
+          },
+          created_at: "2026-08-30T07:30:00Z",
+        }) as NoticeSyncEventRecord,
+        ...syncEvents,
+      ];
+      await route.fulfill(
+        jsonSuccess({
+          provider: "whitebooks",
+          sync_date: "30/08/2026",
+          created_count: 1,
+          updated_count: 0,
+          skipped_count: 0,
+          synced_count: 1,
+          notices: [
+            {
+              id: providerNotice.id,
+              reference_number: providerNotice.reference_number,
+              provider_reference_id: providerNotice.provider_reference_id,
+              provider_status: providerNotice.provider_status,
+              created: true,
+            },
+          ],
+          provider_payload: { status_cd: "1" },
+        }),
+      );
+    });
+
+    await this.page.route(/\/api\/backend\/notices\/[^/]+\/fetch-whitebooks-detail\/$/, async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+
+      const noticeId = route.request().url().split("/notices/")[1]?.split("/fetch-whitebooks-detail/")[0] ?? "";
+      const current = notices.find((notice) => notice.id === noticeId) ?? createNotice({ id: noticeId });
+      const updatedNotice = {
+        ...current,
+        provider: "whitebooks",
+        provider_reference_id: current.provider_reference_id || current.reference_number,
+        provider_notice_type: current.provider_notice_type || "ASMT-10",
+        provider_status: "REPLIED",
+        provider_due_date: current.provider_due_date || "2026-09-10",
+        provider_detail_payload: {
+          status_cd: "1",
+          data: {
+            refId: current.provider_reference_id || current.reference_number,
+            noticeType: current.provider_notice_type || "ASMT-10",
+            status: "REPLIED",
+            summary: "Detailed provider notice body captured for operator review.",
+          },
+        },
+        provider_detail_synced_at: "2026-08-30T07:45:00Z",
+        provider_last_error: "",
+        updated_at: "2026-08-30T07:45:00Z",
+      } as NoticeRecordApi;
+      notices = notices.map((notice) => (notice.id === noticeId ? updatedNotice : notice));
+      syncEvents = [
+        createNoticeSyncEvent({
+          id: `notice-sync-event-detail-${noticeId}`,
+          notice: updatedNotice.id,
+          reference_number: updatedNotice.reference_number,
+          provider_reference_id: updatedNotice.provider_reference_id,
+          event_type: "detail_fetch",
+          status: "success",
+          message: "WhiteBooks notice detail fetched.",
+          counters: { detail_count: 1 },
+          created_at: "2026-08-30T07:45:00Z",
+        }) as NoticeSyncEventRecord,
+        ...syncEvents,
+      ];
+      await route.fulfill(jsonSuccess(updatedNotice));
+    });
+
+    await this.page.route(/\/api\/backend\/notices\/[^/]+\/ensure-follow-up\/$/, async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.fallback();
+        return;
+      }
+
+      const noticeId = route.request().url().split("/notices/")[1]?.split("/ensure-follow-up/")[0] ?? "";
+      const current = notices.find((notice) => notice.id === noticeId) ?? createNotice({ id: noticeId });
+      const created = Number(current.open_follow_up_count ?? 0) === 0;
+      const followUp = createOperationalFollowUp({
+        id: current.latest_follow_up_id || `notice-follow-up-${noticeId}`,
+        workspace: current.workspace_id ?? "workspace-1",
+        client: current.client_id ?? "client-1",
+        gstin: current.gstin,
+        compliance_period: null,
+        return_preparation: null,
+        notice: current.id,
+        follow_up_type: "notice_document_request",
+        reason: `Response or supporting documents required for notice ${current.reference_number}.`,
+        pending_with: "customer",
+        status: "open",
+        priority: current.status === "escalated" ? "critical" : "high",
+        title: `Notice follow-up: ${current.reference_number}`,
+        next_action: "Collect notice response documents, update notice status, and escalate before the due date if still pending.",
+        due_at: `${current.due_date ?? "2026-09-10"}T12:30:00Z`,
+        assigned_to: current.assigned_to,
+        assigned_to_name: current.assigned_to_name,
+      }) as OperationalFollowUpRecord;
+      notices = notices.map((notice) =>
+        notice.id === noticeId
+          ? {
+              ...notice,
+              open_follow_up_count: 1,
+              overdue_follow_up_count: 0,
+              latest_follow_up_id: followUp.id,
+              latest_follow_up_title: followUp.title,
+              latest_follow_up_status: followUp.status,
+              latest_follow_up_priority: followUp.priority,
+              latest_follow_up_due_at: followUp.due_at,
+            }
+          : notice,
+      );
+      syncEvents = [
+        createNoticeSyncEvent({
+          id: `notice-sync-event-follow-up-${noticeId}-${created ? "created" : "reused"}`,
+          notice: current.id,
+          reference_number: current.reference_number,
+          provider: current.provider || "manual",
+          provider_reference_id: current.provider_reference_id,
+          event_type: "follow_up",
+          status: "success",
+          message: created ? "Notice follow-up created." : "Existing notice follow-up reused.",
+          counters: { created: created ? 1 : 0, reused: created ? 0 : 1 },
+          created_at: "2026-08-30T08:00:00Z",
+        }) as NoticeSyncEventRecord,
+        ...syncEvents,
+      ];
+      await route.fulfill(jsonSuccess({ created, follow_up: followUp }));
+    });
+
+    await this.page.route(/\/api\/backend\/notices\/sync-history\/?(?:\?.*)?$/, async (route) => {
+      const url = new URL(route.request().url());
+      const workspace = url.searchParams.get("workspace");
+      const client = url.searchParams.get("client");
+      const gstin = url.searchParams.get("gstin");
+      const noticeId = url.searchParams.get("notice");
+      const eventType = url.searchParams.get("event_type");
+      const eventStatus = url.searchParams.get("status");
+
+      const filtered = syncEvents.filter((event) => {
+        if (workspace && event.workspace_id !== workspace) return false;
+        if (client && event.client_id !== client) return false;
+        if (gstin && event.gstin !== gstin) return false;
+        if (noticeId && event.notice !== noticeId) return false;
+        if (eventType && event.event_type !== eventType) return false;
+        if (eventStatus && event.status !== eventStatus) return false;
+        return true;
+      });
+
+      await route.fulfill(paginated(filtered));
+    });
+
     await this.page.route(/\/api\/backend\/notices\/[^/]+\/$/, async (route) => {
       const noticeId = route.request().url().split("/notices/")[1]?.replace(/\/$/, "");
+      if (noticeId === "sync-whitebooks" || noticeId === "sync-history" || noticeId === "fetch-whitebooks-detail" || noticeId === "ensure-follow-up") {
+        await route.fallback();
+        return;
+      }
       const request = route.request();
       const current = notices.find((notice) => notice.id === noticeId) ?? createNotice();
 

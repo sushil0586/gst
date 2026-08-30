@@ -21,13 +21,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { useGstinsQuery } from "@/features/gstins";
-import { useCreateNoticeMutation, useNoticesQuery, useUpdateNoticeMutation } from "@/features/notices";
+import {
+  useCreateNoticeMutation,
+  useEnsureNoticeFollowUpMutation,
+  useFetchWhiteBooksNoticeDetailMutation,
+  useNoticeSyncHistoryQuery,
+  useNoticesQuery,
+  useSyncWhiteBooksNoticesMutation,
+  useUpdateNoticeMutation,
+} from "@/features/notices";
 import { useWorkspaceMembersQuery } from "@/features/workspace";
 import { getErrorMessage } from "@/lib/api/error-handler";
 import { hasPermission, permissions } from "@/lib/permissions";
 import { useSession } from "@/lib/query/session-provider";
 import { useWorkspaceContext } from "@/store/workspace-context";
-import type { NoticeRecordApi } from "@/types/api";
+import type { NoticeRecordApi, NoticeSyncEventRecord } from "@/types/api";
 
 const statusOptions = [
   { value: "all", label: "All statuses" },
@@ -67,6 +75,36 @@ function getNoticeStatusVariant(status?: string) {
   return "primary" as const;
 }
 
+function formatProviderLabel(provider?: string) {
+  if (!provider) return "Manual";
+  if (provider === "whitebooks") return "WhiteBooks";
+  return provider.replace(/_/g, " ");
+}
+
+function formatEventLabel(eventType: NoticeSyncEventRecord["event_type"]) {
+  const labels: Record<NoticeSyncEventRecord["event_type"], string> = {
+    list_sync: "List sync",
+    detail_fetch: "Detail fetch",
+    follow_up: "Follow-up",
+  };
+  return labels[eventType];
+}
+
+function getEventStatusVariant(status: NoticeSyncEventRecord["status"]) {
+  if (status === "success") return "success" as const;
+  if (status === "failed") return "danger" as const;
+  if (status === "partial") return "warning" as const;
+  return "primary" as const;
+}
+
+function formatCounters(counters?: Record<string, unknown>) {
+  const entries = Object.entries(counters ?? {}).filter(([, value]) => value !== null && value !== undefined && value !== "");
+  if (entries.length === 0) return "No counters";
+  return entries
+    .map(([key, value]) => `${key.replace(/_/g, " ")}: ${String(value)}`)
+    .join(", ");
+}
+
 export default function NoticesPage() {
   const searchParams = useSearchParams();
   const { permissions: sessionPermissions } = useSession();
@@ -86,6 +124,7 @@ export default function NoticesPage() {
   } = useWorkspaceContext();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingNotice, setEditingNotice] = useState<NoticeRecordApi | null>(null);
+  const [historyNotice, setHistoryNotice] = useState<NoticeRecordApi | null>(null);
   const [status, setStatus] = useState("all");
   const [assigneeFilter, setAssigneeFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -108,6 +147,9 @@ export default function NoticesPage() {
   const gstins = gstinsQuery.data?.items ?? [];
   const workspaceMembers = workspaceMembersQuery.data?.items ?? [];
   const canManageNotices = hasPermission(sessionPermissions, permissions.manageGstin);
+  const canManageFollowUps = hasPermission(sessionPermissions, permissions.manageClient);
+  const canInspectHistory = hasPermission(sessionPermissions, permissions.viewClient);
+  const canUseRowActions = canManageNotices || canManageFollowUps || canInspectHistory;
 
   const filters = useMemo(
     () => ({
@@ -122,8 +164,21 @@ export default function NoticesPage() {
   );
 
   const noticesQuery = useNoticesQuery(filters, Boolean(selectedWorkspaceId));
+  const historyFilters = useMemo(
+    () => ({
+      workspace: selectedWorkspaceId ?? undefined,
+      client: selectedClientId ?? undefined,
+      gstin: selectedGstinId ?? historyNotice?.gstin,
+      notice: historyNotice?.id,
+    }),
+    [historyNotice?.gstin, historyNotice?.id, selectedClientId, selectedGstinId, selectedWorkspaceId],
+  );
+  const noticeSyncHistoryQuery = useNoticeSyncHistoryQuery(historyFilters, Boolean(historyNotice && selectedWorkspaceId));
   const createNoticeMutation = useCreateNoticeMutation(filters);
   const updateNoticeMutation = useUpdateNoticeMutation(editingNotice?.id, filters);
+  const syncWhiteBooksMutation = useSyncWhiteBooksNoticesMutation(filters);
+  const fetchWhiteBooksDetailMutation = useFetchWhiteBooksNoticeDetailMutation(filters);
+  const ensureNoticeFollowUpMutation = useEnsureNoticeFollowUpMutation(filters);
   const notices = useMemo(() => noticesQuery.data?.items ?? [], [noticesQuery.data?.items]);
   const noticeMetrics = useMemo(() => {
     const openCount = notices.filter((notice) => notice.status === "open").length;
@@ -234,12 +289,69 @@ export default function NoticesPage() {
     }
   };
 
+  const handleSyncWhiteBooks = async () => {
+    if (!selectedWorkspaceId || !selectedClientId || !selectedGstinId) {
+      toast.error("Select a workspace, client, and GSTIN before syncing WhiteBooks notices.");
+      return;
+    }
+
+    try {
+      const result = await syncWhiteBooksMutation.mutateAsync({
+        workspace: selectedWorkspaceId,
+        client: selectedClientId,
+        gstin: selectedGstinId,
+      });
+      toast.success(
+        `WhiteBooks notices synced. ${result.created_count} created, ${result.updated_count} updated, ${result.skipped_count} skipped.`,
+      );
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
+  };
+
+  const handleFetchWhiteBooksDetail = async (notice: NoticeRecordApi) => {
+    try {
+      const updatedNotice = await fetchWhiteBooksDetailMutation.mutateAsync({ noticeId: notice.id });
+      if (editingNotice?.id === updatedNotice.id) {
+        setEditingNotice(updatedNotice);
+      }
+      toast.success("WhiteBooks notice detail fetched.");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
+  };
+
+  const handleEnsureFollowUp = async (notice: NoticeRecordApi) => {
+    try {
+      const result = await ensureNoticeFollowUpMutation.mutateAsync(notice.id);
+      await noticesQuery.refetch();
+      toast.success(result.created ? "Notice follow-up created." : "Existing notice follow-up reused.");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
+  };
+
+  const handleOpenHistory = (notice: NoticeRecordApi) => {
+    setHistoryNotice(notice);
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Notices"
         description="Track live government notices, ownership, deadlines, and response posture within the active compliance context."
-        actions={canManageNotices ? [{ label: "Add Notice", onClick: handleOpenDialog, disabled: !selectedClientId || availableGstins.length === 0 }] : []}
+        actions={
+          canManageNotices
+            ? [
+                {
+                  label: syncWhiteBooksMutation.isPending ? "Syncing..." : "Sync WhiteBooks",
+                  onClick: handleSyncWhiteBooks,
+                  disabled: syncWhiteBooksMutation.isPending || !selectedWorkspaceId || !selectedClientId || !selectedGstinId,
+                },
+                { label: "Add Notice", onClick: handleOpenDialog, disabled: !selectedClientId || availableGstins.length === 0 },
+              ]
+            : []
+        }
       />
 
       {!selectedWorkspaceId ? (
@@ -336,11 +448,13 @@ export default function NoticesPage() {
                   <TableHead>Title</TableHead>
                   <TableHead>Client</TableHead>
                   <TableHead>GSTIN</TableHead>
+                  <TableHead>Source</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Owner</TableHead>
                   <TableHead>Due date</TableHead>
-                  <TableHead>Created</TableHead>
-                  {canManageNotices ? <TableHead className="text-right">Actions</TableHead> : null}
+                  <TableHead>Follow-up</TableHead>
+                  <TableHead>Synced</TableHead>
+                  {canUseRowActions ? <TableHead className="text-right">Actions</TableHead> : null}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -356,23 +470,73 @@ export default function NoticesPage() {
                     <TableCell>{notice.client_name ?? "Unknown client"}</TableCell>
                     <TableCell>{notice.gstin_value ?? "Unknown GSTIN"}</TableCell>
                     <TableCell>
-                      <StatusBadge label={notice.status.replace(/_/g, " ")} variant={getNoticeStatusVariant(notice.status)} />
+                      <div className="space-y-1">
+                        <p className="font-medium text-slate-900">{formatProviderLabel(notice.provider)}</p>
+                        {notice.provider_notice_type ? <p className="text-xs text-slate-500">{notice.provider_notice_type}</p> : null}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="space-y-1">
+                        <StatusBadge label={notice.status.replace(/_/g, " ")} variant={getNoticeStatusVariant(notice.status)} />
+                        {notice.provider_status ? <p className="text-xs text-slate-500">Portal: {notice.provider_status}</p> : null}
+                      </div>
                     </TableCell>
                     <TableCell>{notice.assigned_to_name ?? "Unassigned"}</TableCell>
                     <TableCell>
                       <div className="space-y-1">
                         <p>{formatDate(notice.due_date)}</p>
+                        {notice.provider_due_date ? <p className="text-xs text-slate-500">Portal: {formatDate(notice.provider_due_date)}</p> : null}
                         {notice.status !== "closed" && isOverdue(notice.due_date) ? (
                           <p className="text-xs font-medium text-orange-700">Overdue</p>
                         ) : null}
                       </div>
                     </TableCell>
-                    <TableCell>{formatDateTime(notice.created_at)}</TableCell>
-                    {canManageNotices ? (
+                    <TableCell>
+                      <div className="space-y-1">
+                        <p className="font-medium text-slate-900">{notice.open_follow_up_count} open</p>
+                        {notice.overdue_follow_up_count > 0 ? (
+                          <p className="text-xs font-medium text-orange-700">{notice.overdue_follow_up_count} overdue</p>
+                        ) : null}
+                        {notice.latest_follow_up_title ? (
+                          <p className="text-xs text-slate-500">{notice.latest_follow_up_title}</p>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                    <TableCell>{notice.provider_synced_at ? formatDateTime(notice.provider_synced_at) : formatDateTime(notice.created_at)}</TableCell>
+                    {canUseRowActions ? (
                       <TableCell className="text-right">
-                        <Button size="sm" variant="outline" onClick={() => handleEditNotice(notice)}>
-                          <ActionLabel kind="edit" label="Update" />
-                        </Button>
+                        <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                          {canManageNotices && notice.provider === "whitebooks" ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleFetchWhiteBooksDetail(notice)}
+                              disabled={fetchWhiteBooksDetailMutation.isPending}
+                            >
+                              <ActionLabel kind="reprocess" label="Fetch Detail" />
+                            </Button>
+                          ) : null}
+                          {canManageFollowUps ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleEnsureFollowUp(notice)}
+                              disabled={ensureNoticeFollowUpMutation.isPending}
+                            >
+                              <ActionLabel kind="create" label="Create Follow-up" />
+                            </Button>
+                          ) : null}
+                          {canInspectHistory ? (
+                            <Button size="sm" variant="outline" onClick={() => handleOpenHistory(notice)}>
+                              <ActionLabel kind="view" label="History" />
+                            </Button>
+                          ) : null}
+                          {canManageNotices ? (
+                            <Button size="sm" variant="outline" onClick={() => handleEditNotice(notice)}>
+                              <ActionLabel kind="edit" label="Update" />
+                            </Button>
+                          ) : null}
+                        </div>
                       </TableCell>
                     ) : null}
                   </TableRow>
@@ -494,6 +658,31 @@ export default function NoticesPage() {
                 className="min-h-28 bg-slate-50"
               />
             </div>
+            {editingNotice?.provider ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+                <div className="grid gap-3 text-sm sm:grid-cols-2">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Source</p>
+                    <p className="mt-1 font-medium text-slate-900">{formatProviderLabel(editingNotice.provider)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Portal reference</p>
+                    <p className="mt-1 font-medium text-slate-900">{editingNotice.provider_reference_id || editingNotice.reference_number}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Portal status</p>
+                    <p className="mt-1 font-medium text-slate-900">{editingNotice.provider_status || "Pending"}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">Detail fetched</p>
+                    <p className="mt-1 font-medium text-slate-900">{formatDateTime(editingNotice.provider_detail_synced_at)}</p>
+                  </div>
+                </div>
+                {editingNotice.provider_last_error ? (
+                  <p className="mt-3 text-sm font-medium text-rose-700">{editingNotice.provider_last_error}</p>
+                ) : null}
+              </div>
+            ) : null}
           </AppModalBody>
           <AppModalFooter>
             <div className="text-sm text-slate-500">Notices remain tied to a GSTIN so response tracking stays audit-ready.</div>
@@ -513,6 +702,68 @@ export default function NoticesPage() {
                   : (createNoticeMutation.isPending ? "Creating..." : "Create notice")}
               </Button>
             </div>
+          </AppModalFooter>
+        </AppModalContent>
+      </Dialog>
+      <Dialog open={Boolean(historyNotice)} onOpenChange={(open) => !open && setHistoryNotice(null)}>
+        <AppModalContent size="lg">
+          <AppModalHeader
+            title="Notice history"
+            description={historyNotice ? `${historyNotice.reference_number} provider sync and follow-up events.` : "Provider sync and follow-up events."}
+          />
+          <AppModalBody>
+            {noticeSyncHistoryQuery.isLoading ? (
+              <LoadingState message="Loading notice history..." />
+            ) : noticeSyncHistoryQuery.isError ? (
+              <ErrorState description={getErrorMessage(noticeSyncHistoryQuery.error)} />
+            ) : (noticeSyncHistoryQuery.data?.items ?? []).length > 0 ? (
+              <div className="overflow-hidden rounded-2xl border border-slate-200">
+                <Table>
+                  <TableHeader className="bg-slate-50">
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead>Event</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Message</TableHead>
+                      <TableHead>Counters</TableHead>
+                      <TableHead>By</TableHead>
+                      <TableHead>Time</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(noticeSyncHistoryQuery.data?.items ?? []).map((event) => (
+                      <TableRow key={event.id}>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <p className="font-medium text-slate-900">{formatEventLabel(event.event_type)}</p>
+                            <p className="text-xs text-slate-500">{formatProviderLabel(event.provider)}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge label={event.status} variant={getEventStatusVariant(event.status)} />
+                        </TableCell>
+                        <TableCell>
+                          <div className="max-w-xs space-y-1">
+                            <p className="text-sm text-slate-700">{event.message || "No message"}</p>
+                            {event.error_message ? <p className="text-xs font-medium text-rose-700">{event.error_message}</p> : null}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm text-slate-600">{formatCounters(event.counters)}</TableCell>
+                        <TableCell>{event.initiated_by_name ?? "System"}</TableCell>
+                        <TableCell>{formatDateTime(event.created_at)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <EmptyState title="No history yet" description="No sync, detail, or follow-up events have been recorded for this notice." />
+            )}
+          </AppModalBody>
+          <AppModalFooter>
+            <div className="text-sm text-slate-500">History is append-only so provider actions remain traceable.</div>
+            <Button variant="outline" onClick={() => setHistoryNotice(null)}>
+              <ActionLabel kind="cancel" label="Close" />
+            </Button>
           </AppModalFooter>
         </AppModalContent>
       </Dialog>

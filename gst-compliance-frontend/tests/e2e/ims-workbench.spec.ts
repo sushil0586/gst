@@ -290,6 +290,7 @@ test.describe("IMS workbench", () => {
       gstin: "gstin-1",
     });
 
+    await page.getByPlaceholder("RETRY").fill("RETRY");
     await page.locator('button:has-text("Retry batch"):not(:disabled)').click();
     await expect(page.getByText("ims-batch-retry-1", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("ims-int-retry-001", { exact: true }).first()).toBeVisible();
@@ -393,6 +394,11 @@ test.describe("IMS workbench", () => {
         2,
       ),
     );
+
+    await expect(page.getByRole("button", { name: "Save IMS draft", exact: true })).toBeDisabled();
+    await page.getByLabel("I confirm this IMS save/reset payload should be sent for the selected GSTIN and return period.").check();
+    await page.getByPlaceholder("052026").fill("052026");
+    await expect(page.getByRole("button", { name: "Save IMS draft", exact: true })).toBeEnabled();
 
     await page.getByRole("button", { name: "Save IMS draft", exact: true }).click();
     await expect(page.getByText("SAVE", { exact: true })).toBeVisible();

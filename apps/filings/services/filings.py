@@ -280,7 +280,7 @@ def enqueue_return_filing_status_sync(*, filing, actor):
     from apps.filings.tasks import sync_return_filing_status_task
 
     if settings.CELERY_TASK_ALWAYS_EAGER:
-        sync_return_filing_status(filing_id=filing.id, actor_id=actor.id if actor else None)
+        _sync_return_filing_status_best_effort(filing=filing, actor=actor)
         return
 
     try:
@@ -291,7 +291,37 @@ def enqueue_return_filing_status_sync(*, filing, actor):
     except Exception:
         if settings.CELERY_STRICT_PRODUCTION_ASYNC and not settings.DEBUG:
             raise RuntimeError("Filing status-sync worker is unavailable. Status sync cannot fall back to inline execution in production.")
+        _sync_return_filing_status_best_effort(filing=filing, actor=actor)
+
+
+def _sync_return_filing_status_best_effort(*, filing, actor):
+    try:
         sync_return_filing_status(filing_id=filing.id, actor_id=actor.id if actor else None)
+    except (serializers.ValidationError, FilingProviderError) as exc:
+        latest_attempt = filing.attempts.order_by("-attempt_number").first()
+        if latest_attempt is not None:
+            latest_attempt.response_summary = {
+                **(latest_attempt.response_summary or {}),
+                "status_sync_error": str(exc),
+                "status_sync_next_action": "retry_status_sync",
+            }
+            latest_attempt.updated_by = actor
+            latest_attempt.save(update_fields=["response_summary", "updated_by", "updated_at"])
+        record_audit_log(
+            actor=actor,
+            action="return_filing.status_sync_failed",
+            entity=filing,
+            workspace_id=filing.workspace_id,
+            client_id=filing.client_id,
+            gstin_id=filing.gstin_id,
+            compliance_period_id=filing.compliance_period_id,
+            metadata={
+                "provider": filing.provider,
+                "provider_reference_id": filing.provider_reference_id,
+                "error_message": str(exc),
+                "next_action": "retry_status_sync",
+            },
+        )
 
 
 def process_return_filing(*, filing_id, actor_id=None):

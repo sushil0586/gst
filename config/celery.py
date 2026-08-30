@@ -27,6 +27,7 @@ app.conf.task_routes = {
     "apps.gst_transactions.process_due_transaction_remediation_follow_ups": {"queue": settings.CELERY_SCHEDULED_QUEUE},
     "apps.gst_transactions.dispatch_transaction_remediation_digest": {"queue": settings.CELERY_SCHEDULED_QUEUE},
     "apps.gst_transactions.dispatch_transaction_remediation_follow_up_reminder": {"queue": settings.CELERY_SCHEDULED_QUEUE},
+    "apps.notices.process_scheduled_notice_syncs": {"queue": settings.CELERY_SCHEDULED_QUEUE},
 }
 
 if getattr(settings, "CLOSE_MANAGER_DIGEST_ENABLED", False):
@@ -46,6 +47,18 @@ if getattr(settings, "REMEDIATION_FOLLOW_UP_AUTOMATION_ENABLED", False):
         "process-due-transaction-remediation-follow-ups": {
             "task": "apps.gst_transactions.process_due_transaction_remediation_follow_ups",
             "schedule": crontab(minute=settings.REMEDIATION_FOLLOW_UP_SCHEDULE_MINUTE),
+        },
+    }
+
+if getattr(settings, "WHITEBOOKS_NOTICE_SYNC_ENABLED", False):
+    app.conf.beat_schedule = {
+        **getattr(app.conf, "beat_schedule", {}),
+        "process-scheduled-notice-syncs": {
+            "task": "apps.notices.process_scheduled_notice_syncs",
+            "schedule": crontab(
+                hour=settings.WHITEBOOKS_NOTICE_SYNC_SCHEDULE_HOUR,
+                minute=settings.WHITEBOOKS_NOTICE_SYNC_SCHEDULE_MINUTE,
+            ),
         },
     }
 

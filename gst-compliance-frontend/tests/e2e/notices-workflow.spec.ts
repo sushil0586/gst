@@ -71,8 +71,101 @@ test.describe("Notices workflow", () => {
     await noticesPage.expectReady();
 
     await expect(page.getByRole("button", { name: "Add Notice" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Sync WhiteBooks" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Create Follow-up" })).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Update" })).toHaveCount(0);
     await expect(page.getByRole("cell", { name: "ASMT-10/2026/1184" })).toBeVisible();
+  });
+
+  test("syncs WhiteBooks notices into the register", async ({ page, app }) => {
+    const noticesPage = new NoticesPage(page);
+
+    await app.mockAuthenticatedShell();
+    await app.mockFoundationApis();
+    await app.mockNoticesApis();
+
+    await noticesPage.goto();
+    await noticesPage.expectReady();
+
+    await page.getByRole("button", { name: "Sync WhiteBooks" }).click();
+
+    await expect(page.getByText("WhiteBooks notices synced. 1 created, 0 updated, 0 skipped.")).toBeVisible();
+    const syncedRow = page.getByRole("row", { name: /WB-NTC-2026-01/ });
+    await expect(syncedRow).toBeVisible();
+    await expect(syncedRow).toContainText("WhiteBooks");
+    await expect(syncedRow).toContainText("ASMT-10");
+    await expect(syncedRow).toContainText("Portal: OPEN");
+  });
+
+  test("shows notice sync history from the register", async ({ page, app }) => {
+    const noticesPage = new NoticesPage(page);
+
+    await app.mockAuthenticatedShell();
+    await app.mockFoundationApis();
+    await app.mockNoticesApis();
+
+    await noticesPage.goto();
+    await noticesPage.expectReady();
+
+    await page.getByRole("button", { name: "Sync WhiteBooks" }).click();
+    const syncedRow = page.getByRole("row", { name: /WB-NTC-2026-01/ });
+    await expect(syncedRow).toBeVisible();
+
+    await syncedRow.getByRole("button", { name: "History" }).click();
+
+    await expect(page.getByRole("heading", { name: "Notice history" })).toBeVisible();
+    await expect(page.getByText("List sync")).toBeVisible();
+    await expect(page.getByText("WhiteBooks notices synced for 30/08/2026.")).toBeVisible();
+    await expect(page.getByText(/created count: 1/)).toBeVisible();
+  });
+
+  test("fetches WhiteBooks notice detail and surfaces provider evidence", async ({ page, app }) => {
+    const noticesPage = new NoticesPage(page);
+
+    await app.mockAuthenticatedShell();
+    await app.mockFoundationApis();
+    await app.mockNoticesApis();
+
+    await noticesPage.goto();
+    await noticesPage.expectReady();
+
+    await page.getByRole("button", { name: "Sync WhiteBooks" }).click();
+    const syncedRow = page.getByRole("row", { name: /WB-NTC-2026-01/ });
+    await expect(syncedRow).toBeVisible();
+
+    await syncedRow.getByRole("button", { name: "Fetch Detail" }).click();
+    await expect(page.getByText("WhiteBooks notice detail fetched.")).toBeVisible();
+    await expect(syncedRow).toContainText("Portal: REPLIED");
+
+    await syncedRow.getByRole("button", { name: "Update" }).click();
+    const dialog = noticesPage.noticeDialog();
+    await expect(dialog.getByText("Portal reference")).toBeVisible();
+    await expect(dialog.getByText("WB-NTC-2026-01")).toBeVisible();
+    await expect(dialog.getByText("Portal status")).toBeVisible();
+    await expect(dialog.getByText("REPLIED")).toBeVisible();
+    await expect(dialog.getByText("Detail fetched")).toBeVisible();
+    await expect(dialog.getByText("30 Aug 2026")).toBeVisible();
+  });
+
+  test("creates a notice-linked operational follow-up from the register", async ({ page, app }) => {
+    const noticesPage = new NoticesPage(page);
+
+    await app.mockAuthenticatedShell();
+    await app.mockFoundationApis();
+    await app.mockNoticesApis();
+
+    await noticesPage.goto();
+    await noticesPage.expectReady();
+
+    const noticeRow = page.getByRole("row", { name: /ASMT-10\/2026\/1184/ });
+    await expect(noticeRow).toBeVisible();
+    await expect(noticeRow).toContainText("0 open");
+
+    await noticeRow.getByRole("button", { name: "Create Follow-up" }).click();
+
+    await expect(page.getByText("Notice follow-up created.")).toBeVisible();
+    await expect(noticeRow).toContainText("1 open");
+    await expect(noticeRow).toContainText("Notice follow-up: ASMT-10/2026/1184");
   });
 
   test("shows a clear error state when notices cannot be loaded", async ({ page, app }) => {

@@ -643,6 +643,42 @@ class WhiteBooksClient:
         )
         return self._normalize_submission_payload(response, default_message="WhiteBooks IMS file fetch failed.")
 
+    def get_notice_list(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        date: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/notices/noticelist",
+            method="GET",
+            query_params={"gstin": gstin, "date": date, "email": email},
+            headers=self._auth_headers({"txn": txn}, state_code=state_code, gst_username=gst_username),
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks notice list fetch failed.")
+
+    def get_notice_details(
+        self,
+        *,
+        email: str,
+        gstin: str,
+        reference_id: str,
+        txn: str,
+        state_code: str | None = None,
+        gst_username: str | None = None,
+    ) -> dict:
+        response = self._request_json(
+            "/notices/noticedetails",
+            method="GET",
+            query_params={"gstin": gstin, "refId": reference_id, "email": email},
+            headers=self._auth_headers({"txn": txn}, state_code=state_code, gst_username=gst_username),
+        )
+        return self._normalize_submission_payload(response, default_message="WhiteBooks notice details fetch failed.")
+
     def fetch_gstr2b_all(
         self,
         *,

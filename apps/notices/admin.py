@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from apps.common.admin import BaseTenantAdminMixin
-from apps.notices.models import Notice
+from apps.notices.models import Notice, NoticeSyncEvent
 
 
 @admin.register(Notice)
@@ -19,3 +19,39 @@ class NoticeAdmin(BaseTenantAdminMixin, admin.ModelAdmin):
 
     def get_queryset(self, request):
         return super().get_queryset(request).select_related("gstin", "gstin__client")
+
+
+@admin.register(NoticeSyncEvent)
+class NoticeSyncEventAdmin(BaseTenantAdminMixin, admin.ModelAdmin):
+    list_display = ("reference_number", "event_type", "status", "provider", "gstin", "initiated_by", "created_at")
+    list_filter = ("event_type", "status", "provider", "gstin__client__workspace")
+    search_fields = ("reference_number", "provider_reference_id", "message", "error_message", "gstin__gstin")
+    ordering = ("-created_at",)
+    date_hierarchy = "created_at"
+    autocomplete_fields = ("gstin", "notice", "initiated_by")
+    readonly_fields = BaseTenantAdminMixin.readonly_fields + ("provider_payload", "counters")
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    "gstin",
+                    "notice",
+                    "provider",
+                    "event_type",
+                    "status",
+                    "reference_number",
+                    "provider_reference_id",
+                    "message",
+                    "error_message",
+                    "initiated_by",
+                    "is_active",
+                )
+            },
+        ),
+        ("Payload", {"fields": ("counters", "provider_payload"), "classes": ("collapse",)}),
+        ("Audit", {"fields": BaseTenantAdminMixin.readonly_fields, "classes": ("collapse",)}),
+    )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("gstin", "gstin__client", "notice", "initiated_by")

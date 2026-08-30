@@ -320,11 +320,89 @@ export type NoticeRecordApi = {
   description: string;
   status: string;
   due_date: string | null;
+  provider: string;
+  provider_reference_id: string;
+  provider_notice_type: string;
+  provider_status: string;
+  provider_due_date: string | null;
+  provider_payload?: Record<string, unknown>;
+  provider_detail_payload?: Record<string, unknown>;
+  provider_synced_at: string | null;
+  provider_detail_synced_at: string | null;
+  provider_last_error: string;
   assigned_to: number | null;
   assigned_to_name?: string | null;
   assigned_to_email?: string | null;
+  open_follow_up_count: number;
+  overdue_follow_up_count: number;
+  latest_follow_up_id?: string | null;
+  latest_follow_up_title?: string | null;
+  latest_follow_up_status?: string | null;
+  latest_follow_up_priority?: string | null;
+  latest_follow_up_due_at?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type NoticeProviderSyncRequest = {
+  workspace: string;
+  client: string;
+  gstin: string;
+  auth_session?: string;
+  txn?: string;
+  email?: string;
+  date?: string;
+};
+
+export type NoticeProviderSyncResponse = {
+  provider: string;
+  sync_date: string;
+  created_count: number;
+  updated_count: number;
+  skipped_count: number;
+  synced_count: number;
+  notices: Array<{
+    id: string;
+    reference_number: string;
+    provider_reference_id: string;
+    provider_status: string;
+    created: boolean;
+  }>;
+  provider_payload?: Record<string, unknown>;
+};
+
+export type NoticeProviderDetailFetchRequest = {
+  noticeId: string;
+  auth_session?: string;
+  txn?: string;
+  email?: string;
+};
+
+export type NoticeFollowUpEnsureResponse = {
+  created: boolean;
+  follow_up: OperationalFollowUpRecord;
+};
+
+export type NoticeSyncEventRecord = {
+  id: string;
+  gstin: string;
+  gstin_value?: string;
+  client_id?: string;
+  client_name?: string;
+  workspace_id?: string;
+  notice: string | null;
+  reference_number: string;
+  provider: string;
+  event_type: "list_sync" | "detail_fetch" | "follow_up";
+  status: "success" | "partial" | "failed" | "skipped";
+  provider_reference_id: string;
+  message: string;
+  counters: Record<string, unknown>;
+  provider_payload?: Record<string, unknown>;
+  error_message: string;
+  initiated_by: number | null;
+  initiated_by_name?: string | null;
+  created_at: string;
 };
 
 export type OperationalFollowUpRecord = {

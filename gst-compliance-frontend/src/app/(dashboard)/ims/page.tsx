@@ -418,6 +418,9 @@ export default function IMSPage() {
   const [fileToken, setFileToken] = useState("");
   const [actionBatchActionFilter, setActionBatchActionFilter] = useState("all");
   const [actionBatchStatusFilter, setActionBatchStatusFilter] = useState("all");
+  const [writeActionConfirmed, setWriteActionConfirmed] = useState(false);
+  const [writeConfirmationText, setWriteConfirmationText] = useState("");
+  const [retryConfirmationText, setRetryConfirmationText] = useState("");
 
   const [statusFilters, setStatusFilters] = useState<IMSStatusRequest | null>(null);
   const [invoiceFilters, setInvoiceFilters] = useState<IMSInvoicesRequest | null>(null);
@@ -583,6 +586,9 @@ export default function IMSPage() {
     || resetMutation.isPending
     || retryMutation.isPending
     || batchStatusMutation.isPending;
+  const writeConfirmationMatches = writeActionConfirmed && writeConfirmationText.trim() === derivedRetPeriod;
+  const retryConfirmationMatches = retryConfirmationText.trim().toUpperCase() === "RETRY";
+  const draftWriteDisabled = !canWrite || isBusy || !writeConfirmationMatches;
 
   function ensureBaseFilters() {
     if (!baseFilters) {
@@ -611,6 +617,10 @@ export default function IMSPage() {
     if (!invdata) {
       return;
     }
+    if (!writeConfirmationMatches) {
+      toast.error("Confirm the IMS write action and matching return period before saving.");
+      return;
+    }
     setResponseTitle("IMS save response");
     setResponseSource("save");
     try {
@@ -636,6 +646,10 @@ export default function IMSPage() {
     if (!invdata) {
       return;
     }
+    if (!writeConfirmationMatches) {
+      toast.error("Confirm the IMS write action and matching return period before resetting.");
+      return;
+    }
     setResponseTitle("IMS reset response");
     setResponseSource("reset");
     try {
@@ -654,6 +668,10 @@ export default function IMSPage() {
   async function handleRetryActionBatch(batch: IMSActionBatchRecord) {
     const filters = ensureBaseFilters();
     if (!filters) {
+      return;
+    }
+    if (!retryConfirmationMatches) {
+      toast.error("Type RETRY before retrying a failed IMS action batch.");
       return;
     }
     setResponseTitle(`IMS ${batch.action_type} retry response`);
@@ -1109,12 +1127,31 @@ export default function IMSPage() {
                   className="min-h-[320px] font-mono text-xs"
                   spellCheck={false}
                 />
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-4">
+                  <label className="flex items-start gap-3 text-sm font-medium text-amber-950">
+                    <input
+                      type="checkbox"
+                      className="mt-1 size-4 rounded border-amber-300"
+                      checked={writeActionConfirmed}
+                      onChange={(event) => setWriteActionConfirmed(event.target.checked)}
+                    />
+                    <span>I confirm this IMS save/reset payload should be sent for the selected GSTIN and return period.</span>
+                  </label>
+                  <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)] md:items-center">
+                    <Input
+                      value={writeConfirmationText}
+                      onChange={(event) => setWriteConfirmationText(event.target.value)}
+                      placeholder={derivedRetPeriod || "MMYYYY"}
+                    />
+                    <p className="text-xs text-amber-900">Type {derivedRetPeriod || "the return period"} to enable save/reset.</p>
+                  </div>
+                </div>
                 <div className="flex flex-wrap gap-3">
-                  <Button onClick={handleSave} disabled={!canWrite || isBusy}>
+                  <Button onClick={handleSave} disabled={draftWriteDisabled}>
                     {saveMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <Save className="size-4" />}
                     <span className="ml-2">Save IMS draft</span>
                   </Button>
-                  <Button variant="outline" onClick={handleReset} disabled={!canWrite || isBusy}>
+                  <Button variant="outline" onClick={handleReset} disabled={draftWriteDisabled}>
                     {resetMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <RotateCcw className="size-4" />}
                     <span className="ml-2">Reset IMS draft</span>
                   </Button>
@@ -1174,6 +1211,16 @@ export default function IMSPage() {
             </Select>
           </div>
         </div>
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-4">
+          <div className="grid gap-2 md:grid-cols-[minmax(0,220px)_minmax(0,1fr)] md:items-center">
+            <Input
+              value={retryConfirmationText}
+              onChange={(event) => setRetryConfirmationText(event.target.value)}
+              placeholder="RETRY"
+            />
+            <p className="text-xs text-amber-900">Type RETRY to enable failed-batch retry actions.</p>
+          </div>
+        </div>
         {actionBatchesQuery.isLoading ? <LoadingState message="Loading IMS action batches..." /> : null}
         {!actionBatchesQuery.isLoading && recentActionBatches.length > 0 ? (
           <div className="grid gap-3 xl:grid-cols-2">
@@ -1217,7 +1264,7 @@ export default function IMSPage() {
                     variant="outline"
                     size="sm"
                     onClick={() => handleRetryActionBatch(batch)}
-                    disabled={!canWrite || batch.status !== "failed" || retryMutation.isPending}
+                    disabled={!canWrite || batch.status !== "failed" || !retryConfirmationMatches || retryMutation.isPending}
                   >
                     {retryMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <RotateCcw className="size-4" />}
                     <span className="ml-2">Retry batch</span>

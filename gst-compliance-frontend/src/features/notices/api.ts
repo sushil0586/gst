@@ -3,7 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api/client";
 import { unwrapApiData, unwrapPaginatedData } from "@/lib/api/helpers";
 import { queryKeys } from "@/lib/query/query-keys";
-import type { NoticeRecordApi } from "@/types/api";
+import type {
+  NoticeFollowUpEnsureResponse,
+  NoticeProviderDetailFetchRequest,
+  NoticeProviderSyncRequest,
+  NoticeProviderSyncResponse,
+  NoticeRecordApi,
+  NoticeSyncEventRecord,
+} from "@/types/api";
 
 export function useNoticesQuery(filters?: Record<string, string | undefined>, enabled = true) {
   return useQuery({
@@ -27,6 +34,17 @@ export function useNoticeQuery(noticeId?: string) {
   });
 }
 
+export function useNoticeSyncHistoryQuery(filters?: Record<string, string | undefined>, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.notices.syncHistory(filters),
+    enabled,
+    queryFn: async () => {
+      const response = await apiClient.get("/notices/sync-history/", { params: filters });
+      return unwrapPaginatedData<NoticeSyncEventRecord>(response);
+    },
+  });
+}
+
 export function useCreateNoticeMutation(filters?: Record<string, string | undefined>) {
   const queryClient = useQueryClient();
 
@@ -38,6 +56,7 @@ export function useCreateNoticeMutation(filters?: Record<string, string | undefi
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.notices.list(filters) });
       queryClient.invalidateQueries({ queryKey: queryKeys.notices.list() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.notices.syncHistory() });
     },
   });
 }
@@ -56,6 +75,55 @@ export function useUpdateNoticeMutation(noticeId?: string, filters?: Record<stri
       }
       queryClient.invalidateQueries({ queryKey: queryKeys.notices.list(filters) });
       queryClient.invalidateQueries({ queryKey: queryKeys.notices.list() });
+    },
+  });
+}
+
+export function useSyncWhiteBooksNoticesMutation(filters?: Record<string, string | undefined>) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (payload: NoticeProviderSyncRequest) => {
+      const response = await apiClient.post("/notices/sync-whitebooks/", payload);
+      return unwrapApiData<NoticeProviderSyncResponse>(response);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.notices.list(filters) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.notices.list() });
+    },
+  });
+}
+
+export function useFetchWhiteBooksNoticeDetailMutation(filters?: Record<string, string | undefined>) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ noticeId, ...payload }: NoticeProviderDetailFetchRequest) => {
+      const response = await apiClient.post(`/notices/${noticeId}/fetch-whitebooks-detail/`, payload);
+      return unwrapApiData<NoticeRecordApi>(response);
+    },
+    onSuccess: (notice) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.notices.detail(notice.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.notices.list(filters) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.notices.list() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.notices.syncHistory() });
+    },
+  });
+}
+
+export function useEnsureNoticeFollowUpMutation(filters?: Record<string, string | undefined>) {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (noticeId: string) => {
+      const response = await apiClient.post(`/notices/${noticeId}/ensure-follow-up/`, {});
+      return unwrapApiData<NoticeFollowUpEnsureResponse>(response);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.notices.list(filters) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.notices.list() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.notices.syncHistory() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.operationalFollowUps.list() });
     },
   });
 }
