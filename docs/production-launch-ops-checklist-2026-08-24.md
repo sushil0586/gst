@@ -91,18 +91,19 @@ The helper skips retention enforcement by default because retention mutates old 
 
 Record outcomes:
 
-- [ ] `manage.py check` passed
-- [ ] `manage.py check --deploy` reviewed and acceptable
+- [x] `manage.py check` passed on staging on August 30, 2026
+- [x] `manage.py check --deploy` reviewed on staging on August 30, 2026; remaining warnings are drf-spectacular schema warnings, not runtime launch blockers
 - [ ] `audit_security_posture` reviewed and acceptable
 - [ ] retention command completed successfully
-- [ ] frontend lint completed successfully
-- [ ] frontend build completed successfully
+- [x] frontend lint completed successfully on August 30, 2026 with two existing non-blocking `live-ims.spec.ts` unused-variable warnings
+- [x] frontend build completed successfully on August 30, 2026
 
 Evidence:
 
-- Command runner: `TBD`
-- Date run: `TBD`
-- Output location or paste link: `TBD`
+- Command runner: `Codex`
+- Date run: `August 30, 2026`
+- Output location or paste link: `Current terminal session; stage deploy validated at commit 38885f4`
+- Remaining audit note: `Staging audit has one warning: FILING_ALERT_EMAIL_ENABLED=False. Do not enable filing alert email until alert routing is confirmed through active users in FILING_DEFAULT_ALERT_RECIPIENT_ROLES or explicit OperationalAlertRoutingRule rows.`
 
 ## 3. Worker and service topology
 
@@ -129,10 +130,10 @@ Recommended queue split:
 
 Evidence:
 
-- Actual service names: `TBD`
-- Queue-to-service mapping: `TBD`
-- Verified by: `TBD`
-- Date confirmed: `TBD`
+- Actual service names: `gst-backend`, `gst-frontend`, `postgresql@16-main`, `gst-celery-imports`, `gst-celery-reconciliation`, `gst-celery-filings`, `gst-celery-scheduled`, `gst-celery-beat`
+- Queue-to-service mapping: `imports`, `reconciliation`, `filings`, `scheduled`, plus Celery Beat
+- Verified by: `Codex on staging`
+- Date confirmed: `August 30, 2026`
 
 Recommended worksheet:
 
@@ -150,17 +151,17 @@ If service names differ from the defaults, set `REQUIRED_SYSTEMD_SERVICES` to th
 
 Record outcomes:
 
-- [ ] Unit-file list reviewed
-- [ ] Running-service list reviewed
-- [ ] Systemd service files reviewed
-- [ ] Redis connectivity confirmed
+- [x] Unit-file list reviewed on staging
+- [x] Running-service list reviewed on staging
+- [x] Systemd service files reviewed by `tools/service_topology_audit.sh`
+- [x] Redis connectivity confirmed with `PONG`
 - [ ] Missing or renamed worker units reconciled with the deployment docs
 
 Evidence:
 
-- Host reviewed: `TBD`
-- Reviewer: `TBD`
-- Notes on mismatches: `TBD`
+- Host reviewed: `16.16.166.34`
+- Reviewer: `Codex`
+- Notes on mismatches: `No staging service topology mismatches found on August 30, 2026`
 
 ## 4. Retention, scheduled jobs, and observability
 
@@ -175,10 +176,10 @@ Evidence:
 
 Evidence:
 
-- Beat service name: `TBD`
+- Beat service name: `gst-celery-beat`
 - Log destination: `TBD`
-- Alerting destination: `TBD`
-- Verified by: `TBD`
+- Alerting destination: `TBD; filing alert routing/users still need confirmation on staging`
+- Verified by: `Codex for service presence on August 30, 2026; alert routing owner still needed`
 
 ### Capacity and recovery checks
 
@@ -198,6 +199,8 @@ Evidence:
 - Browser automation readiness note: `Staging required both npx playwright install chromium and sudo npx playwright install-deps chromium before live smoke could run successfully`
 - Remaining memory-pressure note: `Backend logs still showed a Gunicorn worker timeout and likely OOM-style worker recycle earlier on August 24, 2026; capacity follow-up remains required before broad rollout`
 - Staging sizing/tuning note: `The host has only 1.9 GiB RAM and is also running the Finacc stack; imports and reconciliation concurrency were reduced from 4 to 2 on August 24, 2026, and swap usage improved from roughly 770 MiB to roughly 361 MiB after the change, but a larger or dedicated host is still the stronger broad-rollout option`
+- August 30, 2026 stage deploy note: `Commit 38885f4 deployed; migrations applied; frontend build completed; all GST services active; public login/auth smoke passed; live smoke passed 2/2; notice sync-history endpoint returned 200 OK`
+- August 30, 2026 host health note: `Staging host showed 1.9 GiB RAM, about 800 MiB available, and 488 MiB swap in use during validation`
 - Recovery owner: `TBD`
 - Incident notes link: `TBD`
 
