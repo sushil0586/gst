@@ -102,7 +102,33 @@ test.describe("IMS workbench", () => {
           status_cd: "1",
           section: url.searchParams.get("section"),
           provider_status: url.searchParams.get("status"),
-          invoices: [{ inum: "INV-IMS-001", ctin: "29ABCDE1234F1Z5" }],
+          invoices: [
+            {
+              ctin: "29ABCDE1234F1Z5",
+              inv: [
+                {
+                  inum: "INV-IMS-001",
+                  idt: "01-05-2026",
+                  val: 1180,
+                  status: "PENDING",
+                  itms: [{ itm_det: { txval: 1000, iamt: 180, camt: 0, samt: 0, csamt: 0 } }],
+                },
+              ],
+            },
+          ],
+        }),
+      );
+    });
+
+    await page.route(/\/api\/backend\/ims\/invoices-count\/?(?:\?.*)?$/, async (route) => {
+      await route.fulfill(
+        jsonSuccess({
+          status_cd: "1",
+          data: {
+            pending_count: 3,
+            accepted_count: 2,
+            total_count: 5,
+          },
         }),
       );
     });
@@ -133,8 +159,16 @@ test.describe("IMS workbench", () => {
     await expect(page.getByText("Provider outcome", { exact: true })).toBeVisible();
     await expect(page.getByRole("paragraph").filter({ hasText: "PENDING" })).toBeVisible();
     await expect(page.getByText("1", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("Normalized IMS invoice table", { exact: true })).toBeVisible();
+    await expect(page.getByText("INV-IMS-001", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("29ABCDE1234F1Z5", { exact: true }).first()).toBeVisible();
     await page.getByText("Debug payload", { exact: true }).click();
-    await expect(page.getByText("INV-IMS-001")).toBeVisible();
+    await expect(page.getByText("INV-IMS-001").first()).toBeVisible();
+
+    await page.getByRole("button", { name: "Fetch count", exact: true }).click();
+    await expect(page.getByText("Normalized IMS count summary", { exact: true })).toBeVisible();
+    await expect(page.getByText("Data Pending Count", { exact: true })).toBeVisible();
+    await expect(page.getByText("3", { exact: true }).first()).toBeVisible();
 
     await page.getByRole("tab", { name: "Status", exact: true }).click();
     await page.getByPlaceholder("ims-int-001").fill("ims-int-789");

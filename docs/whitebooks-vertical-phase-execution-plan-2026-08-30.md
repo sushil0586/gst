@@ -303,6 +303,14 @@ Completed recovery hardening slice on 2026-08-30:
 - IMS UI exposes action/status filters, retry controls for failed batches, and provider status refresh controls for submitted batches
 - mocked backend and frontend tests cover duplicate protection, retry, and provider status refresh
 
+Completed normalized operator response slice on 2026-08-30:
+
+- IMS invoice, supplier, rejected, and file responses now render a normalized invoice table when recognizable invoice rows are present
+- nested provider shapes such as supplier GSTIN groups with `inv` arrays are flattened into supplier, invoice, date, section, status, value, taxable value, and tax amount columns
+- IMS invoice count responses now render a normalized metric summary for common count/status fields
+- raw provider JSON remains available below the normalized view for support/debugging
+- mocked frontend coverage verifies nested invoice normalization and count metric rendering
+
 Backend work:
 
 - add async job handling for long IMS operations
@@ -311,7 +319,7 @@ Backend work:
 - done: add duplicate save/reset protection for identical in-progress/submitted action batches
 - done: add failed-batch retry endpoint
 - done: add provider status refresh endpoint for submitted batches
-- normalize invoice count/list responses
+- done: normalize invoice count/list responses for operator display
 - done: add partial-state recovery for save/reset through failed-batch retry and stored status-check evidence
 
 Frontend work:
@@ -319,6 +327,7 @@ Frontend work:
 - done: build operator workbench for counts, filters, invoice drill-downs, status checks, file fetch, and draft save/reset
 - done: show provider response evidence and recent action batches
 - done: add action/status filters and recovery controls to recent IMS action batches
+- done: show normalized count metrics and invoice rows before the raw provider payload
 - prevent accidental bulk actions before expanding beyond pasted JSON draft payloads
 
 QA/UAT:
@@ -329,6 +338,7 @@ QA/UAT:
 - done: mocked duplicate-action protection
 - done: mocked failed-batch retry
 - done: mocked action-batch provider status refresh
+- done: mocked normalized invoice table and count summary
 - pending: live WhiteBooks sandbox fetch counts
 - pending: live WhiteBooks sandbox save accept/reject/no-action batch
 - pending: live WhiteBooks sandbox reset batch

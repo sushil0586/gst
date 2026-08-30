@@ -13,6 +13,7 @@ import { StatusBadge } from "@/components/status/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useCompliancePeriodsQuery } from "@/features/compliance-periods";
@@ -138,6 +139,197 @@ function asIMSActionBatch(value: unknown): IMSActionBatchRecord | null {
   const record = asRecord(value);
   if (!record.id || !record.action_type || !record.status) return null;
   return record as unknown as IMSActionBatchRecord;
+}
+
+type NormalizedIMSInvoice = {
+  id: string;
+  supplierGstin: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  section: string;
+  status: string;
+  value: string;
+  taxableValue: string;
+  taxAmount: string;
+};
+
+type NormalizedIMSCountMetric = {
+  key: string;
+  label: string;
+  value: string;
+};
+
+const invoiceSections = new Set(["B2B", "B2BA", "CN", "CNA", "DN", "DNA", "ECOM", "ECOMA", "IMPG", "IMPS"]);
+const invoiceArrayKeys = new Set(["invoice", "invoices", "inv", "invdata", "docs", "documents", "nt", "notes"]);
+const ignoredMetricKeys = new Set(["status_cd", "status_code", "message", "status_desc", "txn", "token", "int_tran_id"]);
+
+function humanizeKey(value: string) {
+  return value
+    .replace(/\./g, " ")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function getNumericField(record: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const normalized = Number(value.replace(/,/g, ""));
+      if (Number.isFinite(normalized)) return normalized;
+    }
+  }
+  return null;
+}
+
+function formatNumber(value: number | null) {
+  if (value === null) return "Unavailable";
+  return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(value);
+}
+
+function sumTaxHeads(record: Record<string, unknown>) {
+  const directTax =
+    (getNumericField(record, "iamt", "igst", "igst_amount") ?? 0)
+    + (getNumericField(record, "camt", "cgst", "cgst_amount") ?? 0)
+    + (getNumericField(record, "samt", "sgst", "sgst_amount") ?? 0)
+    + (getNumericField(record, "csamt", "cess", "cess_amount") ?? 0);
+  const items = record.itms ?? record.items;
+  if (directTax > 0 || !Array.isArray(items)) return directTax || null;
+  return items.reduce((total, item) => {
+    const itemRecord = asRecord(item);
+    const itemDetail = asRecord(itemRecord.itm_det);
+    const detail = Object.keys(itemDetail).length ? itemDetail : itemRecord;
+    return total + (sumTaxHeads(detail) ?? 0);
+  }, 0);
+}
+
+function sumTaxableValue(record: Record<string, unknown>) {
+  const directTaxable = getNumericField(record, "txval", "taxable_value", "taxableValue");
+  if (directTaxable !== null) return directTaxable;
+  const items = record.itms ?? record.items;
+  if (!Array.isArray(items)) return null;
+  return items.reduce((total, item) => {
+    const itemRecord = asRecord(item);
+    const itemDetail = asRecord(itemRecord.itm_det);
+    const detail = Object.keys(itemDetail).length ? itemDetail : itemRecord;
+    return total + (sumTaxableValue(detail) ?? 0);
+  }, 0);
+}
+
+function inferSection(path: string[]) {
+  for (const segment of [...path].reverse()) {
+    const upper = segment.toUpperCase();
+    if (invoiceSections.has(upper)) return upper;
+  }
+  return "";
+}
+
+function isInvoiceLikeRecord(record: Record<string, unknown>) {
+  return Boolean(
+    getStringField(record, "inum", "invoice_number", "inv_num", "doc_num", "nt_num")
+      || getStringField(record, "idt", "invoice_date", "inv_dt", "doc_dt", "nt_dt")
+      || getNumericField(record, "val", "invoice_value", "total_value", "txval") !== null,
+  );
+}
+
+function normalizeIMSInvoices(payload: Record<string, unknown>) {
+  const rows: NormalizedIMSInvoice[] = [];
+
+  function walk(value: unknown, context: { supplierGstin?: string; section?: string }, path: string[]) {
+    if (rows.length >= 25) return;
+    if (Array.isArray(value)) {
+      value.forEach((item) => walk(item, context, path));
+      return;
+    }
+
+    const record = asRecord(value);
+    if (!Object.keys(record).length) return;
+
+    const supplierGstin =
+      getStringField(record, "ctin", "stin", "supplier_gstin", "supplierGstin", "cpty_gstin") || context.supplierGstin || "";
+    const section = getStringField(record, "section", "sec") || context.section || inferSection(path);
+
+    if (isInvoiceLikeRecord(record)) {
+      rows.push({
+        id: `${rows.length}-${getStringField(record, "inum", "invoice_number", "inv_num", "doc_num", "nt_num") || "invoice"}`,
+        supplierGstin: supplierGstin || "Unavailable",
+        invoiceNumber: getStringField(record, "inum", "invoice_number", "inv_num", "doc_num", "nt_num") || "Unavailable",
+        invoiceDate: getStringField(record, "idt", "invoice_date", "inv_dt", "doc_dt", "nt_dt") || "Unavailable",
+        section: section || "Unavailable",
+        status: getStringField(record, "status", "ims_status", "action", "provider_status") || "Unavailable",
+        value: formatNumber(getNumericField(record, "val", "invoice_value", "total_value")),
+        taxableValue: formatNumber(sumTaxableValue(record)),
+        taxAmount: formatNumber(sumTaxHeads(record)),
+      });
+      return;
+    }
+
+    Object.entries(record).forEach(([key, child]) => {
+      if (key === "itms" || key === "items") return;
+      if (Array.isArray(child) || (child && typeof child === "object")) {
+        const nextContext = {
+          supplierGstin,
+          section: invoiceSections.has(key.toUpperCase()) || invoiceArrayKeys.has(key.toLowerCase()) ? section || key.toUpperCase() : section,
+        };
+        walk(child, nextContext, [...path, key]);
+      }
+    });
+  }
+
+  walk(payload, {}, []);
+  return rows;
+}
+
+function isCountMetricKey(key: string) {
+  const normalized = key.toLowerCase();
+  if (ignoredMetricKeys.has(normalized)) return false;
+  return (
+    normalized.includes("count")
+    || normalized.includes("total")
+    || normalized.includes("pending")
+    || normalized.includes("accepted")
+    || normalized.includes("rejected")
+    || normalized.includes("no_action")
+    || invoiceSections.has(key.toUpperCase())
+  );
+}
+
+function normalizeIMSCountMetrics(payload: Record<string, unknown>) {
+  const metrics: NormalizedIMSCountMetric[] = [];
+
+  function walk(value: unknown, path: string[]) {
+    if (metrics.length >= 16) return;
+    const record = asRecord(value);
+    Object.entries(record).forEach(([key, child]) => {
+      if (metrics.length >= 16) return;
+      const nextPath = [...path, key];
+      if ((typeof child === "number" || typeof child === "string") && isCountMetricKey(key)) {
+        metrics.push({
+          key: nextPath.join("."),
+          label: humanizeKey(nextPath.join(".")),
+          value: String(child),
+        });
+        return;
+      }
+      if (Array.isArray(child)) {
+        if (isCountMetricKey(key)) {
+          metrics.push({
+            key: nextPath.join("."),
+            label: humanizeKey(nextPath.join(".")),
+            value: String(child.length),
+          });
+        }
+        child.slice(0, 3).forEach((item, index) => walk(item, [...nextPath, String(index + 1)]));
+        return;
+      }
+      if (child && typeof child === "object") {
+        walk(child, nextPath);
+      }
+    });
+  }
+
+  walk(payload, []);
+  return metrics;
 }
 
 function getActionBatchStatusVariant(status?: string) {
@@ -324,6 +516,11 @@ export default function IMSPage() {
   const liveResponseRecord = asRecord(liveResponse);
   const liveErrorRecord = liveError instanceof Error ? { message: liveError.message } : asRecord(liveError);
   const liveActionBatch = asIMSActionBatch(liveResponseRecord.action_batch);
+  const normalizedIMSInvoices = liveResponse ? normalizeIMSInvoices(liveResponseRecord) : [];
+  const normalizedIMSCountMetrics = responseSource === "count" && liveResponse ? normalizeIMSCountMetrics(liveResponseRecord) : [];
+  const shouldShowInvoiceTable = Boolean(
+    liveResponse && ["invoices", "supplier", "rejected", "file"].includes(responseSource ?? "") && normalizedIMSInvoices.length,
+  );
   const actionState = getActionStateSummary(canWrite, selectedSession ?? null);
   const responseSummaryCards = liveResponse
     ? [
@@ -1107,6 +1304,62 @@ export default function IMSPage() {
                     {liveActionBatch.error_message}
                   </p>
                 ) : null}
+              </div>
+            ) : null}
+
+            {normalizedIMSCountMetrics.length > 0 ? (
+              <div className="rounded-lg border border-slate-200 px-4 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-slate-900">Normalized IMS count summary</p>
+                  <StatusBadge label={`${normalizedIMSCountMetrics.length} metric(s)`} variant="neutral" />
+                </div>
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  {normalizedIMSCountMetrics.map((metric) => (
+                    <div key={metric.key} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-3">
+                      <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{metric.label}</p>
+                      <p className="mt-2 break-words text-lg font-semibold text-slate-900">{metric.value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {shouldShowInvoiceTable ? (
+              <div className="rounded-lg border border-slate-200 px-4 py-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-slate-900">Normalized IMS invoice table</p>
+                  <StatusBadge label={`${normalizedIMSInvoices.length} row(s)`} variant="neutral" />
+                </div>
+                <div className="mt-4 overflow-hidden rounded-lg border border-slate-100">
+                  <Table>
+                    <TableHeader className="bg-slate-50">
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead>Supplier GSTIN</TableHead>
+                        <TableHead>Invoice</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Section</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Invoice value</TableHead>
+                        <TableHead>Taxable value</TableHead>
+                        <TableHead>Tax amount</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {normalizedIMSInvoices.map((invoice) => (
+                        <TableRow key={invoice.id}>
+                          <TableCell className="font-medium text-slate-900">{invoice.supplierGstin}</TableCell>
+                          <TableCell>{invoice.invoiceNumber}</TableCell>
+                          <TableCell>{invoice.invoiceDate}</TableCell>
+                          <TableCell>{invoice.section}</TableCell>
+                          <TableCell>{invoice.status}</TableCell>
+                          <TableCell>{invoice.value}</TableCell>
+                          <TableCell>{invoice.taxableValue}</TableCell>
+                          <TableCell>{invoice.taxAmount}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
             ) : null}
 
