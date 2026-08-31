@@ -17,6 +17,17 @@ from apps.integrations.whitebooks.exceptions import (
     WhiteBooksTemporaryError,
 )
 
+IMS_PROVIDER_STATUS_VALUES = {
+    "ACCEPTED": "Accept",
+    "REJECTED": "Reject",
+    "PENDING": "Pending",
+}
+
+IMS_PROVIDER_GOODS_TYPE_VALUES = {
+    "GOODS": "G",
+    "SERVICES": "S",
+}
+
 
 def _get_latest_auth_session(*, workspace, client, gstin):
     queryset = ProviderAuthSession.objects.filter(
@@ -463,7 +474,7 @@ def ims_invoices(*, validated_data):
         email=context["email"],
         gstin=context["gstin_value"],
         section=validated_data["section"],
-        status=validated_data["status"],
+        status=_to_provider_ims_status(validated_data["status"]),
         txn=context["txn"],
         state_code=context["state_code"],
         gst_username=context["gst_username"],
@@ -476,7 +487,7 @@ def ims_invoices_count(*, validated_data):
     response = context["client"].ims_invoices_count(
         email=context["email"],
         gstin=context["gstin_value"],
-        goods_type=validated_data["goods_type"],
+        goods_type=_to_provider_goods_type(validated_data["goods_type"]),
         txn=context["txn"],
         state_code=context["state_code"],
         gst_username=context["gst_username"],
@@ -524,3 +535,13 @@ def ims_get_file(*, validated_data):
         gst_username=context["gst_username"],
     )
     return context["client"].sanitize_response_payload(response)
+
+
+def _to_provider_ims_status(status: str) -> str:
+    normalized = str(status or "").strip().upper()
+    return IMS_PROVIDER_STATUS_VALUES.get(normalized, status)
+
+
+def _to_provider_goods_type(goods_type: str) -> str:
+    normalized = str(goods_type or "").strip().upper()
+    return IMS_PROVIDER_GOODS_TYPE_VALUES.get(normalized, goods_type)
