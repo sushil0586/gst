@@ -18,14 +18,9 @@ from apps.integrations.whitebooks.exceptions import (
 )
 
 IMS_PROVIDER_STATUS_VALUES = {
-    "ACCEPTED": "Accept",
-    "REJECTED": "Reject",
-    "PENDING": "Pending",
-}
-
-IMS_PROVIDER_GOODS_TYPE_VALUES = {
-    "GOODS": "G",
-    "SERVICES": "S",
+    "ACCEPTED": "A",
+    "REJECTED": "R",
+    "PENDING": "P",
 }
 
 
@@ -487,7 +482,7 @@ def ims_invoices_count(*, validated_data):
     response = context["client"].ims_invoices_count(
         email=context["email"],
         gstin=context["gstin_value"],
-        goods_type=_to_provider_goods_type(validated_data["goods_type"]),
+        goods_type=validated_data["goods_type"],
         txn=context["txn"],
         state_code=context["state_code"],
         gst_username=context["gst_username"],
@@ -540,8 +535,3 @@ def ims_get_file(*, validated_data):
 def _to_provider_ims_status(status: str) -> str:
     normalized = str(status or "").strip().upper()
     return IMS_PROVIDER_STATUS_VALUES.get(normalized, status)
-
-
-def _to_provider_goods_type(goods_type: str) -> str:
-    normalized = str(goods_type or "").strip().upper()
-    return IMS_PROVIDER_GOODS_TYPE_VALUES.get(normalized, goods_type)

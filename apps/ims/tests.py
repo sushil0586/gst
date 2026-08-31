@@ -416,34 +416,7 @@ def test_viewer_can_fetch_ims_invoices_using_latest_auth_session(ims_viewer_clie
     assert captured["email"] == "otp@ims.example.com"
     assert captured["txn"] == "txn-ims-123"
     assert captured["section"] == "B2B"
-    assert captured["status"] == "Pending"
-
-
-@pytest.mark.django_db
-def test_viewer_can_fetch_ims_invoice_count_with_provider_goods_type(ims_viewer_client, ims_context, monkeypatch):
-    captured = {}
-
-    def fake_ims_invoices_count(self, **kwargs):
-        captured.update(kwargs)
-        return {"status_cd": "1", "data": {"pending": 2}}
-
-    monkeypatch.setattr("apps.integrations.whitebooks.client.WhiteBooksClient.ims_invoices_count", fake_ims_invoices_count)
-
-    response = ims_viewer_client.get(
-        "/api/v1/ims/invoices-count/",
-        {
-            "workspace": str(ims_context["workspace"].id),
-            "client": str(ims_context["client"].id),
-            "gstin": str(ims_context["gstin"].id),
-            "goods_type": "GOODS",
-        },
-    )
-
-    assert response.status_code == 200
-    assert response.data["data"]["data"]["pending"] == 2
-    assert captured["email"] == "otp@ims.example.com"
-    assert captured["txn"] == "txn-ims-123"
-    assert captured["goods_type"] == "G"
+    assert captured["status"] == "P"
 
 
 @pytest.mark.django_db
