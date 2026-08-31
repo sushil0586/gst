@@ -420,6 +420,35 @@ def test_viewer_can_fetch_ims_invoices_using_latest_auth_session(ims_viewer_clie
 
 
 @pytest.mark.django_db
+def test_ims_invoices_explicit_txn_ignores_stale_stored_session(ims_viewer_client, ims_context, monkeypatch):
+    ims_context["auth_session"].verified_at = timezone.now() - timedelta(hours=7)
+    ims_context["auth_session"].save(update_fields=["verified_at", "updated_at"])
+    captured = {}
+
+    def fake_ims_invoices(self, **kwargs):
+        captured.update(kwargs)
+        return {"status_cd": "1", "invoices": []}
+
+    monkeypatch.setattr("apps.integrations.whitebooks.client.WhiteBooksClient.ims_invoices", fake_ims_invoices)
+
+    response = ims_viewer_client.get(
+        "/api/v1/ims/invoices/",
+        {
+            "workspace": str(ims_context["workspace"].id),
+            "client": str(ims_context["client"].id),
+            "gstin": str(ims_context["gstin"].id),
+            "section": "B2B",
+            "status": "PENDING",
+            "txn": "manual-fresh-txn",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["txn"] == "manual-fresh-txn"
+    assert captured["status"] == "P"
+
+
+@pytest.mark.django_db
 def test_ims_status_rejects_stale_auth_session(ims_owner_client, ims_context):
     ims_context["auth_session"].verified_at = timezone.now() - timedelta(hours=7)
     ims_context["auth_session"].save(update_fields=["verified_at", "updated_at"])

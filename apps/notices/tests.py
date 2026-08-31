@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pytest
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -322,6 +324,40 @@ def test_owner_can_sync_whitebooks_notices(
     assert sync_event.initiated_by == notices_context["owner"]
     assert sync_event.counters["created_count"] == 1
     assert sync_event.provider_payload["status_cd"] == "1"
+
+
+@pytest.mark.django_db
+def test_whitebooks_notice_sync_explicit_txn_ignores_stale_stored_session(
+    monkeypatch,
+    notices_owner_client,
+    notices_context,
+    notices_whitebooks_auth_session,
+):
+    notices_whitebooks_auth_session.verified_at = timezone.now() - timedelta(hours=7)
+    notices_whitebooks_auth_session.save(update_fields=["verified_at", "updated_at"])
+    captured = {}
+
+    def fake_notice_list(self, **kwargs):
+        captured.update(kwargs)
+        return {"status_cd": "1", "notices": []}
+
+    monkeypatch.setattr("apps.integrations.whitebooks.client.WhiteBooksClient.get_notice_list", fake_notice_list)
+
+    response = notices_owner_client.post(
+        "/api/v1/notices/sync-whitebooks/",
+        {
+            "workspace": str(notices_context["workspace"].id),
+            "client": str(notices_context["client"].id),
+            "gstin": str(notices_context["gstin"].id),
+            "txn": "manual-fresh-txn",
+            "date": "2026-08-30",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert captured["txn"] == "manual-fresh-txn"
+    assert response.data["data"]["synced_count"] == 0
 
 
 @pytest.mark.django_db

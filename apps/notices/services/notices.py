@@ -484,12 +484,15 @@ def resolve_notice_provider_context(*, validated_data):
     workspace = validated_data["workspace"]
     client = validated_data["client"]
     gstin = validated_data["gstin"]
-    auth_session = validated_data.get("auth_session") or _get_latest_auth_session(
-        workspace=workspace,
-        client=client,
-        gstin=gstin,
-    )
-    txn = str(validated_data.get("txn") or getattr(auth_session, "txn", "") or "").strip()
+    explicit_txn = str(validated_data.get("txn") or "").strip()
+    auth_session = validated_data.get("auth_session")
+    if auth_session is None and not explicit_txn:
+        auth_session = _get_latest_auth_session(
+            workspace=workspace,
+            client=client,
+            gstin=gstin,
+        )
+    txn = str(explicit_txn or getattr(auth_session, "txn", "") or "").strip()
     email = str(
         validated_data.get("email")
         or getattr(auth_session, "email", "")
