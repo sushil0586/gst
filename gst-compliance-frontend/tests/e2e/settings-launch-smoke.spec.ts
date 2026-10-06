@@ -26,13 +26,13 @@ test.describe("Settings launch smoke", () => {
 
     await expect(main.getByText("Workspace management", { exact: true })).toBeVisible();
     await expect(main.getByText("Team management", { exact: true })).toBeVisible();
-    await expect(main.getByText("Pilot readiness", { exact: true })).toBeVisible();
+    await expect(main.getByText("Operational readiness", { exact: true })).toBeVisible();
     await expect(main.getByText("User guide & UAT", { exact: true })).toBeVisible();
     await expect(main.getByText("Change password", { exact: true }).first()).toBeVisible();
 
     await expect(main.getByRole("link", { name: "Open workspaces", exact: true })).toHaveAttribute("href", "/settings/workspaces");
     await expect(main.getByRole("link", { name: "Open team", exact: true })).toHaveAttribute("href", "/settings/team");
-    await expect(main.getByRole("link", { name: "Open readiness", exact: true })).toHaveAttribute("href", "/settings/pilot-readiness");
+    await expect(main.getByRole("link", { name: "Open readiness", exact: true })).toHaveAttribute("href", "/settings/operational-readiness");
     await expect(main.getByRole("link", { name: "Open guide", exact: true })).toHaveAttribute("href", "/settings/user-guide");
     await expect(main.getByRole("link", { name: "Change password", exact: true })).toHaveAttribute("href", "/settings/change-password");
 

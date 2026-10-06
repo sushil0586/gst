@@ -671,7 +671,7 @@ For onboarding-specific cases, also prepare:
 ### Expected
 
 - Page loads successfully.
-- Placeholder shell is visible.
+- Live notice register, filters, ownership, and due-date status are visible.
 - No broken layout or runtime issue.
 
 ## UAT-040 Settings References
@@ -679,7 +679,7 @@ For onboarding-specific cases, also prepare:
 ### Steps
 
 1. Open `Settings`.
-2. Open `Pilot Readiness`.
+2. Open `Operational Readiness`.
 3. Open `User Guide & UAT`.
 4. Open `Team management`.
 

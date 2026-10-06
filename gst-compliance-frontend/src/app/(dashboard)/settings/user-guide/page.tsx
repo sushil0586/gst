@@ -20,7 +20,7 @@ const navigationItems = [
   { label: "Notices", href: "/notices", purpose: "Track notice ownership, deadlines, and response status against the active GSTIN context." },
   { label: "Reports", href: "/reports", purpose: "Review transactions, correct metadata, use bulk remediation, and manage ownership and follow-ups." },
   { label: "Audit Trail", href: "/audit-trail", purpose: "Inspect audit logs and export proof." },
-  { label: "Settings", href: "/settings", purpose: "Open team management, pilot readiness, and this guide." },
+  { label: "Settings", href: "/settings", purpose: "Open team management, operational readiness, and this guide." },
 ];
 
 const practicalFlow = [
@@ -193,8 +193,8 @@ export default function UserGuidePage() {
         </ul>
         <div className="mt-4 flex flex-wrap gap-3">
           <Button asChild size="sm">
-            <Link href="/settings/pilot-readiness">
-              <ActionLabel kind="open" label="Open pilot readiness" />
+            <Link href="/settings/operational-readiness">
+              <ActionLabel kind="open" label="Open operational readiness" />
             </Link>
           </Button>
           <Button asChild size="sm" variant="outline">

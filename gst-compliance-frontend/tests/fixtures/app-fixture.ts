@@ -218,6 +218,20 @@ class QaAppMock {
       });
     }
 
+    await this.page.route("**/api/backend/**", async (route) => {
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "error",
+          message: `Unhandled mocked backend request: ${route.request().method()} ${new URL(route.request().url()).pathname}`,
+          errors: {
+            mock: ["Add a specific Playwright route for this backend call."],
+          },
+        }),
+      });
+    });
+
     await this.page.route("**/api/backend/workspaces/context/**", async (route) => {
       await route.fulfill(jsonSuccess(context));
     });

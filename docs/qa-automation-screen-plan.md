@@ -536,7 +536,7 @@ Stable user journeys across screens after future changes:
 - Create/edit workspace where allowed.
 - Restricted-access states are clearly shown.
 
-### User Guide / Pilot Readiness
+### User Guide / Operational Readiness
 
 - Smoke coverage for page load and link behavior.
 

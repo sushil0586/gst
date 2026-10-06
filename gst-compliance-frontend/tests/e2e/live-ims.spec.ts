@@ -10,8 +10,6 @@ async function selectImsContext(page: Parameters<typeof test>[0]["page"]) {
   const gstinSelector = page.getByTestId("gstin-selector");
   const periodSelector = page.getByTestId("period-selector");
   const workspaceText = (await workspaceSelector.textContent()) ?? "";
-  const gstinText = (await gstinSelector.textContent()) ?? "";
-  const periodText = (await periodSelector.textContent()) ?? "";
 
   if (!workspaceText.includes("Demo Workspace")) {
     await workspaceSelector.click({ force: true });

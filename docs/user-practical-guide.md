@@ -105,7 +105,7 @@ These pages are directly available from the sidebar:
   - Export audit logs
 - `Settings`
   - Team management
-  - Pilot readiness
+  - Operational readiness
   - User guide and UAT references
 
 ## Secondary Navigation Paths

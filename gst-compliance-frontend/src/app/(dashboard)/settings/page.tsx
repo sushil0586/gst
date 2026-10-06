@@ -27,10 +27,10 @@ const settingsSections = [
   },
   {
     icon: ClipboardList,
-    eyebrow: "Operational readiness",
-    title: "Pilot readiness",
+    eyebrow: "Release operations",
+    title: "Operational readiness",
     description: "Run the release and environment checklist before opening a workspace for live operational use.",
-    href: "/settings/pilot-readiness",
+    href: "/settings/operational-readiness",
     action: "Open readiness",
     outcome: "Verify setup, seeded data, workflow readiness, and support checks before rollout.",
   },
