@@ -53,8 +53,8 @@ const screens = [
     snapshot: "live-imports.png",
     stabilize: stabilizeImportsVisual,
   },
-  { path: "/returns", heading: "Returns", snapshot: "live-returns.png" },
-  { path: "/reports", heading: "Transaction Review", snapshot: "live-reports.png" },
+  { path: "/returns", heading: "Returns", snapshot: "live-returns.png", locator: '[class*="panel-card-hero"]' },
+  { path: "/reports", heading: "Transaction Review", snapshot: "live-reports.png", locator: "h1" },
   { path: "/ims", heading: "IMS", snapshot: "live-ims.png" },
   { path: "/settings/team", heading: "Team Management", snapshot: "live-settings-team.png" },
 ] as const;

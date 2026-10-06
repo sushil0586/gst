@@ -41,11 +41,12 @@ test.describe("Live workspaces", () => {
 
     await page.goto("/returns");
     await expect(page.getByRole("main").getByRole("heading", { name: "Returns", exact: true })).toBeVisible();
-    await expect(page.getByText("Outward transactions are required", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("Purchase transactions missing", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText("GSTR-2B import is required", { exact: true })).toBeVisible();
     await expect(page.getByText("Reconciliation has not been run", { exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Prepare GSTR-3B", exact: true })).toBeDisabled();
     await expect(page.getByText(/Preparation is currently blocked for at least one return type\./)).toBeVisible();
-    await expect(page.getByText("No outward transactions are available to compute GSTR-3B liability.", { exact: true })).toBeVisible();
+    await expect(page.getByText("No purchase transactions are available for ITC review.", { exact: true })).toBeVisible();
 
     await page.getByRole("link", { name: "Go to reconciliation", exact: true }).click();
     await expect(page).toHaveURL(/\/reconciliation$/);

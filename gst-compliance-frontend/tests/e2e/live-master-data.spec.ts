@@ -17,7 +17,7 @@ test.describe("Live master data", () => {
 
     await page.goto("/clients");
     await expect(page.getByRole("main").getByRole("heading", { name: "Clients", exact: true })).toBeVisible();
-    await expect(page.getByText("Demo Client Private Limited", { exact: true })).toBeVisible();
+    await expect(page.getByRole("main").getByRole("cell", { name: "Demo Client Private Limited", exact: true })).toBeVisible();
 
     await page.getByPlaceholder("Search by client name, code, PAN, trade name, or email").fill("nonexistent-client");
     await expect(page.getByRole("heading", { name: "No matching client found", exact: true })).toBeVisible();
