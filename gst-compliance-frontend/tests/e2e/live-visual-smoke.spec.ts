@@ -55,7 +55,7 @@ const screens = [
   },
   { path: "/returns", heading: "Returns", snapshot: "live-returns.png", locator: '[class*="panel-card-hero"]' },
   { path: "/reports", heading: "Transaction Review", snapshot: "live-reports.png", locator: "h1" },
-  { path: "/ims", heading: "IMS", snapshot: "live-ims.png" },
+  { path: "/ims", heading: "IMS", snapshot: "live-ims.png", locator: "h1" },
   { path: "/settings/team", heading: "Team Management", snapshot: "live-settings-team.png" },
 ] as const;
 
